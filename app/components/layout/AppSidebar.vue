@@ -15,17 +15,17 @@ const teams: {
   plan: string
 }[] = [
   {
-    name: 'AI Visual Pro',
+    name: 'My Company',
     logo: 'i-lucide-gallery-vertical-end',
     plan: 'Enterprise',
   },
   {
-    name: 'Full Stack CRM',
+    name: 'Turbo Clean Management',
     logo: 'i-lucide-audio-waveform',
     plan: 'Professional',
   },
   {
-    name: 'Demo Workspace',
+    name: 'Workspace',
     logo: 'i-lucide-command',
     plan: 'Free',
   },
@@ -36,8 +36,8 @@ const user: {
   email: string
   avatar: string
 } = {
-  name: 'Adeel Jabbar',
-  email: 'adeel@aivisualpro.com',
+  name: 'Admin User',
+  email: 'admin@company.com',
   avatar: '/avatars/adeel.png',
 }
 

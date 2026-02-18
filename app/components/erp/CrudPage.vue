@@ -95,7 +95,7 @@ function handleReset() {
   reset()
   currentPage.value = 1
   search.value = ''
-  toast.info('Data has been reset to demo defaults')
+  toast.info('Data has been reset to defaults')
 }
 
 // Formatters

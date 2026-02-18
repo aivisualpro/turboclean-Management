@@ -1,6 +1,7 @@
 import tailwindcss from '@tailwindcss/vite'
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
+  spaLoadingTemplate: false,
   devtools: { enabled: false },
 
   watch: ['~/app.config.ts'],

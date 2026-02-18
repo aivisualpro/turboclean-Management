@@ -88,7 +88,7 @@ setHeader({ title: props.title, description: props.description, icon: props.icon
           {{ title }} Module
         </h3>
         <p class="mt-2 text-sm text-muted-foreground max-w-md">
-          This module is part of the Full Stack CRM enterprise suite. Connect your backend to start managing data in real-time.
+          This module is part of the Turbo Clean Management platform. Connect your backend to start managing data in real-time.
         </p>
         <div class="flex gap-2 mt-6">
           <Button variant="outline">

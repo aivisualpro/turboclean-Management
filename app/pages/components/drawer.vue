@@ -45,7 +45,7 @@ const data = [
         </Badge>
         <Badge variant="secondary" class="rounded-full" as-child>
           <NuxtLink
-            to="https://github.com/unovue/vaul-vue"
+            to="https://www.npmjs.com/package/vaul-vue"
             external
             target="_blank"
           >

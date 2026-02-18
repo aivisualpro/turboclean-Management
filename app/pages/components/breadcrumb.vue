@@ -127,7 +127,7 @@ const breadcrumbLinks = ref([
                     <DropdownMenuContent align="start">
                       <DropdownMenuItem>Documentation</DropdownMenuItem>
                       <DropdownMenuItem>Themes</DropdownMenuItem>
-                      <DropdownMenuItem>GitHub</DropdownMenuItem>
+                      <DropdownMenuItem>Source Code</DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </BreadcrumbItem>

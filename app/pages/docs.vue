@@ -2,7 +2,7 @@
 import NumberFlow from '@number-flow/vue'
 
 const { setHeader } = usePageHeader()
-setHeader({ title: 'Documentation', icon: 'i-lucide-book-open', description: 'Full Stack CRM & ERP platform overview' })
+setHeader({ title: 'Documentation', icon: 'i-lucide-book-open', description: 'Turbo Clean Management platform overview' })
 
 const stats = ref({
   modules: 0,
@@ -163,18 +163,18 @@ const industries = [
         <div class="flex items-center gap-3">
           <Badge variant="outline" class="bg-primary/10 text-primary border-primary/20 px-3 py-1">
             <Icon name="i-lucide-sparkles" class="size-3.5 mr-1" />
-            Enterprise CRM/ERP Suite
+            Turbo Clean Management
           </Badge>
           <Badge variant="outline" class="bg-emerald-500/10 text-emerald-600 border-emerald-500/20 px-3 py-1">
             v1.0
           </Badge>
         </div>
         <h1 class="text-3xl md:text-5xl font-bold tracking-tight leading-tight">
-          Full Stack CRM
-          <span class="text-primary">Documentation</span>
+          Turbo Clean
+          <span class="text-primary">Management</span>
         </h1>
         <p class="text-lg text-muted-foreground max-w-2xl leading-relaxed">
-          A comprehensive, production-ready CRM & ERP boilerplate with <strong>12 enterprise modules</strong>,
+          A comprehensive, production-ready operations and workforce management platform with <strong>12 modules</strong>,
           <strong>63+ UI components</strong>, and <strong>45+ pages</strong> — built to scale for any industry.
         </p>
         <div class="flex flex-wrap gap-3">
@@ -469,62 +469,7 @@ const industries = [
       </div>
     </div>
 
-    <!-- Owner/About Section -->
-    <Card class="overflow-hidden">
-      <div class="flex flex-col md:flex-row">
-        <div class="flex-1 p-8">
-          <Badge variant="outline" class="mb-4 bg-primary/10 text-primary border-primary/20">
-            <Icon name="i-lucide-user" class="size-3.5 mr-1" />
-            About the Developer
-          </Badge>
-          <h3 class="text-2xl font-bold mt-2">
-            Adeel Jabbar
-          </h3>
-          <p class="text-muted-foreground mt-2 leading-relaxed">
-            Full Stack Developer, Senior UI/UX Professional, and Graphics Designer with expertise in building
-            enterprise-grade applications. Specializing in modern web technologies, high-performance systems,
-            and premium user experiences.
-          </p>
-          <div class="flex flex-wrap gap-2 mt-4">
-            <Badge variant="secondary">
-              Full Stack Development
-            </Badge>
-            <Badge variant="secondary">
-              UI/UX Design
-            </Badge>
-            <Badge variant="secondary">
-              Enterprise ERP/CRM
-            </Badge>
-            <Badge variant="secondary">
-              Cloud Architecture
-            </Badge>
-            <Badge variant="secondary">
-              Graphics Design
-            </Badge>
-          </div>
-        </div>
-        <div class="flex items-center justify-center bg-muted/50 p-8 md:w-80">
-          <div class="flex flex-col items-center gap-3 text-center">
-            <div class="flex items-center justify-center rounded-full bg-primary/10 p-6">
-              <Icon name="i-lucide-code-2" class="size-12 text-primary" />
-            </div>
-            <p class="text-lg font-bold">
-              AI Visual Pro
-            </p>
-            <p class="text-sm text-muted-foreground">
-              Building the future of business software
-            </p>
-          </div>
-        </div>
-      </div>
-    </Card>
 
-    <!-- Footer -->
-    <div class="text-center py-4 border-t">
-      <p class="text-sm text-muted-foreground">
-        Built with ❤️ by <strong>Adeel Jabbar</strong> · <strong class="text-primary">AI Visual Pro</strong> · MIT License
-      </p>
-    </div>
   </div>
 </template>
 

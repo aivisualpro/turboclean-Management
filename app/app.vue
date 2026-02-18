@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Analytics } from '@vercel/analytics/nuxt'
+
 import { ConfigProvider } from 'reka-ui'
 import { Toaster } from '@/components/ui/sonner'
 import 'vue-sonner/style.css'
@@ -25,20 +25,14 @@ useHead({
   },
 })
 
-const title = 'AI Visual Pro — Enterprise ERP & CRM Platform'
-const description = 'A comprehensive enterprise resource planning and CRM platform by AI Visual Pro. Built with Nuxt 4, Shadcn Vue, and TailwindCSS — featuring 12+ modules, full CRUD, dark mode, and multi-theme support.'
+const title = 'Turbo Clean Management'
+const description = 'Turbo Clean Management — a modern operations and workforce management platform. Built with Nuxt 4, Shadcn Vue, and TailwindCSS.'
 
 useSeoMeta({
   title,
   description,
   ogTitle: title,
   ogDescription: description,
-  ogUrl: 'https://dashboard.dianprata.com',
-  ogImage: 'https://nuxt-shadcn-dashboard.vercel.app/social-card.png',
-  twitterTitle: title,
-  twitterDescription: description,
-  twitterImage: 'https://nuxt-shadcn-dashboard.vercel.app/social-card.png',
-  twitterCard: 'summary_large_image',
 })
 
 const router = useRouter()
@@ -66,6 +60,6 @@ const dir = computed(() => textDirection.value === 'rtl' ? 'rtl' : 'ltr')
       <Toaster :theme="colorMode.preference as any || 'system'" />
     </ConfigProvider>
 
-    <Analytics />
+
   </Body>
 </template>

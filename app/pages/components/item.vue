@@ -154,7 +154,7 @@ import { BadgeCheckIcon, ChevronRightIcon, Plus } from 'lucide-vue-next'
             <Item variant="outline">
               <ItemMedia>
                 <Avatar class="size-10">
-                  <AvatarImage src="https://github.com/evilrabbit.png" />
+                  <AvatarImage src="https://i.pravatar.cc/40?u=evilrabbit" />
                   <AvatarFallback>ER</AvatarFallback>
                 </Avatar>
               </ItemMedia>
@@ -177,19 +177,19 @@ import { BadgeCheckIcon, ChevronRightIcon, Plus } from 'lucide-vue-next'
               <ItemMedia>
                 <div class="*:ring-background flex -space-x-2 *:ring-2 *:grayscale">
                   <Avatar class="hidden sm:flex">
-                    <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" />
+                    <AvatarImage src="https://i.pravatar.cc/40?u=shadcn" alt="@shadcn" />
                     <AvatarFallback>CN</AvatarFallback>
                   </Avatar>
                   <Avatar class="hidden sm:flex">
                     <AvatarImage
-                      src="https://github.com/maxleiter.png"
+                      src="https://i.pravatar.cc/40?u=maxleiter"
                       alt="@maxleiter"
                     />
                     <AvatarFallback>LR</AvatarFallback>
                   </Avatar>
                   <Avatar>
                     <AvatarImage
-                      src="https://github.com/evilrabbit.png"
+                      src="https://i.pravatar.cc/40?u=evilrabbit2"
                       alt="@evilrabbit"
                     />
                     <AvatarFallback>ER</AvatarFallback>

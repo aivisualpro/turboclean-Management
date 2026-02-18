@@ -2,7 +2,7 @@
 import { Loader2 } from 'lucide-vue-next'
 import PasswordInput from '~/components/PasswordInput.vue'
 
-const email = ref('demo@gmail.com')
+const email = ref('admin@company.com')
 const password = ref('password')
 const isLoading = ref(false)
 
@@ -14,7 +14,7 @@ function onSubmit(event: Event) {
   isLoading.value = true
 
   setTimeout(() => {
-    if (email.value === 'demo@gmail.com' && password.value === 'password')
+    if (email.value === 'admin@company.com' && password.value === 'password')
       navigateTo('/')
 
     isLoading.value = false
