@@ -5,37 +5,83 @@ export default defineEventHandler(async (event) => {
     const { db } = await connectToDatabase()
     const collection = db.collection('turboCleanWorkOrders')
 
-    // Fetch all work orders
-    const workOrders = await collection.find({}).sort({ createdAt: -1 }).toArray()
+    const queryInfo = getQuery(event)
+    const limit = Number(queryInfo.limit) || 50
+    const skip = Number(queryInfo.skip) || 0
+    const search = (queryInfo.search as string) || ''
 
-    // Map them to the format expected by the frontend (SalesDocument)
-    return workOrders.map(wo => ({
-      id: wo._id.toString(),
-      number: wo.stockNumber ? `WO-${wo.stockNumber}` : `WO-${wo._id.toString().substring(0, 6)}`,
-      client: wo.dealer ? wo.dealer.toString() : 'Unknown Dealer',
-      clientEmail: '',
-      clientAddress: '',
-      status: 'Sent', // default or derive from some field
-      date: wo.date ? new Date(wo.date).toISOString() : new Date().toISOString(),
-      notes: wo.notes || '',
-      lineItems: [
-        {
-          id: 'li' + wo._id.toString(),
-          description: `Service for VIN: ${wo.vin || 'Unknown'}`,
-          quantity: 1,
-          unitPrice: Number(wo.amount) || 0,
-          discount: 0,
-          tax: 0
+    // Build the exact query
+    const matchQuery: any = {}
+    if (search) {
+      matchQuery.$or = [
+        { stockNumber: { $regex: search, $options: 'i' } },
+        { vin: { $regex: search, $options: 'i' } },
+        { notes: { $regex: search, $options: 'i' } }
+      ]
+    }
+
+    // Modern aggregation pipeline for related data lookup
+    const pipeline = [
+      { $match: matchQuery },
+      { $sort: { createdAt: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      {
+        $lookup: {
+          from: 'turboCleanDealers',
+          localField: 'dealer',
+          foreignField: '_id',
+          as: 'dealerDoc'
         }
-      ],
-      subtotal: Number(wo.amount) || 0,
-      taxTotal: Number(wo.tax) || 0,
-      discountTotal: 0,
+      },
+      {
+        $lookup: {
+          from: 'turboCleanDealerServices',
+          localField: 'dealerServiceId',
+          foreignField: '_id',
+          as: 'dealerServiceDoc'
+        }
+      },
+      {
+        $addFields: {
+          dealerName: { $arrayElemAt: ['$dealerDoc.name', 0] },
+          serviceName: { $arrayElemAt: ['$dealerServiceDoc.serviceName', 0] },
+          status: 'Pending', // Assign a default status
+        }
+      },
+      {
+        $project: {
+          dealerDoc: 0,
+          dealerServiceDoc: 0
+        }
+      }
+    ]
+
+    const workOrders = await collection.aggregate(pipeline).toArray()
+    
+    // Also get total count for this query to know if there's more
+    const totalCount = await collection.countDocuments(matchQuery)
+
+    // Map them to the format targeted by the frontend table
+    const mapped = workOrders.map((wo: any) => ({
+      id: wo._id.toString(),
+      date: wo.date ? new Date(wo.date).toISOString() : new Date().toISOString(),
+      stockNumber: wo.stockNumber || '',
+      vin: wo.vin || '',
+      dealerName: wo.dealerName || wo.dealer?.toString() || '',
+      dealerServiceId: wo.serviceName || wo.dealerServiceId?.toString() || '',
+      amount: Number(wo.amount) || 0,
+      tax: Number(wo.tax) || 0,
       total: Number(wo.total) || 0,
-      createdAt: wo.createdAt ? new Date(wo.createdAt).toISOString() : new Date().toISOString(),
-      vin: wo.vin,
-      dealerServiceId: wo.dealerServiceId ? wo.dealerServiceId.toString() : ''
+      notes: wo.notes || '',
+      status: wo.status
     }))
+
+    return {
+      workOrders: mapped,
+      totalCount,
+      hasMore: (skip + limit) < totalCount
+    }
 
   } catch (error: any) {
     console.error('Error fetching work orders:', error)
