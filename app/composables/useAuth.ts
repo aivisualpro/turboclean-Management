@@ -37,7 +37,8 @@ export function useAuth() {
 
   async function fetchUser() {
     try {
-      const res = await $fetch<{ user: AuthUser }>('/api/auth/me')
+      const headers = import.meta.server ? useRequestHeaders(['cookie']) as Record<string, string> : undefined
+      const res = await $fetch<{ user: AuthUser }>('/api/auth/me', { headers })
       user.value = res.user
       return true
     } catch {

@@ -124,6 +124,20 @@ function onTaskDrop() {
   nextTick(() => setColumns([...board.value.columns]))
 }
 
+function duplicateTask(colId: string, taskId: string) {
+  const col = board.value.columns.find(c => c.id === colId)
+  const task = col?.tasks.find(t => t.id === taskId)
+  if (!task) return
+  addTask(colId, {
+    title: `${task.title} (Copy)`,
+    description: task.description,
+    priority: task.priority,
+    labels: task.labels ? [...task.labels] : undefined,
+    dueDate: task.dueDate,
+    status: colId,
+  })
+}
+
 function colorPriority(p?: Task['priority']) {
   if (!p)
     return 'text-warning'
@@ -244,14 +258,9 @@ function onScrollEnd(columnId: string) {
                           <Icon name="lucide:edit-2" class="size-4" />
                           Edit
                         </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem>
+                        <DropdownMenuItem @click="duplicateTask(col.id, t.id)">
                           <Icon name="lucide:copy" class="size-4" />
-                          Copy card
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <Icon name="lucide:link" class="size-4" />
-                          Copy link
+                          Duplicate
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem variant="destructive" class="text-destructive" @click="removeTask(col.id, t.id)">

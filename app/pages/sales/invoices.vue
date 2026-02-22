@@ -323,7 +323,7 @@ const summaryStats = computed(() => {
 
     <!-- Preview Dialog -->
     <Dialog v-model:open="showPreview">
-      <DialogContent class="max-w-6xl max-h-[90vh] overflow-auto">
+      <DialogContent class="sm:max-w-[90vw] w-[90vw] max-h-[95vh] overflow-auto">
         <DialogHeader>
           <DialogTitle class="flex items-center gap-2">
             <Icon name="i-lucide-receipt" class="size-4" />
@@ -331,7 +331,7 @@ const summaryStats = computed(() => {
           </DialogTitle>
         </DialogHeader>
         <div class="border rounded-lg overflow-hidden bg-white">
-          <iframe :srcdoc="previewHtml" class="w-full h-[700px] border-0" />
+          <iframe :srcdoc="previewHtml" class="w-full border-0" style="height: calc(85vh - 120px)" />
         </div>
         <div class="flex justify-end gap-2 pt-2">
           <Button variant="outline" size="sm" @click="showPreview = false">Close</Button>
