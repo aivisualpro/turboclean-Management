@@ -7,8 +7,9 @@ export default defineEventHandler(async (event) => {
     const collection = db.collection('turboCleanWorkOrders')
 
     const queryInfo = getQuery(event)
-    const limit = Number(queryInfo.limit) || 50
-    const skip = Number(queryInfo.skip) || 0
+    const isExport = queryInfo.export === 'true'
+    const limit = isExport ? 0 : (Number(queryInfo.limit) || 50)
+    const skip = isExport ? 0 : (Number(queryInfo.skip) || 0)
     const search = ((queryInfo.search as string) || '').trim()
     const sortBy = (queryInfo.sortBy as string) || 'date'
     const sortDir = Number(queryInfo.sortDir) || -1
@@ -31,6 +32,17 @@ export default defineEventHandler(async (event) => {
 
     // 1. Build optimized search query
     let matchQuery: any = {}
+    
+    // Filter by specific dealer if provided
+    const dealerIdFilter = (queryInfo.dealerId as string) || ''
+    if (dealerIdFilter) {
+      try {
+        matchQuery.dealer = new ObjectId(dealerIdFilter)
+      } catch {
+        matchQuery.dealer = dealerIdFilter
+      }
+    }
+    
     if (search) {
       const q = search.toLowerCase()
       
@@ -143,6 +155,8 @@ export default defineEventHandler(async (event) => {
 
       return {
         id: wo._id.toString(),
+        dealerId,
+        rawServiceId,
         date: wo.date ? new Date(wo.date).toISOString() : new Date().toISOString(),
         stockNumber: wo.stockNumber || '',
         vin: wo.vin || '',
@@ -164,7 +178,9 @@ export default defineEventHandler(async (event) => {
         const bVal = String(b[sortBy] || '').toLowerCase()
         return sortDir * aVal.localeCompare(bVal)
       })
-      paged = paged.slice(skip, skip + limit)
+      if (!isExport) {
+         paged = paged.slice(skip, skip + limit)
+      }
     }
 
     return {

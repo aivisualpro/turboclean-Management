@@ -181,15 +181,7 @@ async function handleDeleteAllServices() {
     <TooltipProvider :delay-duration="0">
       <div class="h-full flex flex-col bg-background/50 border rounded-xl overflow-hidden backdrop-blur supports-[backdrop-filter]:bg-background/50">
         <!-- Detail or Table -->
-          <DealersDealerDetail
-            v-if="selectedDealerData"
-            :dealer="selectedDealerData"
-            @close="selectedDealer = undefined"
-            @edit="handleEdit"
-            @delete="handleDelete"
-            @status-change="(id, status) => handleStatusChange(id, status)"
-          />
-          <div v-else class="h-full flex flex-col relative overflow-hidden">
+          <div class="h-full flex flex-col relative overflow-hidden">
             <ClientOnly>
               <Teleport to="#page-header-actions">
                 <form @submit.prevent class="relative w-48 xl:w-64 max-w-sm">
@@ -280,7 +272,7 @@ async function handleDeleteAllServices() {
                     :key="d.id"
                     class="border-b cursor-pointer transition-colors hover:bg-muted/30"
                     :class="{ 'bg-muted/50': selectedDealer === d.id }"
-                    @click="selectedDealer = d.id"
+                    @click="navigateTo(`/dealers/${d.id}/services`)"
                   >
                     <td class="p-4 font-medium">
                       {{ d.dealerName }}

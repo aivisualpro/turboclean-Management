@@ -1,11 +1,6 @@
 <script setup lang="ts">
 const route = useRoute()
-const { headerState, clearHeader } = usePageHeader()
-
-// Clear header state on route change so pages without setHeader() don't show stale info
-watch(() => route.fullPath, () => {
-  clearHeader()
-})
+const { headerState } = usePageHeader()
 
 // Derive fallback title from route when no explicit title is set
 const fallbackTitle = computed(() => {

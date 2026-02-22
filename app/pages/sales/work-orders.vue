@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, watch } from 'vue'
+import { toast } from 'vue-sonner'
 
 const { setHeader } = usePageHeader()
 // 1. remove description
@@ -105,33 +106,50 @@ function sortIcon(field: string) {
   return sortDir.value === -1 ? 'lucide:arrow-down' : 'lucide:arrow-up'
 }
 
-function handleExport() {
-  if (workOrders.value.length === 0) {
-    return
+async function handleExport() {
+  try {
+    toast.info('Preparing export...')
+    const res = await $fetch('/api/work-orders', {
+      query: { search: search.value, export: 'true' }
+    })
+    
+    // @ts-ignore
+    const dataToExport = res.workOrders || []
+    
+    if (dataToExport.length === 0) {
+      toast.error('No work orders found to export')
+      return
+    }
+
+    const headers = ['Object ID', 'Date', 'Stock Number', 'VIN', 'Dealer', 'Service', 'Amount', 'Tax', 'Total', 'Notes', 'Is Invoiced']
+    const rows = dataToExport.map((wo: any) => [
+      wo.id,
+      wo.date ? new Date(wo.date).toLocaleDateString() : '',
+      wo.stockNumber,
+      wo.vin,
+      wo.dealerId || wo.dealerName, // fallback to name if dealerId is somehow missing
+      wo.rawServiceId || wo.dealerServiceId,
+      wo.amount,
+      wo.tax,
+      wo.total,
+      `"${(wo.notes || '').replace(/"/g, '""')}"`,
+      wo.isInvoiced ? 'Yes' : 'No'
+    ])
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `work-orders-${new Date().toISOString().slice(0, 10)}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+    
+    toast.success(`Exported ${dataToExport.length} work orders`)
+  } catch (err) {
+    console.error('Export failed:', err)
+    toast.error('Failed to export work orders')
   }
-
-  const headers = ['Date', 'Stock Number', 'VIN', 'Dealer', 'Service', 'Amount', 'Tax', 'Total', 'Notes', 'Is Invoiced']
-  const rows = workOrders.value.map(wo => [
-    wo.date ? new Date(wo.date).toLocaleDateString() : '',
-    wo.stockNumber,
-    wo.vin,
-    wo.dealerName,
-    wo.dealerServiceId,
-    wo.amount,
-    wo.tax,
-    wo.total,
-    `"${(wo.notes || '').replace(/"/g, '""')}"`,
-    wo.isInvoiced ? 'Yes' : 'No'
-  ])
-
-  const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `work-orders-${new Date().toISOString().slice(0, 10)}.csv`
-  link.click()
-  URL.revokeObjectURL(url)
 }
 </script>
 
