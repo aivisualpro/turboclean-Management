@@ -65,6 +65,7 @@ async function doImport() {
   const taxIdx = header.findIndex(h => h === 'tax')
   const totalIdx = header.findIndex(h => h === 'total')
   const notesIdx = header.findIndex(h => h === 'notes' || h === 'note')
+  const isInvoicedIdx = header.findIndex(h => h === 'isinvoiced' || h === 'invoiced')
 
   const parseCurrency = (val: string) => {
     if (!val) return 0
@@ -78,6 +79,7 @@ async function doImport() {
   }
 
   const payload = csvPreview.value.slice(1).map((row) => {
+    const isInvVal = isInvoicedIdx !== -1 ? (row[isInvoicedIdx] || '').toLowerCase().trim() : ''
     return {
       dealer: dealerIdx !== -1 ? row[dealerIdx] : '',
       date: dateIdx !== -1 ? row[dateIdx] : new Date().toISOString(),
@@ -88,6 +90,7 @@ async function doImport() {
       tax: taxIdx !== -1 ? parseCurrency(row[taxIdx] || '') : 0,
       total: totalIdx !== -1 ? parseCurrency(row[totalIdx] || '') : 0,
       notes: notesIdx !== -1 ? row[notesIdx] : '',
+      isInvoiced: isInvVal === 'true' || isInvVal === 'yes' || isInvVal === '1',
     }
   }).filter(d => !!d.dealer)
 
@@ -126,7 +129,7 @@ function cancel() {
           Import Work Orders
         </DialogTitle>
         <DialogDescription>
-          Upload a CSV file to bulk-import work orders. Expected columns: dealer, date, stockNumber, vin, dealerServiceId, amount, tax, total, notes.
+          Upload a CSV file to bulk-import work orders. Expected columns: dealer, date, stockNumber, vin, dealerServiceId, amount, tax, total, notes, isInvoiced.
         </DialogDescription>
       </DialogHeader>
 

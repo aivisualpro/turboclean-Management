@@ -23,6 +23,7 @@ export default defineEventHandler(async (event) => {
       tax: Number(wo.tax) || 0,
       total: Number(wo.total) || 0,
       notes: wo.notes || '',
+      isInvoiced: wo.isInvoiced === true,
       createdAt: new Date(),
       updatedAt: new Date(),
     }))
