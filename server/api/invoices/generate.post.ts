@@ -129,11 +129,21 @@ export default defineEventHandler(async (event) => {
       const taxTotal = lineItems.reduce((s: number, li: any) => s + li.tax, 0)
       const total = lineItems.reduce((s: number, li: any) => s + li.total, 0)
 
+      // Get the last work order date in this week
+      const lastWoDate = lineItems.reduce((latest: string, li: any) => {
+        if (!latest || new Date(li.date) > new Date(latest)) return li.date
+        return latest
+      }, '')
+      const invoiceDate = lastWoDate ? new Date(lastWoDate).toISOString().split('T')[0] : group.weekEnd.toISOString().split('T')[0]
+      const invoiceDateObj = new Date(lastWoDate || group.weekEnd)
+
       // Get dealer contact info
       const dealerName = group.dealer?.dealer || group.dealerId
       const dealerEmail = group.dealer?.email || ''
       const dealerPhone = group.dealer?.phone || ''
       const dealerAddress = group.dealer?.address || ''
+
+      const roundedTotal = Math.round(total * 100) / 100
 
       const invoice = {
         number: invNumber,
@@ -143,18 +153,18 @@ export default defineEventHandler(async (event) => {
         dealerEmail,
         dealerPhone,
         dealerAddress,
-        status: 'Draft',
+        status: 'Paid',
         weekNumber: group.week,
         weekYear: group.year,
         weekStart: group.weekStart.toISOString(),
         weekEnd: group.weekEnd.toISOString(),
-        date: group.weekEnd.toISOString().split('T')[0],
-        dueDate: new Date(group.weekEnd.getTime() + 30 * 86400000).toISOString().split('T')[0], // Net 30
+        date: invoiceDate,
+        dueDate: new Date(invoiceDateObj.getTime() + 30 * 86400000).toISOString().split('T')[0], // Net 30
         lineItems,
         subtotal: Math.round(subtotal * 100) / 100,
         taxTotal: Math.round(taxTotal * 100) / 100,
-        total: Math.round(total * 100) / 100,
-        paidAmount: 0,
+        total: roundedTotal,
+        paidAmount: roundedTotal,
         paymentMethod: '',
         notes: `Weekly invoice for ${dealerName} – Week ${group.week}, ${group.year} (${group.weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${group.weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })})`,
         createdAt: new Date().toISOString(),

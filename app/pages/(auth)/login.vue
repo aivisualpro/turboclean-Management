@@ -5,6 +5,15 @@ definePageMeta({
   layout: 'blank',
 })
 
+// If user already has a valid session, redirect to dashboard
+const { fetchUser } = useAuth()
+onMounted(async () => {
+  const ok = await fetchUser()
+  if (ok) {
+    await navigateTo('/')
+  }
+})
+
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const wiperRef = ref<HTMLCanvasElement | null>(null)
 let animationId: number

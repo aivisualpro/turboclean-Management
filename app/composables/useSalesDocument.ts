@@ -140,15 +140,17 @@ export function useSalesDocument<T extends SalesDocument>(storeKey: string, init
 
 // ── PDF Generation (browser-based) ───────────────────
 export function generatePDF(doc: SalesDocument, docType: 'Work Order' | 'Invoice' | 'Order') {
+  const fmtMoney = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+
   const lineRows = doc.lineItems.map((li, i) => `
     <tr>
-      <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#374151;font-size:13px">${i + 1}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#111827;font-size:13px;font-weight:500">${li.description}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#374151;font-size:13px;text-align:center">${li.quantity}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#374151;font-size:13px;text-align:right">$${li.unitPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#374151;font-size:13px;text-align:center">${li.discount}%</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#374151;font-size:13px;text-align:center">${li.tax}%</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#111827;font-size:13px;text-align:right;font-weight:600">$${calcLineTotal(li).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+      <td style="padding:8px 6px;border-bottom:1px solid #e5e7eb;color:#374151;font-size:11px;text-align:center">${i + 1}</td>
+      <td style="padding:8px 6px;border-bottom:1px solid #e5e7eb;color:#111827;font-size:11px;font-weight:500;word-break:break-word">${li.description}</td>
+      <td style="padding:8px 6px;border-bottom:1px solid #e5e7eb;color:#374151;font-size:11px;text-align:center">${li.quantity}</td>
+      <td style="padding:8px 6px;border-bottom:1px solid #e5e7eb;color:#374151;font-size:11px;text-align:right;white-space:nowrap">${fmtMoney(li.unitPrice)}</td>
+      <td style="padding:8px 6px;border-bottom:1px solid #e5e7eb;color:#374151;font-size:11px;text-align:right;white-space:nowrap">${fmtMoney(li.unitPrice * (li.tax / 100))}</td>
+      <td style="padding:8px 6px;border-bottom:1px solid #e5e7eb;color:#111827;font-size:11px;text-align:right;font-weight:600;white-space:nowrap">${fmtMoney(calcLineTotal(li) + calcLineTotal(li) * (li.tax / 100))}</td>
     </tr>
   `).join('')
 
@@ -169,77 +171,79 @@ export function generatePDF(doc: SalesDocument, docType: 'Work Order' | 'Invoice
   const statusColor = statusColorMap[doc.status] || '#6b7280'
 
   const extraFields = docType === 'Invoice'
-    ? `<tr><td style="padding:6px 0;color:#6b7280;font-size:12px">Due Date:</td><td style="padding:6px 0;color:#111827;font-size:12px;font-weight:500">${doc.dueDate || '—'}</td></tr>
-       <tr><td style="padding:6px 0;color:#6b7280;font-size:12px">Paid:</td><td style="padding:6px 0;color:#10b981;font-size:12px;font-weight:600">$${(doc.paidAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td></tr>`
+    ? `<tr><td style="padding:5px 0;color:#6b7280;font-size:11px;white-space:nowrap;padding-right:8px">Due Date:</td><td style="padding:5px 0;color:#111827;font-size:11px;font-weight:500">${doc.dueDate || '—'}</td></tr>
+       <tr><td style="padding:5px 0;color:#6b7280;font-size:11px;white-space:nowrap;padding-right:8px">Paid:</td><td style="padding:5px 0;color:#10b981;font-size:11px;font-weight:600">${fmtMoney(doc.paidAmount || 0)}</td></tr>`
     : docType === 'Work Order'
-      ? `<tr><td style="padding:6px 0;color:#6b7280;font-size:12px">Valid Until:</td><td style="padding:6px 0;color:#111827;font-size:12px;font-weight:500">${doc.validUntil || '—'}</td></tr>`
+      ? `<tr><td style="padding:5px 0;color:#6b7280;font-size:11px">Valid Until:</td><td style="padding:5px 0;color:#111827;font-size:11px;font-weight:500">${doc.validUntil || '—'}</td></tr>`
       : docType === 'Order'
-        ? `<tr><td style="padding:6px 0;color:#6b7280;font-size:12px">Tracking:</td><td style="padding:6px 0;color:#111827;font-size:12px;font-weight:500">${doc.tracking || '—'}</td></tr>`
+        ? `<tr><td style="padding:5px 0;color:#6b7280;font-size:11px">Tracking:</td><td style="padding:5px 0;color:#111827;font-size:11px;font-weight:500">${doc.tracking || '—'}</td></tr>`
         : ''
 
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${docType} ${doc.number}</title></head><body style="margin:0;padding:40px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#fff;color:#111827">
-    <div style="max-width:800px;margin:0 auto">
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${docType} ${doc.number}</title></head><body style="margin:0;padding:28px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#fff;color:#111827">
+    <div style="max-width:100%;margin:0 auto">
       <!-- Header -->
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:40px">
-        <div>
-          <h1 style="margin:0;font-size:28px;font-weight:800;color:#111827;letter-spacing:-0.5px">Turbo Clean</h1>
-          <p style="margin:4px 0 0;color:#6b7280;font-size:13px">Car Detailing & Cleaning Services<br>info@turboclean.com</p>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;padding-bottom:20px;border-bottom:2px solid #111827">
+        <div style="display:flex;align-items:center;gap:12px">
+          <img src="${origin}/logo.png" style="height:42px;width:auto" alt="Turbo Clean" onerror="this.style.display='none'" />
+          <div>
+            <h1 style="margin:0;font-size:22px;font-weight:800;color:#111827;letter-spacing:-0.5px">Turbo Clean</h1>
+            <p style="margin:2px 0 0;color:#6b7280;font-size:11px">Car Detailing & Cleaning Services<br>info@turboclean.com</p>
+          </div>
         </div>
         <div style="text-align:right">
-          <div style="display:inline-block;padding:6px 16px;border-radius:20px;background:${statusColor}15;color:${statusColor};font-size:12px;font-weight:600;border:1px solid ${statusColor}30">${doc.status}</div>
-          <h2 style="margin:12px 0 0;font-size:22px;font-weight:700;color:#111827">${docType} ${doc.number}</h2>
-          <p style="margin:4px 0 0;color:#6b7280;font-size:13px">Date: ${doc.date}</p>
+          <div style="display:inline-block;padding:4px 12px;border-radius:20px;background:${statusColor}15;color:${statusColor};font-size:10px;font-weight:600;border:1px solid ${statusColor}30">${doc.status}</div>
+          <h2 style="margin:8px 0 0;font-size:16px;font-weight:700;color:#111827">${docType} ${doc.number}</h2>
+          <p style="margin:2px 0 0;color:#6b7280;font-size:11px">Date: ${doc.date}</p>
         </div>
       </div>
 
-      <!-- Bill To -->
-      <div style="display:flex;gap:40px;margin-bottom:32px">
-        <div style="flex:1;padding:20px;background:#f9fafb;border-radius:12px;border:1px solid #e5e7eb">
-          <p style="margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#9ca3af;font-weight:600">Bill To</p>
-          <p style="margin:0;font-size:15px;font-weight:600;color:#111827">${doc.client}</p>
-          <p style="margin:4px 0 0;font-size:12px;color:#6b7280">${doc.clientEmail || ''}</p>
-          <p style="margin:2px 0 0;font-size:12px;color:#6b7280">${doc.clientAddress || ''}</p>
+      <!-- Bill To + Details -->
+      <div style="display:flex;gap:24px;margin-bottom:24px">
+        <div style="flex:1;padding:14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb">
+          <p style="margin:0 0 4px;font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#9ca3af;font-weight:600">Bill To</p>
+          <p style="margin:0;font-size:14px;font-weight:600;color:#111827">${doc.client}</p>
+          ${doc.clientEmail ? `<p style="margin:2px 0 0;font-size:11px;color:#6b7280">${doc.clientEmail}</p>` : ''}
+          ${doc.clientAddress ? `<p style="margin:1px 0 0;font-size:11px;color:#6b7280">${doc.clientAddress}</p>` : ''}
         </div>
-        <div style="width:220px">
+        <div style="min-width:180px">
           <table style="width:100%;border-collapse:collapse">
-            <tr><td style="padding:6px 0;color:#6b7280;font-size:12px">${docType} #:</td><td style="padding:6px 0;color:#111827;font-size:12px;font-weight:500">${doc.number}</td></tr>
-            <tr><td style="padding:6px 0;color:#6b7280;font-size:12px">Date:</td><td style="padding:6px 0;color:#111827;font-size:12px;font-weight:500">${doc.date}</td></tr>
+            <tr><td style="padding:4px 0;color:#6b7280;font-size:11px;white-space:nowrap;padding-right:8px">${docType} #:</td><td style="padding:4px 0;color:#111827;font-size:11px;font-weight:500">${doc.number}</td></tr>
+            <tr><td style="padding:4px 0;color:#6b7280;font-size:11px;white-space:nowrap;padding-right:8px">Date:</td><td style="padding:4px 0;color:#111827;font-size:11px;font-weight:500">${doc.date}</td></tr>
             ${extraFields}
           </table>
         </div>
       </div>
 
       <!-- Line Items Table -->
-      <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+      <table style="width:100%;border-collapse:collapse;margin-bottom:20px;table-layout:fixed">
         <thead>
           <tr style="background:#f3f4f6">
-            <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb">#</th>
-            <th style="padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb">Description</th>
-            <th style="padding:10px 12px;text-align:center;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb">Qty</th>
-            <th style="padding:10px 12px;text-align:right;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb">Price</th>
-            <th style="padding:10px 12px;text-align:center;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb">Disc.</th>
-            <th style="padding:10px 12px;text-align:center;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb">Tax</th>
-            <th style="padding:10px 12px;text-align:right;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb">Total</th>
+            <th style="padding:7px 6px;text-align:center;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb;width:30px">#</th>
+            <th style="padding:7px 6px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb">Description</th>
+            <th style="padding:7px 6px;text-align:center;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb;width:35px">Qty</th>
+            <th style="padding:7px 6px;text-align:right;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb;width:80px">Amount</th>
+            <th style="padding:7px 6px;text-align:right;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb;width:70px">Tax</th>
+            <th style="padding:7px 6px;text-align:right;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb;width:85px">Total</th>
           </tr>
         </thead>
         <tbody>${lineRows}</tbody>
       </table>
 
       <!-- Totals -->
-      <div style="display:flex;justify-content:flex-end;margin-bottom:32px">
-        <table style="width:280px;border-collapse:collapse">
-          <tr><td style="padding:8px 12px;color:#6b7280;font-size:13px">Subtotal</td><td style="padding:8px 12px;text-align:right;color:#111827;font-size:13px;font-weight:500">$${doc.subtotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td></tr>
-          <tr><td style="padding:8px 12px;color:#6b7280;font-size:13px">Discount</td><td style="padding:8px 12px;text-align:right;color:#ef4444;font-size:13px">-$${doc.discountTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td></tr>
-          <tr><td style="padding:8px 12px;color:#6b7280;font-size:13px">Tax</td><td style="padding:8px 12px;text-align:right;color:#111827;font-size:13px">$${doc.taxTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td></tr>
-          <tr style="border-top:2px solid #111827"><td style="padding:12px 12px;color:#111827;font-size:16px;font-weight:700">Total</td><td style="padding:12px 12px;text-align:right;color:#111827;font-size:16px;font-weight:700">$${doc.total.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td></tr>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:24px">
+        <table style="width:220px;border-collapse:collapse">
+          <tr><td style="padding:6px 8px;color:#6b7280;font-size:12px">Subtotal</td><td style="padding:6px 8px;text-align:right;color:#111827;font-size:12px;font-weight:500">${fmtMoney(doc.subtotal)}</td></tr>
+          ${doc.discountTotal > 0 ? `<tr><td style="padding:6px 8px;color:#6b7280;font-size:12px">Discount</td><td style="padding:6px 8px;text-align:right;color:#ef4444;font-size:12px">-${fmtMoney(doc.discountTotal)}</td></tr>` : ''}
+          <tr><td style="padding:6px 8px;color:#6b7280;font-size:12px">Tax</td><td style="padding:6px 8px;text-align:right;color:#111827;font-size:12px">${fmtMoney(doc.taxTotal)}</td></tr>
+          <tr style="border-top:2px solid #111827"><td style="padding:8px 8px;color:#111827;font-size:14px;font-weight:700">Total</td><td style="padding:8px 8px;text-align:right;color:#111827;font-size:14px;font-weight:700">${fmtMoney(doc.total)}</td></tr>
         </table>
       </div>
 
-      ${doc.notes ? `<div style="padding:16px 20px;background:#f9fafb;border-radius:12px;border:1px solid #e5e7eb;margin-bottom:32px"><p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#9ca3af;font-weight:600">Notes</p><p style="margin:0;font-size:13px;color:#374151;line-height:1.6">${doc.notes}</p></div>` : ''}
+      ${doc.notes ? `<div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;margin-bottom:24px"><p style="margin:0 0 3px;font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#9ca3af;font-weight:600">Notes</p><p style="margin:0;font-size:11px;color:#374151;line-height:1.5">${doc.notes}</p></div>` : ''}
 
       <!-- Footer -->
-      <div style="text-align:center;padding-top:24px;border-top:1px solid #e5e7eb">
-        <p style="margin:0;color:#9ca3af;font-size:11px">Thank you for your business! • Turbo Clean – Car Detailing & Cleaning Services</p>
+      <div style="text-align:center;padding-top:16px;border-top:1px solid #e5e7eb">
+        <p style="margin:0;color:#9ca3af;font-size:10px">Thank you for your business! • Turbo Clean – Car Detailing & Cleaning Services</p>
       </div>
     </div>
   </body></html>`

@@ -232,9 +232,7 @@ function onScrollEnd(columnId: string) {
               <template #item="{ element: t }: { element: Task }">
                 <div class="rounded-xl border bg-card px-3 py-2 shadow-sm hover:bg-accent/50 cursor-pointer">
                   <div class="flex items-start justify-between gap-2">
-                    <div class="text-sm text-muted-foreground">
-                      {{ t.id }}
-                    </div>
+                    <div />
                     <DropdownMenu>
                       <DropdownMenuTrigger as-child>
                         <Button size="icon-sm" variant="ghost" class="size-7 text-muted-foreground" title="More actions">

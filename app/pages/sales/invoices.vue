@@ -1,221 +1,346 @@
 <script setup lang="ts">
-import type { SalesDocument } from '~/composables/useSalesDocument'
+import { toast } from 'vue-sonner'
+import { generatePDF, downloadPDF, calcLineTotal } from '~/composables/useSalesDocument'
+
+const { setHeader } = usePageHeader()
+setHeader({ title: 'Invoices', icon: 'i-lucide-receipt' })
+
+const search = ref('')
+const statusFilter = ref('')
+const invoices = ref<any[]>([])
+const loading = ref(false)
+const hasMore = ref(true)
+const skip = ref(0)
+const limit = 20
+const generating = ref(false)
+
+const selectedInvoice = ref<any>(null)
+const showPreview = ref(false)
 
 const statusOptions = [
+  { label: 'All', value: '' },
   { label: 'Draft', value: 'Draft' },
   { label: 'Sent', value: 'Sent' },
   { label: 'Paid', value: 'Paid' },
   { label: 'Overdue', value: 'Overdue' },
-  { label: 'Cancelled', value: 'Cancelled' },
 ]
 
-const extraFields = [
-  { key: 'dueDate', label: 'Due Date', type: 'date' },
-  { key: 'paidAmount', label: 'Amount Paid ($)', type: 'number', placeholder: '0' },
-  { key: 'paymentMethod', label: 'Payment Method', placeholder: 'Wire Transfer, Credit Card...' },
-]
+async function fetchInvoices(reset = false) {
+  if (loading.value) return
+  if (reset) {
+    skip.value = 0
+    invoices.value = []
+    hasMore.value = true
+  }
+  if (!hasMore.value) return
 
-const seedData: SalesDocument[] = [
-  {
-    id: 'i1',
-    number: 'INV-2026-078',
-    client: 'GlobalSoft',
-    clientEmail: 'accounts@globalsoft.com',
-    clientAddress: '800 Market Street, Floor 12, San Francisco, CA 94102',
-    status: 'Paid',
-    date: '2026-01-15',
-    dueDate: '2026-02-15',
-    paidAmount: 68843.25,
-    paymentMethod: 'Wire Transfer',
-    notes: 'Payment received Feb 10. Bank reference: WR-2026-88341.',
-    lineItems: [
-      { id: 'li1', description: 'ERP Platform License (Annual, 25 seats)', quantity: 25, unitPrice: 1800, discount: 5, tax: 8.5 },
-      { id: 'li2', description: 'Inventory Management Module', quantity: 1, unitPrice: 8500, discount: 0, tax: 8.5 },
-      { id: 'li3', description: 'Financial Reporting Add-on', quantity: 1, unitPrice: 5200, discount: 0, tax: 8.5 },
-      { id: 'li4', description: 'Implementation Consulting (40 hrs)', quantity: 40, unitPrice: 175, discount: 0, tax: 8.5 },
-    ],
-    subtotal: 63450,
-    taxTotal: 5393.25,
-    discountTotal: 2250,
-    total: 68843.25,
-    createdAt: '2026-01-15T09:00:00Z',
-  },
-  {
-    id: 'i2',
-    number: 'INV-2026-079',
-    client: 'TechVision Inc',
-    clientEmail: 'ap@techvision.com',
-    clientAddress: '1200 Innovation Blvd, San Jose, CA 95134',
-    status: 'Sent',
-    date: '2026-02-01',
-    dueDate: '2026-03-01',
-    paidAmount: 50000,
-    paymentMethod: '',
-    notes: 'Partial payment of $50,000 received. Balance due by March 1.',
-    lineItems: [
-      { id: 'li5', description: 'Enterprise CRM License (50 seats, Annual)', quantity: 50, unitPrice: 1200, discount: 10, tax: 8.5 },
-      { id: 'li6', description: 'Data Migration & Setup', quantity: 1, unitPrice: 15000, discount: 0, tax: 8.5 },
-      { id: 'li7', description: 'Custom API Integration (3 systems)', quantity: 3, unitPrice: 8500, discount: 5, tax: 8.5 },
-      { id: 'li8', description: 'Staff Training (On-site, 3 days)', quantity: 2, unitPrice: 4500, discount: 0, tax: 8.5 },
-      { id: 'li9', description: '24/7 Premium Support (Annual)', quantity: 1, unitPrice: 12000, discount: 15, tax: 8.5 },
-    ],
-    subtotal: 108225,
-    taxTotal: 9199.13,
-    discountTotal: 14775,
-    total: 117424.13,
-    createdAt: '2026-02-01T11:00:00Z',
-  },
-  {
-    id: 'i3',
-    number: 'INV-2026-080',
-    client: 'NexGen Solutions',
-    clientEmail: 'billing@nexgensolutions.io',
-    clientAddress: '2100 Greenway Plaza, Suite 800, Houston, TX 77046',
-    status: 'Overdue',
-    date: '2026-01-05',
-    dueDate: '2026-02-05',
-    paidAmount: 0,
-    paymentMethod: '',
-    notes: 'Payment overdue. Second reminder sent Feb 10. Escalation pending.',
-    lineItems: [
-      { id: 'li10', description: 'Platform License Q1 Installment', quantity: 1, unitPrice: 22500, discount: 0, tax: 8.25 },
-      { id: 'li11', description: 'Managed Hosting (Monthly)', quantity: 3, unitPrice: 3500, discount: 0, tax: 8.25 },
-    ],
-    subtotal: 33000,
-    taxTotal: 2722.50,
+  loading.value = true
+  try {
+    const res: any = await $fetch('/api/invoices', {
+      query: { skip: skip.value, limit, search: search.value, status: statusFilter.value }
+    })
+    invoices.value = [...invoices.value, ...(res.invoices || [])]
+    hasMore.value = res.hasMore
+    skip.value += limit
+  } catch (err) {
+    console.error(err)
+    toast.error('Failed to fetch invoices')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function handleGenerate() {
+  generating.value = true
+  try {
+    const res: any = await $fetch('/api/invoices/generate', { method: 'POST' })
+    if (res.generated > 0) {
+      toast.success(`Generated ${res.generated} new invoices`)
+      fetchInvoices(true)
+    } else {
+      toast.info('No new invoices to generate – all work orders are already invoiced')
+    }
+  } catch (err) {
+    console.error(err)
+    toast.error('Failed to generate invoices')
+  } finally {
+    generating.value = false
+  }
+}
+
+function openPreviewFor(inv: any) {
+  selectedInvoice.value = inv
+  showPreview.value = true
+}
+
+function handleDownload(inv: any) {
+  const doc = toSalesDoc(inv)
+  downloadPDF(doc, 'Invoice')
+}
+
+function toSalesDoc(inv: any) {
+  return {
+    id: inv.id,
+    number: inv.number,
+    client: inv.dealerName,
+    clientEmail: inv.dealerEmail,
+    clientAddress: inv.dealerAddress,
+    status: inv.status,
+    date: inv.date,
+    dueDate: inv.dueDate,
+    paidAmount: inv.paidAmount || 0,
+    paymentMethod: inv.paymentMethod || '',
+    notes: inv.notes || '',
+    lineItems: (inv.lineItems || []).map((li: any) => ({
+      id: li.workOrderId || '',
+      description: li.description || '',
+      quantity: 1,
+      unitPrice: li.amount || 0,
+      discount: 0,
+      tax: li.amount > 0 ? Math.round((li.tax / li.amount) * 10000) / 100 : 0,
+    })),
+    subtotal: inv.subtotal,
+    taxTotal: inv.taxTotal,
     discountTotal: 0,
-    total: 35722.50,
-    createdAt: '2026-01-05T08:30:00Z',
+    total: inv.total,
+    createdAt: inv.createdAt,
+  }
+}
+
+const previewHtml = computed(() => {
+  if (!selectedInvoice.value) return ''
+  return generatePDF(toSalesDoc(selectedInvoice.value), 'Invoice')
+})
+
+// Intersect Logic
+const vIntersect = {
+  mounted: (el: HTMLElement, binding: any) => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) binding.value()
+      },
+      { rootMargin: '100px', threshold: 0.1 }
+    )
+    observer.observe(el)
+    ;(el as any)._observer = observer
   },
-  {
-    id: 'i4',
-    number: 'INV-2026-081',
-    client: 'DataFlow AI',
-    clientEmail: 'finance@dataflowai.com',
-    clientAddress: '300 Broad Street, Stamford, CT 06901',
-    status: 'Paid',
-    date: '2026-01-20',
-    dueDate: '2026-02-04',
-    paidAmount: 10741.35,
-    paymentMethod: 'Credit Card',
-    notes: 'Paid in full via corporate card. Thank you!',
-    lineItems: [
-      { id: 'li12', description: 'Startup Plan (5 seats, Annual)', quantity: 5, unitPrice: 480, discount: 0, tax: 6.35 },
-      { id: 'li13', description: 'AI Analytics Add-on', quantity: 1, unitPrice: 6500, discount: 0, tax: 6.35 },
-      { id: 'li14', description: 'Video Training Package', quantity: 1, unitPrice: 1200, discount: 0, tax: 6.35 },
-    ],
-    subtotal: 10100,
-    taxTotal: 641.35,
-    discountTotal: 0,
-    total: 10741.35,
-    createdAt: '2026-01-20T14:00:00Z',
+  unmounted: (el: HTMLElement) => {
+    if ((el as any)._observer) (el as any)._observer.disconnect()
   },
-  {
-    id: 'i5',
-    number: 'INV-2026-082',
-    client: 'Meridian Corp',
-    clientEmail: 'accounting@meridiancorp.com',
-    clientAddress: '456 Oak Drive, Austin, TX 78701',
-    status: 'Sent',
-    date: '2026-02-10',
-    dueDate: '2026-03-10',
-    paidAmount: 0,
-    paymentMethod: '',
-    notes: 'Net 30. Invoice sent via email to accounting department.',
-    lineItems: [
-      { id: 'li15', description: 'CRM Professional (15 seats, Annual)', quantity: 15, unitPrice: 960, discount: 5, tax: 8.25 },
-      { id: 'li16', description: 'Sales Forecasting Module', quantity: 1, unitPrice: 4800, discount: 0, tax: 8.25 },
-      { id: 'li17', description: 'Custom Report Builder', quantity: 1, unitPrice: 3600, discount: 0, tax: 8.25 },
-      { id: 'li18', description: 'Remote Setup & Training (16 hrs)', quantity: 16, unitPrice: 150, discount: 0, tax: 8.25 },
-    ],
-    subtotal: 25080,
-    taxTotal: 2069.10,
-    discountTotal: 720,
-    total: 27149.10,
-    createdAt: '2026-02-10T10:00:00Z',
-  },
-  {
-    id: 'i6',
-    number: 'INV-2026-083',
-    client: 'CloudNine Tech',
-    clientEmail: 'ap@cloudninetech.com',
-    clientAddress: '500 W Madison St, Chicago, IL 60661',
-    status: 'Paid',
-    date: '2026-01-28',
-    dueDate: '2026-02-28',
-    paidAmount: 23870,
-    paymentMethod: 'ACH Transfer',
-    notes: 'Paid ahead of schedule. Loyalty discount applied.',
-    lineItems: [
-      { id: 'li19', description: 'Cloud Hosting Premium (Annual)', quantity: 1, unitPrice: 18000, discount: 10, tax: 10.25 },
-      { id: 'li20', description: 'SSL Certificate & Security Pack', quantity: 1, unitPrice: 2800, discount: 0, tax: 10.25 },
-      { id: 'li21', description: 'Domain Management (5 domains)', quantity: 5, unitPrice: 120, discount: 0, tax: 10.25 },
-    ],
-    subtotal: 19000,
-    taxTotal: 1947.50,
-    discountTotal: 1800,
-    total: 20947.50,
-    createdAt: '2026-01-28T12:00:00Z',
-  },
-  {
-    id: 'i7',
-    number: 'INV-2026-084',
-    client: 'Apex Group',
-    clientEmail: 'billing@apexgroup.com',
-    clientAddress: '777 Third Avenue, New York, NY 10017',
-    status: 'Draft',
-    date: '2026-02-12',
-    dueDate: '2026-03-12',
-    paidAmount: 0,
-    paymentMethod: '',
-    notes: 'Pending approval from sales director before sending.',
-    lineItems: [
-      { id: 'li22', description: 'Enterprise Suite (75 seats)', quantity: 75, unitPrice: 1500, discount: 12, tax: 8.875 },
-      { id: 'li23', description: 'Dedicated Account Manager (Annual)', quantity: 1, unitPrice: 24000, discount: 0, tax: 8.875 },
-      { id: 'li24', description: 'Priority SLA (99.99% uptime)', quantity: 1, unitPrice: 15000, discount: 5, tax: 8.875 },
-      { id: 'li25', description: 'Quarterly Business Reviews', quantity: 4, unitPrice: 2000, discount: 0, tax: 8.875 },
-    ],
-    subtotal: 149750,
-    taxTotal: 13290.31,
-    discountTotal: 14250,
-    total: 163040.31,
-    createdAt: '2026-02-12T16:30:00Z',
-  },
-  {
-    id: 'i8',
-    number: 'INV-2026-085',
-    client: 'Zenith Systems',
-    clientEmail: 'pay@zenithsys.com',
-    clientAddress: '1500 NE Irving St, Portland, OR 97232',
-    status: 'Overdue',
-    date: '2026-01-01',
-    dueDate: '2026-01-31',
-    paidAmount: 0,
-    paymentMethod: '',
-    notes: 'Third overdue notice sent. Collections review meeting scheduled.',
-    lineItems: [
-      { id: 'li26', description: 'Platform Renewal (Annual)', quantity: 1, unitPrice: 36000, discount: 0, tax: 0 },
-      { id: 'li27', description: 'Additional Storage (500GB)', quantity: 1, unitPrice: 4800, discount: 0, tax: 0 },
-      { id: 'li28', description: 'API Rate Limit Upgrade', quantity: 1, unitPrice: 2400, discount: 0, tax: 0 },
-    ],
-    subtotal: 43200,
-    taxTotal: 0,
-    discountTotal: 0,
-    total: 43200,
-    createdAt: '2026-01-01T06:00:00Z',
-  },
-]
+}
+
+onMounted(() => fetchInvoices())
+
+let searchTimeout: any
+watch(search, () => {
+  clearTimeout(searchTimeout)
+  searchTimeout = setTimeout(() => fetchInvoices(true), 300)
+})
+watch(statusFilter, () => fetchInvoices(true))
+
+function fmt(n: number) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0)
+}
+
+function fmtDate(d: string) {
+  if (!d) return '—'
+  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+const badgeClasses: Record<string, string> = {
+  Draft: 'bg-gray-500/10 text-gray-600 border-gray-500/20',
+  Sent: 'bg-blue-500/10 text-blue-600 border-blue-500/20',
+  Paid: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
+  Overdue: 'bg-red-500/10 text-red-600 border-red-500/20',
+  Cancelled: 'bg-gray-500/10 text-gray-500 border-gray-500/20',
+}
+
+const summaryStats = computed(() => {
+  const all = invoices.value
+  return {
+    count: all.length,
+    totalAmount: all.reduce((s: number, inv: any) => s + (inv.total || 0), 0),
+    draftCount: all.filter((i: any) => i.status === 'Draft').length,
+    paidCount: all.filter((i: any) => i.status === 'Paid').length,
+  }
+})
 </script>
 
 <template>
-  <SalesDocumentPage
-    store-key="sales-invoices-v2"
-    doc-type="Invoice"
-    title="Invoices"
-    description="Generate, send, and track invoices with payment reminders"
-    icon="i-lucide-receipt"
-    :status-options="statusOptions"
-    :extra-fields="extraFields"
-    :initial-data="seedData"
-  />
+  <div class="absolute inset-0 flex flex-col overflow-hidden">
+    <!-- Header Actions -->
+    <ClientOnly>
+      <Teleport to="#page-header-actions">
+        <div class="flex items-center gap-2">
+          <div class="relative hidden sm:block">
+            <Icon name="lucide:search" class="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+            <Input v-model="search" placeholder="Search invoices..." class="pl-8 w-40 h-8 text-sm" />
+          </div>
+          <Select v-model="statusFilter">
+            <SelectTrigger class="h-8 w-[100px] text-xs">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="s in statusOptions" :key="s.value" :value="s.value" class="text-xs">
+                {{ s.label }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="sm" class="h-8" :disabled="generating" @click="handleGenerate">
+            <Icon :name="generating ? 'lucide:loader-2' : 'lucide:zap'" :class="generating ? 'animate-spin' : ''" class="mr-1 size-4" />
+            {{ generating ? 'Generating...' : 'Generate Invoices' }}
+          </Button>
+        </div>
+      </Teleport>
+    </ClientOnly>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-2 gap-3 md:grid-cols-4 p-4 pb-0 lg:p-6 lg:pb-0">
+      <Card>
+        <CardContent class="flex items-center gap-3 p-4">
+          <div class="flex items-center justify-center rounded-lg bg-primary/10 p-2">
+            <Icon name="i-lucide-receipt" class="size-4 text-primary" />
+          </div>
+          <div>
+            <p class="text-lg font-bold tabular-nums">{{ summaryStats.count }}</p>
+            <p class="text-xs text-muted-foreground">Total Invoices</p>
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent class="flex items-center gap-3 p-4">
+          <div class="flex items-center justify-center rounded-lg bg-emerald-500/10 p-2">
+            <Icon name="i-lucide-dollar-sign" class="size-4 text-emerald-500" />
+          </div>
+          <div>
+            <p class="text-lg font-bold tabular-nums">{{ fmt(summaryStats.totalAmount) }}</p>
+            <p class="text-xs text-muted-foreground">Total Amount</p>
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent class="flex items-center gap-3 p-4">
+          <div class="flex items-center justify-center rounded-lg bg-gray-500/10 p-2">
+            <Icon name="i-lucide-file-edit" class="size-4 text-gray-500" />
+          </div>
+          <div>
+            <p class="text-lg font-bold tabular-nums">{{ summaryStats.draftCount }}</p>
+            <p class="text-xs text-muted-foreground">Drafts</p>
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent class="flex items-center gap-3 p-4">
+          <div class="flex items-center justify-center rounded-lg bg-emerald-500/10 p-2">
+            <Icon name="i-lucide-check-circle" class="size-4 text-emerald-500" />
+          </div>
+          <div>
+            <p class="text-lg font-bold tabular-nums">{{ summaryStats.paidCount }}</p>
+            <p class="text-xs text-muted-foreground">Paid</p>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+
+    <!-- Table -->
+    <div class="flex-1 min-h-0 rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden m-4 mt-3 lg:m-6 lg:mt-3">
+      <div class="h-full overflow-auto">
+        <table class="w-full text-sm caption-bottom border-collapse">
+          <TableHeader class="sticky top-0 z-10 bg-muted/95 backdrop-blur shadow-sm">
+            <TableRow>
+              <TableHead>Invoice #</TableHead>
+              <TableHead>Dealer</TableHead>
+              <TableHead>Week</TableHead>
+              <TableHead class="text-right">Subtotal</TableHead>
+              <TableHead class="text-right">Tax</TableHead>
+              <TableHead class="text-right">Total</TableHead>
+              <TableHead class="text-center">Items</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Date</TableHead>
+              <TableHead>Due Date</TableHead>
+              <TableHead class="text-center">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow v-for="inv in invoices" :key="inv.id" class="cursor-pointer hover:bg-muted/50">
+              <TableCell class="font-semibold text-xs whitespace-nowrap">{{ inv.number }}</TableCell>
+              <TableCell class="text-xs truncate max-w-[140px]">
+                <div>
+                  <p class="font-medium">{{ inv.dealerName }}</p>
+                  <p v-if="inv.dealerEmail" class="text-[10px] text-muted-foreground">{{ inv.dealerEmail }}</p>
+                </div>
+              </TableCell>
+              <TableCell class="text-xs whitespace-nowrap">
+                W{{ inv.weekNumber }}, {{ inv.weekYear }}
+              </TableCell>
+              <TableCell class="text-right text-xs tabular-nums">{{ fmt(inv.subtotal) }}</TableCell>
+              <TableCell class="text-right text-xs tabular-nums">{{ fmt(inv.taxTotal) }}</TableCell>
+              <TableCell class="text-right text-xs tabular-nums font-semibold">{{ fmt(inv.total) }}</TableCell>
+              <TableCell class="text-center text-xs tabular-nums">{{ inv.lineItems?.length || 0 }}</TableCell>
+              <TableCell>
+                <Badge variant="outline" :class="badgeClasses[inv.status] || ''" class="text-[10px]">
+                  {{ inv.status }}
+                </Badge>
+              </TableCell>
+              <TableCell class="text-xs whitespace-nowrap">{{ fmtDate(inv.date) }}</TableCell>
+              <TableCell class="text-xs whitespace-nowrap">{{ fmtDate(inv.dueDate) }}</TableCell>
+              <TableCell>
+                <div class="flex items-center justify-center gap-1">
+                  <Button variant="ghost" size="icon" class="h-7 w-7" @click="openPreviewFor(inv)">
+                    <Icon name="lucide:eye" class="size-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="icon" class="h-7 w-7" @click="handleDownload(inv)">
+                    <Icon name="lucide:download" class="size-3.5" />
+                  </Button>
+                </div>
+              </TableCell>
+            </TableRow>
+            <TableRow v-if="loading && invoices.length === 0">
+              <TableCell :colspan="11" class="text-center py-10">
+                <Icon name="lucide:loader-2" class="size-6 animate-spin text-muted-foreground mx-auto" />
+              </TableCell>
+            </TableRow>
+            <TableRow v-if="!loading && invoices.length === 0">
+              <TableCell :colspan="11" class="text-center py-10 text-muted-foreground">
+                <div class="space-y-2">
+                  <Icon name="lucide:receipt" class="size-10 mx-auto opacity-30" />
+                  <p>No invoices found.</p>
+                  <p class="text-xs">Click <strong>Generate Invoices</strong> to create invoices from your work orders.</p>
+                </div>
+              </TableCell>
+            </TableRow>
+            <tr v-if="hasMore && invoices.length > 0" v-intersect="fetchInvoices" class="h-10">
+              <td :colspan="11" class="text-center">
+                <div v-if="loading" class="flex justify-center py-4">
+                  <Icon name="lucide:loader-2" class="size-4 animate-spin text-muted-foreground" />
+                </div>
+              </td>
+            </tr>
+          </TableBody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Preview Dialog -->
+    <Dialog v-model:open="showPreview">
+      <DialogContent class="max-w-6xl max-h-[90vh] overflow-auto">
+        <DialogHeader>
+          <DialogTitle class="flex items-center gap-2">
+            <Icon name="i-lucide-receipt" class="size-4" />
+            Invoice Preview – {{ selectedInvoice?.number }}
+          </DialogTitle>
+        </DialogHeader>
+        <div class="border rounded-lg overflow-hidden bg-white">
+          <iframe :srcdoc="previewHtml" class="w-full h-[700px] border-0" />
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <Button variant="outline" size="sm" @click="showPreview = false">Close</Button>
+          <Button size="sm" @click="handleDownload(selectedInvoice)">
+            <Icon name="lucide:download" class="mr-1 size-4" />
+            Download PDF
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  </div>
 </template>
