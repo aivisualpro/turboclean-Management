@@ -1,5 +1,6 @@
+import { Buffer } from 'node:buffer'
+import process from 'node:process'
 import { connectToDatabase } from '../../utils/mongodb'
-
 export default defineEventHandler(async (event) => {
   try {
     const body = await readBody(event)
@@ -38,7 +39,7 @@ export default defineEventHandler(async (event) => {
       role: user.role || 'User',
       iat: Date.now(),
     })
-    const token = Buffer.from(sessionPayload).toString('base64')
+    const token = Buffer.from(sessionPayload).toString('base64url')
 
     // Set session cookie (HTTP-only, 7-day expiry)
     setCookie(event, 'turbo_session', token, {
@@ -58,8 +59,10 @@ export default defineEventHandler(async (event) => {
         role: user.role || 'User',
       },
     }
-  } catch (error: any) {
-    if (error.statusCode) throw error
+  }
+  catch (error: any) {
+    if (error.statusCode)
+      throw error
     throw createError({ statusCode: 500, statusMessage: error.message })
   }
 })
