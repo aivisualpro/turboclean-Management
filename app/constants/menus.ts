@@ -44,16 +44,6 @@ export const navMenu: NavMenu[] = [
         icon: 'i-lucide-trending-up',
         link: '/reports/sales',
       },
-      {
-        title: 'Financial Reports',
-        icon: 'i-lucide-pie-chart',
-        link: '/reports/financial',
-      },
-      {
-        title: 'Emails',
-        icon: 'i-lucide-mail',
-        link: '/email',
-      },
     ],
   },
 ]

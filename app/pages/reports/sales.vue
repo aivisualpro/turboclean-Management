@@ -330,12 +330,12 @@ const avatarColors = [
                 <TableRow v-for="(d, i) in topDealers" :key="d.name">
                   <TableCell>
                     <div class="flex items-center justify-center size-6 rounded-full text-[10px] font-bold" :class="Number(i) < 3 ? 'bg-amber-500/15 text-amber-600' : 'bg-muted text-muted-foreground'">
-                      {{ i + 1 }}
+                      {{ Number(i) + 1 }}
                     </div>
                   </TableCell>
                   <TableCell>
                     <div class="flex items-center gap-2.5">
-                      <div class="flex items-center justify-center rounded-full size-8 text-xs font-bold" :class="avatarColors[i % avatarColors.length]">
+                      <div class="flex items-center justify-center rounded-full size-8 text-xs font-bold" :class="avatarColors[Number(i) % avatarColors.length]">
                         {{ d.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2) }}
                       </div>
                       <span class="font-medium text-sm truncate max-w-[200px]">{{ d.name }}</span>
@@ -374,7 +374,7 @@ const avatarColors = [
               <div v-for="(d, i) in topDealers" :key="d.name" class="space-y-1.5">
                 <div class="flex items-center justify-between text-sm">
                   <div class="flex items-center gap-2">
-                    <div class="size-3 rounded" :style="{ background: chartColors[i % chartColors.length] }" />
+                    <div class="size-3 rounded" :style="{ background: chartColors[Number(i) % chartColors.length] }" />
                     <span class="font-medium truncate max-w-[200px]">{{ d.name }}</span>
                   </div>
                   <span class="font-semibold tabular-nums">{{ fmt(d.revenue) }}</span>
@@ -382,7 +382,7 @@ const avatarColors = [
                 <div class="h-7 rounded-lg overflow-hidden bg-muted/50 relative">
                   <div
                     class="h-full rounded-lg transition-all duration-1000 flex items-center px-3"
-                    :style="{ width: `${(d.revenue / topDealerMax) * 100}%`, background: chartColors[i % chartColors.length] }"
+                    :style="{ width: `${(d.revenue / topDealerMax) * 100}%`, background: chartColors[Number(i) % chartColors.length] }"
                   >
                     <span v-if="(d.revenue / topDealerMax) > 0.15" class="text-white text-[10px] font-semibold">{{ d.orders }} orders</span>
                   </div>
@@ -422,12 +422,12 @@ const avatarColors = [
                   <TableRow v-for="(s, i) in topServices" :key="s.name">
                     <TableCell>
                       <div class="flex items-center justify-center size-6 rounded-full text-[10px] font-bold" :class="Number(i) < 3 ? 'bg-violet-500/15 text-violet-600' : 'bg-muted text-muted-foreground'">
-                        {{ i + 1 }}
+                        {{ Number(i) + 1 }}
                       </div>
                     </TableCell>
                     <TableCell>
                       <div class="flex items-center gap-2">
-                        <div class="size-3 rounded" :style="{ background: chartColors[i % chartColors.length] }" />
+                        <div class="size-3 rounded" :style="{ background: chartColors[Number(i) % chartColors.length] }" />
                         <span class="font-medium text-sm truncate max-w-[250px]">{{ s.name }}</span>
                       </div>
                     </TableCell>
@@ -436,7 +436,7 @@ const avatarColors = [
                     <TableCell>
                       <div class="flex items-center gap-2">
                         <div class="flex-1 h-2 rounded-full bg-muted overflow-hidden">
-                          <div class="h-full rounded-full transition-all" :style="{ width: `${(s.revenue / (stats.kpis.totalRevenue || 1)) * 100}%`, background: chartColors[i % chartColors.length] }" />
+                          <div class="h-full rounded-full transition-all" :style="{ width: `${(s.revenue / (stats.kpis.totalRevenue || 1)) * 100}%`, background: chartColors[Number(i) % chartColors.length] }" />
                         </div>
                         <span class="text-xs font-medium tabular-nums w-10 text-right">{{ Math.round((s.revenue / (stats.kpis.totalRevenue || 1)) * 100) }}%</span>
                       </div>
@@ -468,7 +468,7 @@ const avatarColors = [
               <div class="w-full mt-4 space-y-2">
                 <div v-for="(s, i) in topServices" :key="s.name" class="flex items-center justify-between text-xs">
                   <div class="flex items-center gap-2 min-w-0">
-                    <div class="size-2.5 rounded-full shrink-0" :style="{ background: chartColors[i % chartColors.length] }" />
+                    <div class="size-2.5 rounded-full shrink-0" :style="{ background: chartColors[Number(i) % chartColors.length] }" />
                     <span class="text-muted-foreground truncate">{{ s.name }}</span>
                   </div>
                   <div class="flex items-center gap-2 shrink-0 ml-2">
