@@ -4,7 +4,7 @@ export default defineEventHandler(async (event) => {
   const token = getCookie(event, 'turbo_session')
 
   if (!token) {
-    throw createError({ statusCode: 401, statusMessage: 'Not authenticated' })
+    return { user: null }
   }
 
   try {
@@ -14,7 +14,7 @@ export default defineEventHandler(async (event) => {
     // Check if token is expired (7 days)
     if (Date.now() - payload.iat > 7 * 24 * 60 * 60 * 1000) {
       deleteCookie(event, 'turbo_session', { path: '/' })
-      throw createError({ statusCode: 401, statusMessage: 'Session expired' })
+      return { user: null }
     }
 
     return {
@@ -27,10 +27,8 @@ export default defineEventHandler(async (event) => {
     }
   }
   catch (error: any) {
-    if (error.statusCode)
-      throw error
     deleteCookie(event, 'turbo_session', { path: '/' })
     console.error('Session Parse Error:', error)
-    throw createError({ statusCode: 401, statusMessage: error.message || 'Invalid session' })
+    return { user: null }
   }
 })
