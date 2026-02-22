@@ -16,12 +16,12 @@ const teams: {
 }[] = [
   {
     name: 'My Company',
-    logo: 'i-lucide-gallery-vertical-end',
+    logo: '/logo.png',
     plan: 'Enterprise',
   },
   {
     name: 'Turbo Clean Management',
-    logo: 'i-lucide-audio-waveform',
+    logo: '/logo.png',
     plan: 'Professional',
   },
   {

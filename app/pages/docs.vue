@@ -118,7 +118,7 @@ const modules = [
     color: 'text-lime-500',
     bgColor: 'bg-lime-500/10',
     features: ['Data Tables', 'Filtering', 'Sorting', 'Bulk Actions'],
-    link: '/tasks',
+    link: '/dealers',
   },
   {
     title: 'Kanban Board',

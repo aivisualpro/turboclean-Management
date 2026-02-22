@@ -15,7 +15,9 @@ useHead({
     { key: 'theme-color', name: 'theme-color', content: color },
   ],
   link: [
-    { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
+    { rel: 'icon', type: 'image/png', href: '/favicon-32.png', sizes: '32x32' },
+    { rel: 'icon', type: 'image/png', href: '/icon-192.png', sizes: '192x192' },
+    { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
   ],
   htmlAttrs: {
     lang: 'en',
