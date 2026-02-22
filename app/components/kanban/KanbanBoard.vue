@@ -119,18 +119,6 @@ function onColumnDrop(evt: any) {
   setColumns(evt.to.__draggable_component__.modelValue)
 }
 
-function renameColumn(id: string) {
-  const titleRef = document.getElementById(`col-title-${id}`) as HTMLElement
-  if (titleRef)
-    setTimeout(() => titleRef.focus(), 500)
-}
-
-function onUpdateColumn(evt: any, id: string) {
-  if (!evt.target.textContent?.trim())
-    return
-  updateColumn(id, evt.target.textContent?.trim())
-}
-
 function onTaskDrop() {
   // ensure state is persisted after any move (within or across columns)
   nextTick(() => setColumns([...board.value.columns]))
@@ -177,66 +165,67 @@ const OPTIONS: UseTimeAgoOptions<false, UseTimeAgoUnitNamesDefault> = {
   rounding: 'floor',
   updateInterval: 1000,
 }
+
+// Simple Intersection Observer Directive logic inline
+const vIntersect = {
+  mounted: (el: HTMLElement, binding: any) => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && el.dataset.column) {
+          binding.value(el.dataset.column)
+        }
+      },
+      { root: null, threshold: 0.1 }
+    )
+    observer.observe(el)
+    // Store observer on element for unmounting
+    ;(el as any)._observer = observer
+  },
+  unmounted: (el: HTMLElement) => {
+    if ((el as any)._observer) {
+      ;(el as any)._observer.disconnect()
+    }
+  }
+}
+
+function onScrollEnd(columnId: string) {
+  // We can add load more logic here using the columnId if we paginate backend requests
+  // console.log('Load more tasks for:', columnId)
+}
 </script>
 
 <template>
-  <div class="flex gap-4 overflow-x-auto overflow-y-hidden pb-4">
-    <!-- Columns Draggable wrapper -->
-    <Draggable
-      v-model="board.columns"
-      class="flex gap-4 min-w-max"
-      item-key="id"
-      :animation="180"
-      handle=".col-handle"
-      ghost-class="opacity-50"
-      @end="onColumnDrop"
+  <div class="flex gap-4 overflow-x-auto overflow-y-hidden pb-4 h-[calc(100vh-7rem)] w-full">
+    <div
+      v-for="col in board.columns"
+      :key="col.id"
+      class="flex-1 min-w-[220px] h-full flex flex-col"
     >
-      <template #item="{ element: col }: { element: Column }">
-        <Card class="w-[272px] shrink-0 py-2 gap-4 self-start">
-          <CardHeader class="flex flex-row items-center justify-between gap-2 px-2">
-            <CardTitle class="font-semibold text-base flex items-center gap-2">
-              <Icon name="lucide:grip-vertical" class="col-handle cursor-grab opacity-60" />
-              <span
-                :id="`col-title-${col.id}`"
-                contenteditable="true" class="hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50 px-1 rounded"
-                @blur="onUpdateColumn($event, col.id)" @keydown.enter.prevent
-              >{{ col.title }}</span>
-              <Badge variant="secondary" class="h-5 min-w-5 px-1 font-mono tabular-nums">
-                {{ col.tasks.length }}
-              </Badge>
-            </CardTitle>
-            <CardAction class="flex">
-              <Button size="icon-sm" variant="ghost" class="size-7 text-muted-foreground" @click="openNewTask(col.id)">
-                <Icon name="lucide:plus" />
-              </Button>
-              <DropdownMenu modal>
-                <DropdownMenuTrigger as-child>
-                  <Button size="icon-sm" variant="ghost" class="size-7 text-muted-foreground">
-                    <Icon name="lucide:ellipsis-vertical" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent class="w-20" align="start">
-                  <DropdownMenuItem @click="renameColumn(col.id)">
-                    <Icon name="lucide:edit-2" class="size-4" />
-                    Rename
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem variant="destructive" class="text-destructive" @click="removeColumn(col.id)">
-                    <Icon name="lucide:trash-2" class="size-4" />
-                    Delete
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </CardAction>
-          </CardHeader>
-          <CardContent class="px-2 overflow-y-auto overflow-x-hidden flex-1">
-            <!-- Tasks within the column -->
-            <Draggable
-              v-model="col.tasks"
-              :group="{ name: 'kanban-tasks', pull: true, put: true }"
-              item-key="id"
-              :animation="180"
-              class="flex flex-col gap-3 min-h-[24px] p-0.5"
+      <Card class="h-full flex flex-col pt-2 pb-0 gap-2">
+        <CardHeader class="flex flex-row items-center justify-between gap-2 px-2 py-0">
+          <CardTitle class="font-semibold text-base flex items-center gap-2">
+            <span
+              :id="`col-title-${col.id}`"
+              class="px-1"
+            >{{ col.title }}</span>
+            <Badge variant="secondary" class="h-5 min-w-5 px-1 font-mono tabular-nums">
+              {{ col.tasks.length }}
+            </Badge>
+          </CardTitle>
+          <CardAction class="flex">
+            <Button size="icon-sm" variant="ghost" class="size-7 text-muted-foreground" @click="openNewTask(col.id)">
+              <Icon name="lucide:plus" />
+            </Button>
+          </CardAction>
+        </CardHeader>
+        <CardContent class="px-2 overflow-y-auto overflow-x-hidden flex-1 no-scrollbar">
+          <!-- Tasks within the column -->
+          <Draggable
+            v-model="col.tasks"
+            :group="{ name: 'kanban-tasks', pull: true, put: true }"
+            item-key="id"
+            :animation="180"
+            class="flex flex-col gap-3 min-h-[24px] p-0.5 h-full"
               ghost-class="opacity-50"
               @end="onTaskDrop"
             >
@@ -402,17 +391,11 @@ const OPTIONS: UseTimeAgoOptions<false, UseTimeAgoUnitNamesDefault> = {
                   </div>
                 </div>
               </template>
-            </Draggable>
-          </CardContent>
-          <CardFooter class="px-2 mt-auto">
-            <Button size="sm" variant="ghost" class="text-muted-foreground" @click="openNewTask(col.id)">
-              <Icon name="lucide:plus" />
-              Add Task
-            </Button>
-          </CardFooter>
-        </Card>
-      </template>
-    </Draggable>
+            <div class="h-4 w-full flex-shrink-0" :data-column="col.id" v-intersect="onScrollEnd"></div>
+          </Draggable>
+        </CardContent>
+      </Card>
+    </div>
   </div>
 
   <!-- New Task Dialog -->

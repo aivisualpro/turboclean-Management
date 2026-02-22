@@ -19,6 +19,11 @@ const props = defineProps<{
   statusOptions: { label: string, value: string }[]
   extraFields?: { key: string, label: string, type?: string, placeholder?: string }[]
   initialData: SalesDocument[]
+  showImport?: boolean
+}>()
+
+const emit = defineEmits<{
+  (e: 'import'): void
 }>()
 
 const { setHeader } = usePageHeader()
@@ -315,6 +320,10 @@ const previewHtml = computed(() => {
         <Button variant="outline" size="sm" @click="handleReset">
           <Icon name="i-lucide-rotate-ccw" class="mr-1 size-4" />
           Reset
+        </Button>
+        <Button v-if="showImport" variant="outline" size="sm" @click="emit('import')">
+          <Icon name="i-lucide-upload" class="mr-1 size-4" />
+          Import
         </Button>
         <Button size="sm" @click="openCreate">
           <Icon name="i-lucide-plus" class="mr-1 size-4" />

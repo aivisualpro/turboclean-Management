@@ -176,10 +176,14 @@
     font-family: var(--font-sans);
     font-synthesis-weight: none;
     text-rendering: optimizeLegibility;
+    overflow: hidden;
+    height: 100vh;
   }
 
   html {
     @apply scroll-smooth;
+    overflow: hidden;
+    height: 100vh;
   }
 
   @supports (font: -apple-system-body) and (-webkit-appearance: none) {

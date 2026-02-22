@@ -10,14 +10,9 @@ export const navMenu: NavMenu[] = [
         link: '/',
       },
       {
-        title: 'Email',
-        icon: 'i-lucide-mail',
-        link: '/email',
-      },
-      {
-        title: 'Dealers',
-        icon: 'i-lucide-building-2',
-        link: '/dealers',
+        title: 'App Users',
+        icon: 'i-lucide-users',
+        link: '/users',
       },
       {
         title: 'Services',
@@ -25,10 +20,9 @@ export const navMenu: NavMenu[] = [
         link: '/services',
       },
       {
-        title: 'Tasks',
-        icon: 'i-lucide-kanban',
-        link: '/tasks',
-        new: true,
+        title: 'Dealers',
+        icon: 'i-lucide-building-2',
+        link: '/dealers',
       },
       {
         title: 'Work Orders',
@@ -41,6 +35,11 @@ export const navMenu: NavMenu[] = [
         link: '/sales/invoices',
       },
       {
+        title: 'Tasks',
+        icon: 'i-lucide-kanban',
+        link: '/tasks',
+      },
+      {
         title: 'Sales Reports',
         icon: 'i-lucide-trending-up',
         link: '/reports/sales',
@@ -51,9 +50,9 @@ export const navMenu: NavMenu[] = [
         link: '/reports/financial',
       },
       {
-        title: 'HR Reports',
-        icon: 'i-lucide-file-bar-chart',
-        link: '/reports/hr',
+        title: 'Emails',
+        icon: 'i-lucide-mail',
+        link: '/email',
       },
     ],
   },
