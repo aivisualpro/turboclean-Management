@@ -20,6 +20,7 @@ export default defineEventHandler(async (event) => {
         preferredContactMethod: 'any'
       }],
       status: doc.status || 'Pending',
+      services: doc.services || [],
       createdAt: doc.createdAt?.toISOString() || doc._id.getTimestamp().toISOString(),
       updatedAt: doc.updatedAt?.toISOString() || doc._id.getTimestamp().toISOString(),
       notes: doc.notes || ''

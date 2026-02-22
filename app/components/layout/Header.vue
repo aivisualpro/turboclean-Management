@@ -40,7 +40,7 @@ const displayTitle = computed(() => headerState.title || fallbackTitle.value)
         </div>
       </div>
     </div>
-    <div class="ml-auto flex items-center gap-2">
+    <div id="page-header-actions" class="ml-auto flex items-center gap-2">
       <slot />
     </div>
   </header>

@@ -19,12 +19,21 @@ export interface DealerContact {
   preferredContactMethod: PreferredContactMethod
 }
 
+export interface DealerService {
+  id?: string
+  service: string
+  amount: number
+  tax: number
+  total: number
+}
+
 export interface Dealer {
   id: string
   dealerName: string
   address: string
   contacts: DealerContact[]
   status: DealerStatus
+  services?: DealerService[]
   createdAt: string
   updatedAt: string
 }
@@ -110,6 +119,38 @@ export function useDealers() {
     }
   }
 
+  async function importDealerServices(services: { dealer: string; service: string; amount: number; tax: number; total: number }[]) {
+    try {
+      const response = await $fetch<{ success: boolean; count: number }>('/api/dealers/services/import', {
+        method: 'POST',
+        body: { services }
+      })
+      await fetchDealers()
+      return response.count
+    } catch (error) {
+      console.error('Failed to import dealer services:', error)
+      return 0
+    }
+  }
+
+  async function deleteAllDealerServices() {
+    if (!import.meta.client) return 0
+    if (!window.confirm('Are you sure you want to delete ALL services from ALL dealers? This cannot be undone.')) {
+      return 0
+    }
+    
+    try {
+      const response = await $fetch<{ success: boolean; count: number }>('/api/dealers/services/delete-all', {
+        method: 'DELETE'
+      })
+      await fetchDealers()
+      return response.count
+    } catch (error) {
+      console.error('Failed to delete all dealer services:', error)
+      return 0
+    }
+  }
+
   function resetToDefaults() {
     dealers.value = []
   }
@@ -131,6 +172,8 @@ export function useDealers() {
     updateDealer,
     deleteDealer,
     importDealers,
+    importDealerServices,
+    deleteAllDealerServices,
     resetToDefaults,
     formatPhoneNumber,
   }

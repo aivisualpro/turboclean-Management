@@ -17,7 +17,7 @@ const extraFields = [
 const seedData: SalesDocument[] = [
   {
     id: 'q1',
-    number: 'QT-2026-041',
+    number: 'WO-2026-041',
     client: 'TechVision Inc',
     clientEmail: 'procurement@techvision.com',
     clientAddress: '1200 Innovation Blvd, San Jose, CA 95134',
@@ -41,7 +41,7 @@ const seedData: SalesDocument[] = [
   },
   {
     id: 'q2',
-    number: 'QT-2026-040',
+    number: 'WO-2026-040',
     client: 'GlobalSoft',
     clientEmail: 'purchasing@globalsoft.com',
     clientAddress: '800 Market Street, Floor 12, San Francisco, CA 94102',
@@ -64,7 +64,7 @@ const seedData: SalesDocument[] = [
   },
   {
     id: 'q3',
-    number: 'QT-2026-039',
+    number: 'WO-2026-039',
     client: 'Meridian Corp',
     clientEmail: 'ops@meridiancorp.com',
     clientAddress: '456 Oak Drive, Austin, TX 78701',
@@ -86,7 +86,7 @@ const seedData: SalesDocument[] = [
   },
   {
     id: 'q4',
-    number: 'QT-2026-038',
+    number: 'WO-2026-038',
     client: 'NexGen Solutions',
     clientEmail: 'cto@nexgensolutions.io',
     clientAddress: '2100 Greenway Plaza, Suite 800, Houston, TX 77046',
@@ -110,7 +110,7 @@ const seedData: SalesDocument[] = [
   },
   {
     id: 'q5',
-    number: 'QT-2026-037',
+    number: 'WO-2026-037',
     client: 'Apex Group',
     clientEmail: 'finance@apexgroup.com',
     clientAddress: '777 Third Avenue, New York, NY 10017',
@@ -132,7 +132,7 @@ const seedData: SalesDocument[] = [
   },
   {
     id: 'q6',
-    number: 'QT-2026-036',
+    number: 'WO-2026-036',
     client: 'DataFlow AI',
     clientEmail: 'admin@dataflowai.com',
     clientAddress: '300 Broad Street, Stamford, CT 06901',
@@ -157,10 +157,10 @@ const seedData: SalesDocument[] = [
 
 <template>
   <SalesDocumentPage
-    store-key="sales-quotes-v2"
-    doc-type="Quote"
-    title="Quotes & Estimates"
-    description="Create professional quotes with configurable line items"
+    store-key="sales-work-orders-v2"
+    doc-type="Work Order"
+    title="Work Orders"
+    description="Create professional work orders with configurable line items"
     icon="i-lucide-file-text"
     :status-options="statusOptions"
     :extra-fields="extraFields"

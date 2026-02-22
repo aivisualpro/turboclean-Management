@@ -139,7 +139,7 @@ export function useSalesDocument<T extends SalesDocument>(storeKey: string, init
 }
 
 // ── PDF Generation (browser-based) ───────────────────
-export function generatePDF(doc: SalesDocument, docType: 'Quote' | 'Invoice' | 'Order') {
+export function generatePDF(doc: SalesDocument, docType: 'Work Order' | 'Invoice' | 'Order') {
   const lineRows = doc.lineItems.map((li, i) => `
     <tr>
       <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;color:#374151;font-size:13px">${i + 1}</td>
@@ -171,7 +171,7 @@ export function generatePDF(doc: SalesDocument, docType: 'Quote' | 'Invoice' | '
   const extraFields = docType === 'Invoice'
     ? `<tr><td style="padding:6px 0;color:#6b7280;font-size:12px">Due Date:</td><td style="padding:6px 0;color:#111827;font-size:12px;font-weight:500">${doc.dueDate || '—'}</td></tr>
        <tr><td style="padding:6px 0;color:#6b7280;font-size:12px">Paid:</td><td style="padding:6px 0;color:#10b981;font-size:12px;font-weight:600">$${(doc.paidAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td></tr>`
-    : docType === 'Quote'
+    : docType === 'Work Order'
       ? `<tr><td style="padding:6px 0;color:#6b7280;font-size:12px">Valid Until:</td><td style="padding:6px 0;color:#111827;font-size:12px;font-weight:500">${doc.validUntil || '—'}</td></tr>`
       : docType === 'Order'
         ? `<tr><td style="padding:6px 0;color:#6b7280;font-size:12px">Tracking:</td><td style="padding:6px 0;color:#111827;font-size:12px;font-weight:500">${doc.tracking || '—'}</td></tr>`
@@ -247,7 +247,7 @@ export function generatePDF(doc: SalesDocument, docType: 'Quote' | 'Invoice' | '
   return html
 }
 
-export function downloadPDF(doc: SalesDocument, docType: 'Quote' | 'Invoice' | 'Order') {
+export function downloadPDF(doc: SalesDocument, docType: 'Work Order' | 'Invoice' | 'Order') {
   const html = generatePDF(doc, docType)
   const printWindow = window.open('', '_blank')
   if (printWindow) {

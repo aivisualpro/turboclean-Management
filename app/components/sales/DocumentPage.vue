@@ -12,7 +12,7 @@ import {
 
 const props = defineProps<{
   storeKey: string
-  docType: 'Quote' | 'Invoice' | 'Order'
+  docType: 'Work Order' | 'Invoice' | 'Order'
   title: string
   description: string
   icon: string
@@ -85,7 +85,7 @@ const editingTotals = computed(() => calcDocumentTotals(editingLineItems.value))
 function openCreate() {
   isEditing.value = false
   formData.value = {
-    number: `${props.docType === 'Quote' ? 'QT' : props.docType === 'Invoice' ? 'INV' : 'ORD'}-2026-${String(items.value.length + 1).padStart(3, '0')}`,
+    number: `${props.docType === 'Work Order' ? 'WO' : props.docType === 'Invoice' ? 'INV' : 'ORD'}-2026-${String(items.value.length + 1).padStart(3, '0')}`,
     client: '',
     clientEmail: '',
     clientAddress: '',

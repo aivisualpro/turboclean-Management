@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { Upload } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
-import { useServices } from '~/composables/useServices'
+import { useDealers } from '~/composables/useDealers'
 
-const { importServices } = useServices()
+const { importDealerServices } = useDealers()
 
 const isOpen = defineModel<boolean>('open', { default: false })
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -31,7 +31,6 @@ function onFileChange(event: Event) {
         const char = row[i]
         if (char === '"') {
           inQuotes = !inQuotes
-          // We can optionally keep the quote or drop it; we'll drop it after
         } else if (char === ',' && !inQuotes) {
           cols.push(currentVal.trim().replace(/^"|"$/g, ''))
           currentVal = ''
@@ -58,33 +57,35 @@ async function doImport() {
   if (!headerRow) return
   const header = headerRow.map(h => h.toLowerCase().trim())
   
-  const serviceIdx = header.findIndex(h => h.includes('service') || h.includes('name'))
-  const descriptionIdx = header.findIndex(h => h.includes('description') || h.includes('desc'))
-  const priceIdx = header.findIndex(h => h.includes('price') || h.includes('cost'))
-  const taxIdx = header.findIndex(h => h.includes('tax'))
+  const dealerIdx = header.findIndex(h => h === 'dealer' || h === 'dealer id' || h.startsWith('dealer ('))
+  const serviceIdx = header.findIndex(h => h === 'service' || h === 'service name' || h === 'service id' || h.startsWith('service ('))
+  const amountIdx = header.findIndex(h => h === 'amount' || h.startsWith('amount ('))
+  const taxIdx = header.findIndex(h => h === 'tax' || h.startsWith('tax ('))
+  const totalIdx = header.findIndex(h => h === 'total' || h.startsWith('total ('))
 
-  if (serviceIdx === -1) {
-    toast.error('CSV must have a "Service" column')
+  if (dealerIdx === -1 || serviceIdx === -1) {
+    toast.error('CSV must have "dealer" (or "dealer id") and "service" columns')
     return
   }
 
-  const newServices = csvPreview.value.slice(1).map((row) => {
+  const payload = csvPreview.value.slice(1).map((row) => {
     return {
-      service: row[serviceIdx] || 'Unknown Service',
-      description: descriptionIdx !== -1 ? (row[descriptionIdx] || '') : '',
-      price: priceIdx !== -1 ? (parseFloat(row[priceIdx] || '') || 0) : 0,
-      tax: taxIdx !== -1 ? (parseFloat(row[taxIdx] || '') || 0) : 0,
+      dealer: row[dealerIdx] || '',
+      service: row[serviceIdx] || '',
+      amount: amountIdx !== -1 ? (parseFloat((row[amountIdx] || '').replace(/[^0-9.-]+/g, '')) || 0) : 0,
+      tax: taxIdx !== -1 ? (parseFloat((row[taxIdx] || '').replace(/[^0-9.-]+/g, '')) || 0) : 0,
+      total: totalIdx !== -1 ? (parseFloat((row[totalIdx] || '').replace(/[^0-9.-]+/g, '')) || 0) : 0,
     }
-  }).filter(s => s.service && s.service !== 'Unknown Service')
+  }).filter(s => s.dealer && s.service)
 
   try {
-    const count = await importServices(newServices)
-    toast.success(`Successfully imported ${count} service(s)`)
+    const count = await importDealerServices(payload)
+    toast.success(`Successfully imported ${count} dealer service limits/entries`)
     isOpen.value = false
     csvPreview.value = []
     fileName.value = ''
   } catch (error) {
-    toast.error('Failed to import services')
+    toast.error('Failed to import dealer services')
   }
 }
 
@@ -101,10 +102,10 @@ function cancel() {
       <DialogHeader>
         <DialogTitle class="flex items-center gap-2">
           <Upload class="size-5" />
-          Import Services
+          Import Dealer Services
         </DialogTitle>
         <DialogDescription>
-          Upload a CSV file to bulk-import services. Expected columns: Service, Description, Price, Tax
+          Upload a CSV file to bulk-import services for dealers. Expected columns: dealer, service, amount, tax, total (where dealer and service are MongoDB IDs).
         </DialogDescription>
       </DialogHeader>
 
@@ -131,14 +132,14 @@ function cancel() {
           <p class="text-sm font-medium">
             Preview ({{ csvPreview.length - 1 }} rows)
           </p>
-          <ScrollArea class="h-48 border rounded-lg">
+          <div class="h-48 border rounded-lg overflow-auto">
             <table class="w-full text-xs">
               <thead>
                 <tr class="border-b bg-muted/50">
                   <th
                     v-for="(h, i) in csvPreview[0]"
                     :key="i"
-                    class="p-2 text-left font-medium"
+                    class="p-2 text-left font-medium whitespace-nowrap bg-muted/50"
                   >
                     {{ h }}
                   </th>
@@ -150,13 +151,13 @@ function cancel() {
                   :key="ri"
                   class="border-b"
                 >
-                  <td v-for="(cell, ci) in row" :key="ci" class="p-2">
+                  <td v-for="(cell, ci) in row" :key="ci" class="p-2 whitespace-nowrap max-w-[150px] truncate" :title="cell">
                     {{ cell }}
                   </td>
                 </tr>
               </tbody>
             </table>
-          </ScrollArea>
+          </div>
           <p v-if="csvPreview.length > 6" class="text-xs text-muted-foreground">
             ... and {{ csvPreview.length - 6 }} more rows
           </p>

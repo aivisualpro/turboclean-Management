@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { Upload } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
-import { useServices } from '~/composables/useServices'
+import { nanoid } from 'nanoid'
+import type { Dealer, DealerStatus } from '~/composables/useDealers'
+import { useDealers } from '~/composables/useDealers'
 
-const { importServices } = useServices()
+const { importDealers } = useDealers()
 
 const isOpen = defineModel<boolean>('open', { default: false })
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -31,7 +33,6 @@ function onFileChange(event: Event) {
         const char = row[i]
         if (char === '"') {
           inQuotes = !inQuotes
-          // We can optionally keep the quote or drop it; we'll drop it after
         } else if (char === ',' && !inQuotes) {
           cols.push(currentVal.trim().replace(/^"|"$/g, ''))
           currentVal = ''
@@ -58,33 +59,63 @@ async function doImport() {
   if (!headerRow) return
   const header = headerRow.map(h => h.toLowerCase().trim())
   
-  const serviceIdx = header.findIndex(h => h.includes('service') || h.includes('name'))
-  const descriptionIdx = header.findIndex(h => h.includes('description') || h.includes('desc'))
-  const priceIdx = header.findIndex(h => h.includes('price') || h.includes('cost'))
-  const taxIdx = header.findIndex(h => h.includes('tax'))
+  const nameIdx = header.findIndex(h => h === 'dealer name' || h === 'name' || h === 'dealer')
+  const addressIdx = header.findIndex(h => h === 'address')
+  const contactIdx = header.findIndex(h => h === 'primary contact' || h === 'contact name' || h === 'contact')
+  const phoneIdx = header.findIndex(h => h === 'phone' || h === 'phone number')
+  const emailIdx = header.findIndex(h => h === 'email' || h === 'email address')
+  const statusIdx = header.findIndex(h => h === 'status')
 
-  if (serviceIdx === -1) {
-    toast.error('CSV must have a "Service" column')
+  if (nameIdx === -1) {
+    toast.error('CSV must have a "Dealer Name" column')
     return
   }
 
-  const newServices = csvPreview.value.slice(1).map((row) => {
-    return {
-      service: row[serviceIdx] || 'Unknown Service',
-      description: descriptionIdx !== -1 ? (row[descriptionIdx] || '') : '',
-      price: priceIdx !== -1 ? (parseFloat(row[priceIdx] || '') || 0) : 0,
-      tax: taxIdx !== -1 ? (parseFloat(row[taxIdx] || '') || 0) : 0,
+  const payload: Omit<Dealer, 'id' | 'createdAt' | 'updatedAt'>[] = csvPreview.value.slice(1).map((row) => {
+    const dealerName = row[nameIdx] || ''
+    const address = addressIdx !== -1 ? (row[addressIdx] || '') : ''
+    const contactName = contactIdx !== -1 ? (row[contactIdx] || '') : ''
+    const phone = phoneIdx !== -1 ? (row[phoneIdx] || '') : ''
+    const email = emailIdx !== -1 ? (row[emailIdx] || '') : ''
+    const statusVal = statusIdx !== -1 ? (row[statusIdx] || 'Pending') : 'Pending'
+    
+    // basic mapping for status
+    let status: DealerStatus = 'Pending'
+    if (['Authorised', 'Pending', 'Rejected', 'In Followup'].includes(statusVal)) {
+      status = statusVal as DealerStatus
+    } else if (statusVal.toLowerCase() === 'authorised' || statusVal.toLowerCase() === 'authorized') {
+      status = 'Authorised'
     }
-  }).filter(s => s.service && s.service !== 'Unknown Service')
+
+    const contacts = []
+    if (contactName || phone || email) {
+      contacts.push({
+        id: nanoid(8),
+        name: contactName,
+        designation: '',
+        phones: phone ? [{ id: nanoid(8), number: phone, type: 'mobile' as const }] : [],
+        emails: email ? [email] : [],
+        preferredContactMethod: 'any' as const
+      })
+    }
+
+    return {
+      dealerName,
+      address,
+      status,
+      contacts,
+      services: []
+    }
+  }).filter(d => d.dealerName)
 
   try {
-    const count = await importServices(newServices)
-    toast.success(`Successfully imported ${count} service(s)`)
+    const count = await importDealers(payload)
+    toast.success(`Successfully imported ${count} dealers`)
     isOpen.value = false
     csvPreview.value = []
     fileName.value = ''
   } catch (error) {
-    toast.error('Failed to import services')
+    toast.error('Failed to import dealers')
   }
 }
 
@@ -101,10 +132,10 @@ function cancel() {
       <DialogHeader>
         <DialogTitle class="flex items-center gap-2">
           <Upload class="size-5" />
-          Import Services
+          Import Dealers
         </DialogTitle>
         <DialogDescription>
-          Upload a CSV file to bulk-import services. Expected columns: Service, Description, Price, Tax
+          Upload a CSV file to bulk-import dealers. Expected columns: Dealer Name, Address, Primary Contact, Phone, Email, Status.
         </DialogDescription>
       </DialogHeader>
 
@@ -138,7 +169,7 @@ function cancel() {
                   <th
                     v-for="(h, i) in csvPreview[0]"
                     :key="i"
-                    class="p-2 text-left font-medium"
+                    class="p-2 text-left font-medium whitespace-nowrap"
                   >
                     {{ h }}
                   </th>
@@ -150,7 +181,7 @@ function cancel() {
                   :key="ri"
                   class="border-b"
                 >
-                  <td v-for="(cell, ci) in row" :key="ci" class="p-2">
+                  <td v-for="(cell, ci) in row" :key="ci" class="p-2 whitespace-nowrap max-w-[150px] truncate" :title="cell">
                     {{ cell }}
                   </td>
                 </tr>

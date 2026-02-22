@@ -5,17 +5,25 @@ definePageMeta({
 </script>
 
 <template>
-  <LayoutAuth reverse>
-    <div class="grid mx-auto max-w-sm gap-6">
-      <div class="grid gap-2 text-center">
-        <h1 class="text-2xl font-semibold tracking-tight">
-          Welcome back
-        </h1>
-        <p class="text-balance text-sm text-muted-foreground">
-          Login with your Apple or Google account
-        </p>
+  <div class="flex flex-col items-center justify-center gap-6 bg-muted p-6 min-h-svh md:p-10">
+    <div class="max-w-sm w-full flex flex-col gap-6">
+      <NuxtLink to="/" class="flex flex-col items-center self-center gap-2 font-medium">
+        <img src="/logo.png" alt="Turbo Clean Management" class="h-16 w-auto" />
+      </NuxtLink>
+      <div class="flex flex-col gap-6">
+        <Card>
+          <CardHeader class="text-center">
+            <CardTitle class="text-xl">
+              Welcome back
+            </CardTitle>
+
+          </CardHeader>
+          <CardContent>
+            <AuthSignIn />
+          </CardContent>
+        </Card>
+
       </div>
-      <AuthSignIn />
     </div>
-  </LayoutAuth>
+  </div>
 </template>
