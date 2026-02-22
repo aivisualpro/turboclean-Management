@@ -53,17 +53,26 @@ export default defineEventHandler(async (event) => {
 
     // ── Monthly Revenue Trend ─────────────────────
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-    const monthlyMap = new Map<string, { revenue: number; orders: number; invoiced: number; uninvoiced: number }>()
+    const monthlyMap = new Map<string, { revenue: number; orders: number; invoiced: number; uninvoiced: number; dealerRevenue: Map<string, { name: string; revenue: number }> }>()
 
     for (const wo of allWorkOrders) {
       const d = wo.date ? new Date(wo.date) : null
       if (!d || isNaN(d.getTime())) continue
       const key = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`
-      const entry = monthlyMap.get(key) || { revenue: 0, orders: 0, invoiced: 0, uninvoiced: 0 }
+      const entry = monthlyMap.get(key) || { revenue: 0, orders: 0, invoiced: 0, uninvoiced: 0, dealerRevenue: new Map() }
       entry.revenue += Number(wo.total) || 0
       entry.orders += 1
       if (wo.isInvoiced) entry.invoiced += 1
       else entry.uninvoiced += 1
+
+      // Track per-month dealer revenue
+      const dId = wo.dealer?.toString() || 'unknown'
+      const dealer = dealerMap.get(dId)
+      const dealerName = dealer?.dealer || dId
+      const dEntry = entry.dealerRevenue.get(dId) || { name: dealerName, revenue: 0 }
+      dEntry.revenue += Number(wo.total) || 0
+      entry.dealerRevenue.set(dId, dEntry)
+
       monthlyMap.set(key, entry)
     }
 
@@ -72,6 +81,10 @@ export default defineEventHandler(async (event) => {
     const monthlyTrend = sortedMonthKeys.map(key => {
       const [yr, mo] = key.split('-')
       const entry = monthlyMap.get(key)!
+      const topDealersForMonth = [...entry.dealerRevenue.values()]
+        .sort((a, b) => b.revenue - a.revenue)
+        .slice(0, 5)
+        .map(d => ({ name: d.name, revenue: Math.round(d.revenue * 100) / 100 }))
       return {
         month: `${monthNames[Number(mo)]} ${yr}`,
         shortMonth: monthNames[Number(mo)]!,
@@ -80,6 +93,7 @@ export default defineEventHandler(async (event) => {
         orders: entry.orders,
         invoiced: entry.invoiced,
         uninvoiced: entry.uninvoiced,
+        topDealers: topDealersForMonth,
       }
     })
 

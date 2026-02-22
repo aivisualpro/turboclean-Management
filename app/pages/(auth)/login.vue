@@ -567,8 +567,6 @@ onMounted(() => {
         <!-- Wiper text animation -->
         <canvas ref="wiperRef" class="wiper-canvas" />
 
-        <p class="welcome-sub">Sign in to your Turbo Clean dashboard</p>
-
         <!-- Login Card -->
         <div class="login-card">
           <AuthSignIn />
@@ -782,7 +780,11 @@ onMounted(() => {
 
 .login-footer {
   font-size: 0.75rem;
-  color: rgba(150, 190, 230, 0.2);
+  background: linear-gradient(135deg, #ffd700, #f5a623, #e8960c);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  opacity: 0.6;
   margin: 0;
 }
 

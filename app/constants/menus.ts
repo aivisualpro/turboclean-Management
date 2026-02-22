@@ -39,11 +39,6 @@ export const navMenu: NavMenu[] = [
         icon: 'i-lucide-kanban',
         link: '/tasks',
       },
-      {
-        title: 'Sales Reports',
-        icon: 'i-lucide-trending-up',
-        link: '/reports/sales',
-      },
     ],
   },
 ]

@@ -31,15 +31,11 @@ const teams: {
   },
 ]
 
-const user: {
-  name: string
-  email: string
-  avatar: string
-} = {
-  name: 'Admin User',
-  email: 'admin@company.com',
-  avatar: '/avatars/adeel.png',
-}
+const { user: authUser } = useAuth()
+const user = computed(() => ({
+  name: authUser.value?.name || 'User',
+  role: authUser.value?.role || 'User',
+}))
 
 const { sidebar } = useAppSettings()
 </script>

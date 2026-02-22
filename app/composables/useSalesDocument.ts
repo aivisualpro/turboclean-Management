@@ -182,8 +182,8 @@ export function generatePDF(doc: SalesDocument, docType: 'Work Order' | 'Invoice
       <!-- Header -->
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:40px">
         <div>
-          <h1 style="margin:0;font-size:28px;font-weight:800;color:#111827;letter-spacing:-0.5px">FullStack CRM</h1>
-          <p style="margin:4px 0 0;color:#6b7280;font-size:13px">123 Business Avenue, Suite 400<br>San Francisco, CA 94102<br>contact@fullstackcrm.io</p>
+          <h1 style="margin:0;font-size:28px;font-weight:800;color:#111827;letter-spacing:-0.5px">Turbo Clean</h1>
+          <p style="margin:4px 0 0;color:#6b7280;font-size:13px">Car Detailing & Cleaning Services<br>info@turboclean.com</p>
         </div>
         <div style="text-align:right">
           <div style="display:inline-block;padding:6px 16px;border-radius:20px;background:${statusColor}15;color:${statusColor};font-size:12px;font-weight:600;border:1px solid ${statusColor}30">${doc.status}</div>
@@ -239,7 +239,7 @@ export function generatePDF(doc: SalesDocument, docType: 'Work Order' | 'Invoice
 
       <!-- Footer -->
       <div style="text-align:center;padding-top:24px;border-top:1px solid #e5e7eb">
-        <p style="margin:0;color:#9ca3af;font-size:11px">Thank you for your business! • FullStack CRM & ERP Platform</p>
+        <p style="margin:0;color:#9ca3af;font-size:11px">Thank you for your business! • Turbo Clean – Car Detailing & Cleaning Services</p>
       </div>
     </div>
   </body></html>`
