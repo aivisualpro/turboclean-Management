@@ -45,8 +45,6 @@ export const DealersMapper = {
       address: mongoDoc.address || '',
       notes: mongoDoc.notes || '',
       status: mongoDoc.status || 'Pending',
-      createdAt: mongoDoc.createdAt ? new Date(mongoDoc.createdAt).toISOString() : new Date().toISOString(),
-      updatedAt: mongoDoc.updatedAt ? new Date(mongoDoc.updatedAt).toISOString() : new Date().toISOString(),
     }
   },
   toMongo(appSheetRow: any): Record<string, any> {
@@ -70,11 +68,9 @@ export const DealerServicesMapper = {
       _id: mongoDoc._id?.toString() || mongoDoc.id || '',
       dealer: mongoDoc.dealer?.toString() || '',
       service: mongoDoc.service?.toString() || '',
-      amount: Number(mongoDoc.amount) || 0,
-      tax: Number(mongoDoc.tax) || 0,
-      total: Number(mongoDoc.total) || 0,
-      createdAt: mongoDoc.createdAt ? new Date(mongoDoc.createdAt).toISOString() : new Date().toISOString(),
-      updatedAt: mongoDoc.updatedAt ? new Date(mongoDoc.updatedAt).toISOString() : new Date().toISOString(),
+      Amount: Number(mongoDoc.amount) || 0,
+      Tax: Number(mongoDoc.tax) || 0,
+      Total: Number(mongoDoc.total) || 0,
     }
   },
   toMongo(appSheetRow: any): Record<string, any> {
@@ -99,8 +95,6 @@ export const ServicesMapper = {
       description: mongoDoc.description || '',
       price: Number(mongoDoc.price) || 0,
       tax: Number(mongoDoc.tax) || 0,
-      createdAt: mongoDoc.createdAt ? new Date(mongoDoc.createdAt).toISOString() : new Date().toISOString(),
-      updatedAt: mongoDoc.updatedAt ? new Date(mongoDoc.updatedAt).toISOString() : new Date().toISOString(),
     }
   },
   toMongo(appSheetRow: any): Record<string, any> {
@@ -130,8 +124,6 @@ export const WorkOrdersMapper = {
       total: Number(mongoDoc.total) || 0,
       notes: mongoDoc.notes || '',
       isInvoiced: mongoDoc.isInvoiced === true ? 'Y' : 'N',
-      createdAt: mongoDoc.createdAt ? new Date(mongoDoc.createdAt).toISOString() : new Date().toISOString(),
-      updatedAt: mongoDoc.updatedAt ? new Date(mongoDoc.updatedAt).toISOString() : new Date().toISOString(),
     }
   },
   toMongo(appSheetRow: any): Record<string, any> {

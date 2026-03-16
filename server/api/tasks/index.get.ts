@@ -16,10 +16,11 @@ export default defineEventHandler(async () => {
   for (const task of tasks) {
     const statusCol = columnsMap[task.status as string]
     if (statusCol) {
-      // Map _id to id
+      // Map _id to id and remove _id from response
+      const { _id, ...rest } = task
       const mappedTask = {
-        ...task,
-        id: task._id.toString()
+        ...rest,
+        id: _id.toString()
       }
       statusCol.tasks.push(mappedTask)
     }

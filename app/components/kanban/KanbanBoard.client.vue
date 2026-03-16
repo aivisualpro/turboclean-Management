@@ -97,6 +97,16 @@ function editTask() {
   showModalTask.value.open = false
 }
 
+function normalizeToAbsoluteISO(d: unknown): string {
+  if (!d) return new Date().toISOString()
+  if (typeof d === 'object' && d instanceof Date) return d.toISOString()
+  const s = String(d)
+  // Already absolute (has 'T' and timezone info)
+  if (s.includes('T')) return s.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(s) ? s : `${s}Z`
+  // Date-only string like "2026-02-28" → make it absolute
+  return `${s}T00:00:00Z`
+}
+
 function showEditTask(colId: string, taskId: string) {
   const task = board.value.columns.find(c => c.id === colId)?.tasks.find(t => t.id === taskId)
   if (!task)
@@ -104,11 +114,14 @@ function showEditTask(colId: string, taskId: string) {
   newTask.title = task.title
   newTask.description = task.description
   newTask.priority = task.priority
-  if (typeof task.dueDate === 'object') {
-    task.dueDate = task.dueDate.toISOString()
+  try {
+    const isoStr = normalizeToAbsoluteISO(task.dueDate)
+    dueDate.value = parseAbsoluteToLocal(isoStr)
+    dueTime.value = `${dueDate.value.hour < 10 ? `0${dueDate.value?.hour}` : dueDate.value?.hour}:${dueDate.value.minute < 10 ? `0${dueDate.value?.minute}` : dueDate.value?.minute}`
+  } catch {
+    dueDate.value = undefined
+    dueTime.value = '00:00'
   }
-  dueDate.value = parseAbsoluteToLocal(task.dueDate as string)
-  dueTime.value = `${dueDate.value.hour < 10 ? `0${dueDate.value?.hour}` : dueDate.value?.hour}:${dueDate.value.minute < 10 ? `0${dueDate.value?.minute}` : dueDate.value?.minute}`
   newTask.status = task.status
   newTask.labels = task.labels
   showModalTask.value = { type: 'edit', open: true, columnId: colId, taskId }
@@ -398,7 +411,9 @@ function onScrollEnd(columnId: string) {
                   </div>
                 </div>
               </template>
-            <div class="h-4 w-full flex-shrink-0" :data-column="col.id" v-intersect="onScrollEnd"></div>
+              <template #footer>
+                <div class="h-4 w-full flex-shrink-0" :data-column="col.id" v-intersect="onScrollEnd"></div>
+              </template>
           </Draggable>
         </CardContent>
       </Card>

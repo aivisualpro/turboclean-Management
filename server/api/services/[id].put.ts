@@ -27,9 +27,12 @@ export default defineEventHandler(async (event) => {
       { $set: updateDoc }
     )
 
-    // ── Sync to AppSheet ──
-    const appSheetRow: any = { _id: id, ...updateDoc }
-    if (appSheetRow.updatedAt) appSheetRow.updatedAt = appSheetRow.updatedAt.toISOString()
+    // ── Sync to AppSheet (only fields that exist in AppSheet) ──
+    const appSheetRow: Record<string, any> = { _id: id }
+    if (updateDoc.service !== undefined) appSheetRow.service = updateDoc.service
+    if (updateDoc.description !== undefined) appSheetRow.description = updateDoc.description
+    if (updateDoc.price !== undefined) appSheetRow.price = updateDoc.price
+    if (updateDoc.tax !== undefined) appSheetRow.tax = updateDoc.tax
     appSheetEdit('Services', [appSheetRow]).catch(err =>
       console.error('[Sync] Failed to edit service in AppSheet:', err)
     )

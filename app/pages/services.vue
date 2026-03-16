@@ -91,10 +91,10 @@ function handleSave() {
   if (editingId.value) {
     // Optimistic Edit
     const idx = services.value.findIndex(s => s.id === editingId.value)
-    const oldData = idx >= 0 ? { ...services.value[idx] } : null
+    const oldData: Service | null = idx >= 0 ? { ...services.value[idx]! } : null
 
     if (idx >= 0) {
-      services.value[idx] = { ...services.value[idx], ...snapshot }
+      Object.assign(services.value[idx]!, snapshot)
     }
     showForm.value = false
     toast.success('Service updated successfully')
@@ -125,7 +125,7 @@ function handleSave() {
     }).then((res) => {
       const tempIdx = services.value.findIndex(s => s.id === tempId)
       if (tempIdx >= 0) {
-        services.value[tempIdx] = { ...services.value[tempIdx], id: res.id }
+        services.value[tempIdx] = { ...services.value[tempIdx]!, id: res.id }
       }
     }).catch(() => {
       services.value = services.value.filter(s => s.id !== tempId)
