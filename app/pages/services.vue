@@ -36,13 +36,11 @@ const editingId = ref<string | null>(null)
 const formData = reactive({
   service: '',
   description: '',
-  price: 0,
-  tax: 0,
 })
 
 function openAddForm() {
   editingId.value = null
-  Object.assign(formData, { service: '', description: '', price: 0, tax: 0 })
+  Object.assign(formData, { service: '', description: '' })
   showForm.value = true
 }
 
@@ -51,8 +49,6 @@ function openEditForm(s: any) {
   Object.assign(formData, {
     service: s.service || '',
     description: s.description || '',
-    price: s.price || 0,
-    tax: s.tax || 0,
   })
   showForm.value = true
 }
@@ -141,7 +137,7 @@ function exportToCsv() {
     toast.error('No services to export')
     return
   }
-  const headers = ['Id', 'Service', 'Description', 'Price', 'Tax']
+  const headers = ['Id', 'Service', 'Description']
   const csvContent = [
     headers.join(','),
     ...data.map(s => {
@@ -149,8 +145,6 @@ function exportToCsv() {
         `"${s.id || ''}"`,
         `"${(s.service || '').replace(/"/g, '""')}"`,
         `"${(s.description || '').replace(/"/g, '""')}"`,
-        `"${s.price}"`,
-        `"${s.tax}"`
       ].join(',')
     })
   ].join('\n')
@@ -198,10 +192,8 @@ function exportToCsv() {
         <table class="w-full text-sm caption-bottom border-collapse">
           <TableHeader class="sticky top-0 z-10 bg-muted/95 backdrop-blur shadow-sm">
             <TableRow>
-              <TableHead class="w-1/4">Service</TableHead>
+              <TableHead class="w-1/3">Service</TableHead>
               <TableHead class="w-1/2">Description</TableHead>
-              <TableHead class="text-right">Price</TableHead>
-              <TableHead class="text-right">Tax</TableHead>
               <TableHead class="text-right w-[100px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -209,8 +201,6 @@ function exportToCsv() {
             <TableRow v-for="s in filteredList" :key="s.id" class="hover:bg-muted/50">
               <TableCell class="font-medium text-xs">{{ s.service }}</TableCell>
               <TableCell class="text-xs text-muted-foreground">{{ s.description }}</TableCell>
-              <TableCell class="text-right text-xs tabular-nums">${{ Number(s.price).toFixed(2) }}</TableCell>
-              <TableCell class="text-right text-xs tabular-nums text-muted-foreground">{{ Number(s.tax).toFixed(2) }}%</TableCell>
               <TableCell class="text-right">
                 <div class="flex items-center justify-end gap-1">
                   <Button variant="ghost" size="icon" class="size-7" title="Edit" @click="openEditForm(s)">
@@ -223,12 +213,12 @@ function exportToCsv() {
               </TableCell>
             </TableRow>
             <TableRow v-if="isLoading">
-              <TableCell :colspan="5" class="text-center py-10">
+              <TableCell :colspan="3" class="text-center py-10">
                 <Loader2 class="size-6 animate-spin text-muted-foreground mx-auto" />
               </TableCell>
             </TableRow>
             <TableRow v-if="!isLoading && filteredList.length === 0">
-              <TableCell :colspan="5" class="text-center py-10 text-muted-foreground">
+              <TableCell :colspan="3" class="text-center py-10 text-muted-foreground">
                 No services found.
               </TableCell>
             </TableRow>
@@ -254,17 +244,6 @@ function exportToCsv() {
           <div class="space-y-1.5">
             <Label>Description</Label>
             <Input v-model="formData.description" placeholder="Full interior detailing..." />
-          </div>
-          
-          <div class="grid grid-cols-2 gap-4">
-            <div class="space-y-1.5">
-              <Label>Price ($)</Label>
-              <Input v-model.number="formData.price" type="number" step="0.01" min="0" placeholder="0.00" />
-            </div>
-            <div class="space-y-1.5">
-              <Label>Tax (%)</Label>
-              <Input v-model.number="formData.tax" type="number" step="0.01" min="0" placeholder="0.00" />
-            </div>
           </div>
         </div>
 

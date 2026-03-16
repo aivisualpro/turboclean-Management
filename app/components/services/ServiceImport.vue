@@ -60,8 +60,6 @@ async function doImport() {
   
   const serviceIdx = header.findIndex(h => h.includes('service') || h.includes('name'))
   const descriptionIdx = header.findIndex(h => h.includes('description') || h.includes('desc'))
-  const priceIdx = header.findIndex(h => h.includes('price') || h.includes('cost'))
-  const taxIdx = header.findIndex(h => h.includes('tax'))
 
   if (serviceIdx === -1) {
     toast.error('CSV must have a "Service" column')
@@ -72,8 +70,6 @@ async function doImport() {
     return {
       service: row[serviceIdx] || 'Unknown Service',
       description: descriptionIdx !== -1 ? (row[descriptionIdx] || '') : '',
-      price: priceIdx !== -1 ? (parseFloat(row[priceIdx] || '') || 0) : 0,
-      tax: taxIdx !== -1 ? (parseFloat(row[taxIdx] || '') || 0) : 0,
     }
   }).filter(s => s.service && s.service !== 'Unknown Service')
 
@@ -104,7 +100,7 @@ function cancel() {
           Import Services
         </DialogTitle>
         <DialogDescription>
-          Upload a CSV file to bulk-import services. Expected columns: Service, Description, Price, Tax
+          Upload a CSV file to bulk-import services. Expected columns: Service, Description
         </DialogDescription>
       </DialogHeader>
 

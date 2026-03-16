@@ -10,8 +10,6 @@ export default defineEventHandler(async (event) => {
       id: doc._id.toString(),
       service: doc.service || '',
       description: doc.description || '',
-      price: doc.price || 0,
-      tax: doc.tax || 0,
       createdAt: doc.createdAt?.toISOString() || doc._id.getTimestamp().toISOString(),
       updatedAt: doc.updatedAt?.toISOString() || doc._id.getTimestamp().toISOString()
     }))

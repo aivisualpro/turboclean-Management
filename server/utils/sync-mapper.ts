@@ -12,6 +12,7 @@ export const AppUsersMapper = {
       email: mongoDoc.email || '',
       phone: mongoDoc.phone || '',
       address: mongoDoc.address || '',
+      registerDealers: Array.isArray(mongoDoc.registerDealers) ? mongoDoc.registerDealers.join(' , ') : '',
       role: mongoDoc.role || 'User',
       status: mongoDoc.status || 'Active',
       password: mongoDoc.password || '',
@@ -20,11 +21,16 @@ export const AppUsersMapper = {
     }
   },
   toMongo(appSheetRow: any): Record<string, any> {
+    // AppSheet stores registerDealers as comma-separated string
+    const registerDealers = appSheetRow.registerDealers
+      ? String(appSheetRow.registerDealers).split(/\s*,\s*/).filter(Boolean)
+      : []
     return {
       name: appSheetRow.name || '',
       email: appSheetRow.email || '',
       phone: appSheetRow.phone || '',
       address: appSheetRow.address || '',
+      registerDealers,
       role: appSheetRow.role || 'User',
       status: appSheetRow.status || 'Active',
       password: appSheetRow.password || '',
@@ -93,16 +99,12 @@ export const ServicesMapper = {
       _id: mongoDoc._id?.toString() || '',
       service: mongoDoc.service || '',
       description: mongoDoc.description || '',
-      price: Number(mongoDoc.price) || 0,
-      tax: Number(mongoDoc.tax) || 0,
     }
   },
   toMongo(appSheetRow: any): Record<string, any> {
     return {
       service: appSheetRow.service || '',
       description: appSheetRow.description || '',
-      price: Number(appSheetRow.price) || 0,
-      tax: Number(appSheetRow.tax) || 0,
       createdAt: appSheetRow.createdAt ? new Date(appSheetRow.createdAt) : new Date(),
       updatedAt: new Date(),
     }

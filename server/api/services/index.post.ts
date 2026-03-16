@@ -10,8 +10,6 @@ export default defineEventHandler(async (event) => {
     const doc = {
       service: body.service || '',
       description: body.description || '',
-      price: Number(body.price) || 0,
-      tax: Number(body.tax) || 0,
       createdAt: new Date(),
       updatedAt: new Date()
     }

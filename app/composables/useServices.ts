@@ -3,8 +3,6 @@ export interface Service {
   id: string
   service: string
   description: string
-  price: number
-  tax: number
   createdAt: string
   updatedAt: string
 }

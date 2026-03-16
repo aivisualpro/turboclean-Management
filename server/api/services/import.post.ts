@@ -17,8 +17,6 @@ export default defineEventHandler(async (event) => {
     const servicesToInsert = services.map((s: any) => ({
       service: s.service || 'Unknown Service',
       description: s.description || '',
-      price: Number(s.price) || 0,
-      tax: Number(s.tax) || 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     }))

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { Plus, Search, Pencil, Trash2 } from 'lucide-vue-next'
+import { Plus, Search, Pencil, Trash2, Check, ChevronsUpDown, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
+import { useDealers } from '~/composables/useDealers'
 
 const { setHeader } = usePageHeader()
 setHeader({ title: 'App Users', icon: 'i-lucide-users' })
@@ -10,6 +11,31 @@ const userList = computed(() => users.value || [])
 
 // Real-time: auto-refresh when AppSheet changes users
 useLiveSync('AppUsers', () => refresh())
+
+// Fetch dealers for multi-select
+const { dealers, fetchDealers } = useDealers()
+if (import.meta.client && dealers.value.length === 0) fetchDealers()
+const dealerSearch = ref('')
+const dealerPopoverOpen = ref(false)
+
+const filteredDealers = computed(() => {
+  const q = dealerSearch.value.toLowerCase()
+  if (!q) return dealers.value
+  return dealers.value.filter(d => d.dealerName.toLowerCase().includes(q))
+})
+
+function toggleDealer(dealerId: string) {
+  const idx = formData.registerDealers.indexOf(dealerId)
+  if (idx >= 0) {
+    formData.registerDealers.splice(idx, 1)
+  } else {
+    formData.registerDealers.push(dealerId)
+  }
+}
+
+function getDealerName(id: string): string {
+  return dealers.value.find(d => d.id === id)?.dealerName || id
+}
 
 const searchValue = ref('')
 const displayList = computed(() => {
@@ -40,6 +66,7 @@ const formData = reactive({
   email: '',
   phone: '',
   address: '',
+  registerDealers: [] as string[],
   role: 'User',
   status: 'Active',
   password: '',
@@ -52,10 +79,12 @@ function openAddForm() {
     email: '',
     phone: '',
     address: '',
+    registerDealers: [],
     role: 'User',
     status: 'Active',
     password: '',
   })
+  dealerSearch.value = ''
   showForm.value = true
 }
 
@@ -66,10 +95,12 @@ function openEditForm(user: any) {
     email: user.email || '',
     phone: user.phone || '',
     address: user.address || '',
+    registerDealers: Array.isArray(user.registerDealers) ? [...user.registerDealers] : [],
     role: user.role || 'User',
     status: user.status || 'Active',
     password: user.password || '',
   })
+  dealerSearch.value = ''
   showForm.value = true
 }
 
@@ -196,6 +227,7 @@ function handleSave() {
                 <th class="p-4 text-left font-medium text-muted-foreground">Phone</th>
                 <th class="p-4 text-left font-medium text-muted-foreground">Email</th>
                 <th class="p-4 text-left font-medium text-muted-foreground">Address</th>
+                <th class="p-4 text-left font-medium text-muted-foreground">Registered Dealers</th>
                 <th class="p-4 text-left font-medium text-muted-foreground">App Role</th>
                 <th class="p-4 text-left font-medium text-muted-foreground">Status</th>
                 <th class="p-4 text-right font-medium text-muted-foreground">Actions</th>
@@ -221,6 +253,14 @@ function handleSave() {
                   {{ u.address || '—' }}
                 </td>
                 <td class="p-4">
+                  <div v-if="u.registerDealers?.length" class="flex flex-wrap gap-1 max-w-[200px]">
+                    <Badge v-for="dId in u.registerDealers" :key="dId" variant="outline" class="text-[10px] px-1.5 py-0 bg-blue-500/10 text-blue-600 border-blue-500/20 truncate max-w-[150px]">
+                      {{ getDealerName(dId) }}
+                    </Badge>
+                  </div>
+                  <span v-else class="text-muted-foreground">—</span>
+                </td>
+                <td class="p-4">
                   <Badge variant="outline" class="text-[10px] px-1.5 py-0" :class="u.role === 'Admin' ? 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20' : 'bg-gray-500/10 text-gray-600 border-gray-500/20'">
                     {{ u.role }}
                   </Badge>
@@ -242,12 +282,12 @@ function handleSave() {
                 </td>
               </tr>
               <tr v-if="pending">
-                <td colspan="7" class="p-8 text-center text-muted-foreground">
+                <td colspan="8" class="p-8 text-center text-muted-foreground">
                   Loading users...
                 </td>
               </tr>
               <tr v-else-if="displayList.length === 0">
-                <td colspan="7" class="p-8 text-center text-muted-foreground">
+                <td colspan="8" class="p-8 text-center text-muted-foreground">
                   No users found
                 </td>
               </tr>
@@ -299,6 +339,50 @@ function handleSave() {
               </Button>
             </div>
             <p class="text-[10px] text-muted-foreground" v-if="editingId">Leave blank to keep current password</p>
+          </div>
+
+          <!-- Register Dealers Multi-Select -->
+          <div class="space-y-1.5">
+            <Label>Register Dealers</Label>
+            <Popover v-model:open="dealerPopoverOpen">
+              <PopoverTrigger as-child>
+                <Button variant="outline" role="combobox" :aria-expanded="dealerPopoverOpen" class="w-full justify-between h-auto min-h-9 font-normal">
+                  <div v-if="formData.registerDealers.length" class="flex flex-wrap gap-1 py-0.5">
+                    <Badge v-for="dId in formData.registerDealers" :key="dId" variant="secondary" class="text-[11px] px-1.5 py-0 gap-1 shrink-0">
+                      {{ getDealerName(dId) }}
+                      <X class="size-3 cursor-pointer opacity-60 hover:opacity-100" @click.stop="toggleDealer(dId)" />
+                    </Badge>
+                  </div>
+                  <span v-else class="text-muted-foreground">Select dealers...</span>
+                  <ChevronsUpDown class="ml-2 size-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent class="w-[--reka-popover-trigger-width] p-0" align="start">
+                <Command>
+                  <CommandInput v-model="dealerSearch" placeholder="Search dealers..." />
+                  <CommandEmpty>No dealers found.</CommandEmpty>
+                  <CommandList class="max-h-48">
+                    <CommandGroup>
+                      <CommandItem
+                        v-for="d in filteredDealers"
+                        :key="d.id"
+                        :value="d.dealerName"
+                        @select.prevent="toggleDealer(d.id)"
+                        class="cursor-pointer"
+                      >
+                        <div class="flex items-center gap-2 w-full">
+                          <div class="size-4 shrink-0 rounded border flex items-center justify-center" :class="formData.registerDealers.includes(d.id) ? 'bg-primary border-primary' : 'border-muted-foreground/30'">
+                            <Check v-if="formData.registerDealers.includes(d.id)" class="size-3 text-primary-foreground" />
+                          </div>
+                          <span class="truncate">{{ d.dealerName }}</span>
+                        </div>
+                      </CommandItem>
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            <p class="text-[10px] text-muted-foreground">{{ formData.registerDealers.length }} dealer{{ formData.registerDealers.length !== 1 ? 's' : '' }} selected</p>
           </div>
           
           <div class="grid grid-cols-2 gap-4">

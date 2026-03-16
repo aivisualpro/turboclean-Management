@@ -16,6 +16,7 @@ export default defineEventHandler(async (event) => {
       email: body.email,
       phone: body.phone,
       address: body.address,
+      registerDealers: Array.isArray(body.registerDealers) ? body.registerDealers : undefined,
       role: body.role,
       status: body.status,
       password: body.password,
@@ -33,6 +34,7 @@ export default defineEventHandler(async (event) => {
     // ── Sync to AppSheet ──
     const appSheetRow: any = { _id: id, ...updateDoc }
     if (appSheetRow.updatedAt) appSheetRow.updatedAt = appSheetRow.updatedAt.toISOString()
+    if (Array.isArray(appSheetRow.registerDealers)) appSheetRow.registerDealers = appSheetRow.registerDealers.join(' , ')
     appSheetEdit('AppUsers', [appSheetRow]).catch(err =>
       console.error('[Sync] Failed to edit user in AppSheet:', err)
     )

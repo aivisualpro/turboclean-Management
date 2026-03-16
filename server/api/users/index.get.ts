@@ -10,6 +10,7 @@ export default defineEventHandler(async (event) => {
       email: u.email || '',
       phone: u.phone || '',
       address: u.address || '',
+      registerDealers: Array.isArray(u.registerDealers) ? u.registerDealers : [],
       role: u.role || 'User',
       status: u.status || 'Active',
       password: u.password || '', // Usually shouldn't send back to client, but doing it for simplicity based on the prompt
