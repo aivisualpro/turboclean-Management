@@ -37,6 +37,10 @@ export default defineEventHandler(async (event) => {
     const body = await readBody(event)
     const query = getQuery(event)
 
+    // Debug: log raw webhook payload
+    console.log('[Webhook] Raw payload:', JSON.stringify(body, null, 2))
+    console.log('[Webhook] Query params:', JSON.stringify(query))
+
     // ── Normalize: support both formats ───────────────────
     // Table: from query param, body.table, or body root
     const table = (query.table as string) || body?.table || ''
