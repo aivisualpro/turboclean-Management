@@ -30,6 +30,7 @@ import { connectToDatabase } from '../../utils/mongodb'
 import { ObjectId } from 'mongodb'
 import { REVERSE_TABLE_MAP } from '../../utils/appsheet'
 import { MAPPER_LOOKUP } from '../../utils/sync-mapper'
+import { emitSyncEvent } from '../../utils/sync-events'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -194,6 +195,13 @@ export default defineEventHandler(async (event) => {
 
         default:
           results.push({ success: false, error: `Unknown action: ${action}` })
+      }
+    }
+
+    // ── Emit real-time events for all successful operations ──
+    for (const r of results) {
+      if (r.success) {
+        emitSyncEvent({ table, action: r.action || action.toLowerCase(), id: r.id || '' })
       }
     }
 

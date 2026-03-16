@@ -9,7 +9,10 @@ import { useServices } from '~/composables/useServices'
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Services', icon: 'i-lucide-briefcase' })
 
-const { services, isLoading } = useServices()
+const { services, isLoading, fetchServices } = useServices()
+
+// Real-time: auto-refresh when AppSheet changes services
+useLiveSync('Services', () => fetchServices())
 
 const searchValue = ref('')
 const debouncedSearch = refDebounced(searchValue, 250)

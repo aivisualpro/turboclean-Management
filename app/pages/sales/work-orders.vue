@@ -70,6 +70,9 @@ onMounted(() => {
   fetchWorkOrders()
 })
 
+// Real-time: auto-refresh when AppSheet changes work orders
+useLiveSync('WorkOrders', () => fetchWorkOrders(true))
+
 // Search delay
 let searchTimeout: any
 watch(search, () => {

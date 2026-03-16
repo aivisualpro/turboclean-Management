@@ -8,6 +8,9 @@ setHeader({ title: 'App Users', icon: 'i-lucide-users' })
 const { data: users, pending, refresh } = await useFetch<any[]>('/api/users')
 const userList = computed(() => users.value || [])
 
+// Real-time: auto-refresh when AppSheet changes users
+useLiveSync('AppUsers', () => refresh())
+
 const searchValue = ref('')
 const displayList = computed(() => {
   if (!searchValue.value) return userList.value

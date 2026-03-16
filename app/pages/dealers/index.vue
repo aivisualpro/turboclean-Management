@@ -8,7 +8,10 @@ import { cn } from '~/lib/utils'
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Dealers', icon: 'i-lucide-building-2' })
 
-const { dealers, authorised, pending, rejected, updateDealer, deleteDealer, deleteAllDealerServices } = useDealers()
+const { dealers, authorised, pending, rejected, updateDealer, deleteDealer, deleteAllDealerServices, fetchDealers } = useDealers()
+
+// Real-time: auto-refresh when AppSheet changes dealers or their services
+useLiveSync(['Dealers', 'DealerServices'], () => fetchDealers())
 
 const selectedDealer = ref<string | undefined>()
 const searchValue = ref('')
