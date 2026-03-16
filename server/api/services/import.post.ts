@@ -1,4 +1,6 @@
 import { connectToDatabase } from '../../utils/mongodb'
+import { appSheetAdd } from '../../utils/appsheet'
+import { ServicesMapper } from '../../utils/sync-mapper'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -22,7 +24,16 @@ export default defineEventHandler(async (event) => {
     }))
 
     if (servicesToInsert.length > 0) {
-      await collection.insertMany(servicesToInsert)
+      const result = await collection.insertMany(servicesToInsert)
+      
+      // ── Sync to AppSheet ──
+      const insertedIds = Object.values(result.insertedIds)
+      const appSheetRows = servicesToInsert.map((doc: any, i: number) =>
+        ServicesMapper.toAppSheet({ ...doc, _id: insertedIds[i] })
+      )
+      appSheetAdd('Services', appSheetRows).catch(err =>
+        console.error('[Sync] Failed to add services to AppSheet:', err)
+      )
     }
 
     return {

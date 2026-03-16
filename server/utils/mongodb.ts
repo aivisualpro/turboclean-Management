@@ -1,8 +1,8 @@
 import process from 'node:process'
 import { MongoClient, ServerApiVersion } from 'mongodb'
 
-// Setup global caching for MongoDB client in development
-// to prevent connections from being exhausted
+// Setup global caching for MongoDB client
+// Prevents connection exhaustion in both dev (HMR) and production (serverless warm starts)
 declare global {
   // eslint-disable-next-line vars-on-top
   var _mongoClientPromise: Promise<MongoClient> | undefined
@@ -16,28 +16,27 @@ const options = {
     strict: true,
     deprecationErrors: true,
   },
+  // Serverless-friendly timeouts
+  serverSelectionTimeoutMS: 10000,
+  connectTimeoutMS: 10000,
 }
 
-let client: MongoClient
-let clientPromise: Promise<MongoClient>
-
-if (process.env.NODE_ENV === 'development') {
-  // In development mode, use a global variable so that the value
-  // is preserved across module reloads caused by HMR (Hot Module Replacement).
+function getClientPromise(): Promise<MongoClient> {
+  // Use global cache in ALL environments to reuse connections
+  // across Vercel warm invocations and dev HMR reloads
   if (!globalThis._mongoClientPromise) {
-    client = new MongoClient(uri, options)
-    globalThis._mongoClientPromise = client.connect()
+    const client = new MongoClient(uri, options)
+    globalThis._mongoClientPromise = client.connect().catch((err) => {
+      // Reset the cache so the next request retries
+      globalThis._mongoClientPromise = undefined
+      throw err
+    })
   }
-  clientPromise = globalThis._mongoClientPromise
-}
-else {
-  // In production mode, it's best to not use a global variable.
-  client = new MongoClient(uri, options)
-  clientPromise = client.connect()
+  return globalThis._mongoClientPromise
 }
 
 export async function connectToDatabase() {
-  const resolvedClient = await clientPromise
+  const resolvedClient = await getClientPromise()
   const db = resolvedClient.db('turboClean')
   return { db, client: resolvedClient }
 }

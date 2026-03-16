@@ -1,4 +1,6 @@
 import { connectToDatabase } from '../../utils/mongodb'
+import { appSheetAdd } from '../../utils/appsheet'
+import { DealersMapper } from '../../utils/sync-mapper'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -17,14 +19,23 @@ export default defineEventHandler(async (event) => {
       phone: d.contacts?.[0]?.phones?.[0]?.number || '',
       email: d.contacts?.[0]?.emails?.[0] || '',
       address: d.address || '',
-      notes: d.notes || '', // Map notes if exists, otherwise empty
+      notes: d.notes || '',
       status: d.status || 'Pending',
       createdAt: new Date(),
       updatedAt: new Date(),
     }))
 
     if (dealersToInsert.length > 0) {
-      await collection.insertMany(dealersToInsert)
+      const result = await collection.insertMany(dealersToInsert)
+      
+      // ── Sync to AppSheet ──
+      const insertedIds = Object.values(result.insertedIds)
+      const appSheetRows = dealersToInsert.map((doc: any, i: number) => 
+        DealersMapper.toAppSheet({ ...doc, _id: insertedIds[i] })
+      )
+      appSheetAdd('Dealers', appSheetRows).catch(err =>
+        console.error('[Sync] Failed to add dealers to AppSheet:', err)
+      )
     }
 
     return {

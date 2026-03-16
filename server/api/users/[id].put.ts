@@ -1,5 +1,6 @@
 import { connectToDatabase } from '../../utils/mongodb'
 import { ObjectId } from 'mongodb'
+import { appSheetEdit } from '../../utils/appsheet'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -28,6 +29,14 @@ export default defineEventHandler(async (event) => {
       { _id: new ObjectId(id) },
       { $set: updateDoc }
     )
+
+    // ── Sync to AppSheet ──
+    const appSheetRow: any = { _id: id, ...updateDoc }
+    if (appSheetRow.updatedAt) appSheetRow.updatedAt = appSheetRow.updatedAt.toISOString()
+    appSheetEdit('AppUsers', [appSheetRow]).catch(err =>
+      console.error('[Sync] Failed to edit user in AppSheet:', err)
+    )
+
     return { success: true }
   } catch (error: any) {
     throw createError({ statusCode: 500, statusMessage: error.message })

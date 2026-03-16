@@ -1,5 +1,7 @@
 import { connectToDatabase } from '../../../utils/mongodb'
 import { ObjectId } from 'mongodb'
+import { appSheetAdd } from '../../../utils/appsheet'
+import { DealerServicesMapper } from '../../../utils/sync-mapper'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -17,11 +19,9 @@ export default defineEventHandler(async (event) => {
     
     for (const s of services) {
       if (!s.dealer || !s.service) continue
-      if (!dealerUpdates[s.dealer]) {
-        dealerUpdates[s.dealer] = []
-      }
+      const arr = (dealerUpdates[s.dealer] ??= [])
       
-      dealerUpdates[s.dealer].push({
+      arr.push({
         id: new ObjectId().toString(),
         service: s.service,
         amount: Number(s.amount) || 0,
@@ -31,6 +31,8 @@ export default defineEventHandler(async (event) => {
     }
 
     let count = 0
+    const allAppSheetRows: any[] = []
+
     // Perform updates
     for (const [dealerIdStr, servicesArray] of Object.entries(dealerUpdates)) {
       if (!ObjectId.isValid(dealerIdStr)) {
@@ -46,6 +48,25 @@ export default defineEventHandler(async (event) => {
         }
       )
       count += servicesArray.length
+
+      // ── Prepare AppSheet sync rows ──
+      for (const svc of servicesArray) {
+        allAppSheetRows.push(DealerServicesMapper.toAppSheet({
+          _id: svc.id,
+          dealer: dealerIdStr,
+          service: svc.service,
+          amount: svc.amount,
+          tax: svc.tax,
+          total: svc.total,
+        }))
+      }
+    }
+
+    // ── Sync to AppSheet ──
+    if (allAppSheetRows.length > 0) {
+      appSheetAdd('DealerServices', allAppSheetRows).catch(err =>
+        console.error('[Sync] Failed to add dealer services to AppSheet:', err)
+      )
     }
 
     return {

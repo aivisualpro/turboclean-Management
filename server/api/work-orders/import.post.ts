@@ -1,5 +1,7 @@
 import { connectToDatabase } from '../../utils/mongodb'
 import { ObjectId } from 'mongodb'
+import { appSheetAdd } from '../../utils/appsheet'
+import { WorkOrdersMapper } from '../../utils/sync-mapper'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -29,7 +31,16 @@ export default defineEventHandler(async (event) => {
     }))
 
     if (documentsToInsert.length > 0) {
-      await collection.insertMany(documentsToInsert)
+      const result = await collection.insertMany(documentsToInsert)
+      
+      // ── Sync to AppSheet ──
+      const insertedIds = Object.values(result.insertedIds)
+      const appSheetRows = documentsToInsert.map((doc: any, i: number) =>
+        WorkOrdersMapper.toAppSheet({ ...doc, _id: insertedIds[i] })
+      )
+      appSheetAdd('WorkOrders', appSheetRows).catch(err =>
+        console.error('[Sync] Failed to add work orders to AppSheet:', err)
+      )
     }
 
     return {

@@ -1,5 +1,6 @@
 import { connectToDatabase } from '../../utils/mongodb'
 import { ObjectId } from 'mongodb'
+import { appSheetDelete } from '../../utils/appsheet'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -9,6 +10,12 @@ export default defineEventHandler(async (event) => {
     }
     const { db } = await connectToDatabase()
     await db.collection('turboCleanAppUsers').deleteOne({ _id: new ObjectId(id) })
+
+    // ── Sync to AppSheet ──
+    appSheetDelete('AppUsers', [{ _id: id }]).catch(err =>
+      console.error('[Sync] Failed to delete user from AppSheet:', err)
+    )
+
     return { success: true }
   } catch (error: any) {
     throw createError({ statusCode: 500, statusMessage: error.message })
