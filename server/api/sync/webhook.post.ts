@@ -28,7 +28,7 @@
 
 import { connectToDatabase } from '../../utils/mongodb'
 import { ObjectId } from 'mongodb'
-import { REVERSE_TABLE_MAP } from '../../utils/appsheet'
+import { REVERSE_TABLE_MAP, appSheetEdit } from '../../utils/appsheet'
 import { MAPPER_LOOKUP } from '../../utils/sync-mapper'
 import { emitSyncEvent } from '../../utils/sync-events'
 
@@ -36,10 +36,6 @@ export default defineEventHandler(async (event) => {
   try {
     const body = await readBody(event)
     const query = getQuery(event)
-
-    // Debug: log raw webhook payload
-    console.log('[Webhook] Raw payload:', JSON.stringify(body, null, 2))
-    console.log('[Webhook] Query params:', JSON.stringify(query))
 
     // ── Normalize: support both formats ───────────────────
     // Table: from query param, body.table, or body root
@@ -112,8 +108,8 @@ export default defineEventHandler(async (event) => {
         case 'add': {
           const mongoDoc = mapper.toMongo(row)
           
-          // If ID is provided and looks like a valid ObjectId, use it
-          if (rowId && rowId.length === 24) {
+          // If ID is provided and looks like a valid 24-char hex ObjectId, use it
+          if (rowId && rowId.length === 24 && /^[0-9a-fA-F]{24}$/.test(rowId)) {
             try {
               // Check if already exists (prevent duplicates)
               const existing = await collection.findOne({ _id: new ObjectId(rowId) })
@@ -131,14 +127,16 @@ export default defineEventHandler(async (event) => {
               }
             }
             catch {
-              // If ObjectId conversion fails, insert without specific _id
               const result = await collection.insertOne(mongoDoc)
-              results.push({ success: true, action: 'added', id: result.insertedId.toString() })
+              const newId = result.insertedId.toString()
+              results.push({ success: true, action: 'added', id: newId, appSheetOldId: rowId })
             }
           }
           else {
+            // AppSheet _id is not a valid ObjectId — insert and sync the real ID back
             const result = await collection.insertOne(mongoDoc)
-            results.push({ success: true, action: 'added', id: result.insertedId.toString() })
+            const newId = result.insertedId.toString()
+            results.push({ success: true, action: 'added', id: newId, appSheetOldId: rowId })
           }
           break
         }
@@ -206,6 +204,26 @@ export default defineEventHandler(async (event) => {
     for (const r of results) {
       if (r.success) {
         emitSyncEvent({ table, action: r.action || action.toLowerCase(), id: r.id || '' })
+      }
+    }
+
+    // ── Sync real MongoDB IDs back to AppSheet for new records ──
+    // When AppSheet creates a record, its _id differs from MongoDB's ObjectId.
+    // Strategy: Delete the old AppSheet row, re-add with the correct MongoDB ObjectId.
+    const idUpdates = results.filter(r => r.success && r.appSheetOldId && r.id !== r.appSheetOldId)
+    if (idUpdates.length > 0) {
+      const { appSheetDelete: delFromAppSheet, appSheetAdd: addToAppSheet } = await import('../../utils/appsheet')
+      
+      for (const r of idUpdates) {
+        // Delete the AppSheet row with the old auto-generated ID
+        delFromAppSheet(table, [{ _id: r.appSheetOldId }]).then(() => {
+          // Re-add with the correct MongoDB ObjectId + original data
+          const mongoDoc = mapper.toMongo(rows.find((row: any) => (row._id || row.id) === r.appSheetOldId) || {})
+          const appSheetRow = mapper.toAppSheet({ ...mongoDoc, _id: r.id })
+          return addToAppSheet(table, [appSheetRow])
+        }).catch(err => {
+          console.error(`[Webhook] Failed to sync ID back to AppSheet for ${table}:`, err)
+        })
       }
     }
 
