@@ -24,7 +24,6 @@ const displayList = computed(() => {
 
 const showForm = ref(false)
 const showDeleteDialog = ref(false)
-const isSubmitting = ref(false)
 const editingId = ref<string | null>(null)
 
 const showPassword = ref(false)
@@ -79,49 +78,94 @@ function confirmDelete(id: string) {
   showDeleteDialog.value = true
 }
 
-async function handleDelete() {
+function handleDelete() {
   if (!editingId.value) return
-  isSubmitting.value = true
-  try {
-    await $fetch(`/api/users/${editingId.value}`, { method: 'DELETE' })
-    toast.success('User deleted successfully')
-    showDeleteDialog.value = false
-    await refresh()
-  } catch (error: any) {
-    toast.error(error.message || 'Failed to delete user')
-  } finally {
-    isSubmitting.value = false
+  const deleteId = editingId.value
+
+  // ── Optimistic: remove from UI immediately ──
+  const removedUser = users.value?.find(u => u.id === deleteId)
+  if (users.value) {
+    users.value = users.value.filter(u => u.id !== deleteId)
   }
+  showDeleteDialog.value = false
+  toast.success('User deleted successfully')
+
+  // ── Background: fire API call silently ──
+  $fetch(`/api/users/${deleteId}`, { method: 'DELETE' }).catch(() => {
+    // Rollback: re-add user if API failed
+    if (removedUser && users.value) {
+      users.value.push(removedUser)
+    }
+    toast.error('Failed to delete user — restored')
+  })
 }
 
-async function handleSave() {
+function handleSave() {
   if (!formData.name) {
     toast.error('Name is required')
     return
   }
-  isSubmitting.value = true
-  try {
-    if (editingId.value) {
-      await $fetch(`/api/users/${editingId.value}`, {
-        method: 'PUT',
-        body: formData
-      })
-      toast.success('User updated successfully')
-    } else {
-      await $fetch('/api/users', {
-        method: 'POST',
-        body: formData
-      })
-      toast.success('User created successfully')
+
+  const snapshot = { ...formData }
+
+  if (editingId.value) {
+    // ── Optimistic Edit: update in UI immediately ──
+    const idx = users.value?.findIndex(u => u.id === editingId.value) ?? -1
+    const oldData = idx >= 0 ? { ...users.value![idx] } : null
+
+    if (idx >= 0 && users.value) {
+      users.value[idx] = { ...users.value[idx], ...snapshot }
     }
     showForm.value = false
-    await refresh()
-  } catch (error: any) {
-    toast.error(error.message || 'Failed to save user')
-  } finally {
-    isSubmitting.value = false
+    toast.success('User updated successfully')
+
+    // ── Background: fire API call silently ──
+    $fetch(`/api/users/${editingId.value}`, {
+      method: 'PUT',
+      body: snapshot,
+    }).catch(() => {
+      // Rollback on failure
+      if (oldData && idx >= 0 && users.value) {
+        users.value[idx] = oldData
+      }
+      toast.error('Failed to update user — reverted')
+    })
+  } else {
+    // ── Optimistic Add: add to UI immediately with temp id ──
+    const tempId = `temp-${Date.now()}`
+    const tempUser = {
+      id: tempId,
+      ...snapshot,
+      createdAt: new Date().toISOString(),
+    }
+    if (users.value) {
+      users.value.unshift(tempUser)
+    }
+    showForm.value = false
+    toast.success('User created successfully')
+
+    // ── Background: fire API call, then swap temp id for real id ──
+    $fetch<{ success: boolean; id: string }>('/api/users', {
+      method: 'POST',
+      body: snapshot,
+    }).then((res) => {
+      // Replace temp id with real server id
+      if (users.value) {
+        const tempIdx = users.value.findIndex(u => u.id === tempId)
+        if (tempIdx >= 0) {
+          users.value[tempIdx] = { ...users.value[tempIdx], id: res.id }
+        }
+      }
+    }).catch(() => {
+      // Rollback: remove the optimistically added user
+      if (users.value) {
+        users.value = users.value.filter(u => u.id !== tempId)
+      }
+      toast.error('Failed to create user — removed')
+    })
   }
 }
+
 </script>
 
 <template>
@@ -286,11 +330,8 @@ async function handleSave() {
         </div>
 
         <SheetFooter class="gap-2 px-6 py-4 border-t shrink-0">
-          <Button variant="outline" @click="showForm = false" :disabled="isSubmitting">Cancel</Button>
-          <Button @click="handleSave" :disabled="isSubmitting">
-            <span v-if="isSubmitting">Saving...</span>
-            <span v-else>Save User</span>
-          </Button>
+          <Button variant="outline" @click="showForm = false">Cancel</Button>
+          <Button @click="handleSave">Save User</Button>
         </SheetFooter>
       </SheetContent>
     </Sheet>
@@ -305,11 +346,8 @@ async function handleSave() {
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel :disabled="isSubmitting">Cancel</AlertDialogCancel>
-          <AlertDialogAction @click="handleDelete" class="bg-destructive text-destructive-foreground hover:bg-destructive/90" :disabled="isSubmitting">
-            <span v-if="isSubmitting">Deleting...</span>
-            <span v-else>Continue</span>
-          </AlertDialogAction>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction @click="handleDelete" class="bg-destructive text-destructive-foreground hover:bg-destructive/90">Continue</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
