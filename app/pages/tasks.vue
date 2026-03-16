@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import KanbanBoard from '~/components/kanban/KanbanBoard.vue'
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Tasks' })
 </script>
@@ -7,9 +6,13 @@ setHeader({ title: 'Tasks' })
 <template>
   <div class="h-full">
     <div class="flex flex-col gap-4 h-full">
-      <KanbanBoard />
+      <KanbanBoard>
+        <template #fallback>
+          <div class="flex items-center justify-center h-full">
+            <Icon name="lucide:loader-2" class="size-6 animate-spin text-muted-foreground" />
+          </div>
+        </template>
+      </KanbanBoard>
     </div>
-
-
   </div>
 </template>

@@ -17,6 +17,7 @@ const props = withDefaults(defineProps<SidebarMenuButtonProps>(), {
   as: 'button',
   variant: 'default',
   size: 'default',
+  asChild: false,
 })
 </script>
 
@@ -28,7 +29,7 @@ const props = withDefaults(defineProps<SidebarMenuButtonProps>(), {
     :data-active="isActive"
     :class="cn(sidebarMenuButtonVariants({ variant, size }), props.class)"
     :as="as"
-    :as-child="asChild"
+    :as-child="props.asChild"
     v-bind="$attrs"
   >
     <slot />
