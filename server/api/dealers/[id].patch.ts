@@ -6,9 +6,14 @@ export default defineEventHandler(async (event) => {
   try {
     const id = getRouterParam(event, 'id')
     const body = await readBody(event)
-    console.log('[PATCH /api/dealers/:id] id=', id, 'body=', JSON.stringify(body))
+    console.log('[PATCH /api/dealers/:id] ── START ──')
+    console.log('[PATCH] id=', id)
+    console.log('[PATCH] raw body=', JSON.stringify(body))
+    console.log('[PATCH] body.isTaxApplied=', body.isTaxApplied, 'type=', typeof body.isTaxApplied)
+    console.log('[PATCH] body.taxPercentage=', body.taxPercentage, 'type=', typeof body.taxPercentage)
 
     if (!id || id.length !== 24) {
+      console.error('[PATCH] Invalid ID! length=', id?.length)
       throw createError({ statusCode: 400, statusMessage: 'Invalid dealer ID' })
     }
     const { db } = await connectToDatabase()
@@ -27,10 +32,18 @@ export default defineEventHandler(async (event) => {
     if (body.notes !== undefined) updateDoc.notes = body.notes
     if (body.status !== undefined) updateDoc.status = body.status
 
-    await db.collection('turboCleanDealers').updateOne(
+    console.log('[PATCH] updateDoc to $set=', JSON.stringify(updateDoc))
+
+    const result = await db.collection('turboCleanDealers').updateOne(
       { _id: new ObjectId(id) },
       { $set: updateDoc }
     )
+    console.log('[PATCH] MongoDB result: matchedCount=', result.matchedCount, 'modifiedCount=', result.modifiedCount)
+
+    // Verify the write by re-reading the document
+    const verified = await db.collection('turboCleanDealers').findOne({ _id: new ObjectId(id) })
+    console.log('[PATCH] Verified doc: isTaxApplied=', verified?.isTaxApplied, 'taxPercentage=', verified?.taxPercentage)
+    console.log('[PATCH] ── END ──')
 
     // ── Sync to AppSheet (only fields that exist in AppSheet) ──
     const appSheetRow: Record<string, any> = { _id: id }
@@ -47,8 +60,9 @@ export default defineEventHandler(async (event) => {
       console.error('[Sync] Failed to edit dealer in AppSheet:', err)
     )
 
-    return { success: true }
+    return { success: true, matchedCount: result.matchedCount, modifiedCount: result.modifiedCount }
   } catch (error: any) {
+    console.error('[PATCH] ERROR:', error.message)
     throw createError({ statusCode: 500, statusMessage: error.message })
   }
 })

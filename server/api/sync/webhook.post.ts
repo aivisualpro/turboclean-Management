@@ -146,7 +146,10 @@ export default defineEventHandler(async (event) => {
             results.push({ success: false, error: 'Missing _id for edit action' })
             break
           }
+          console.log(`[Webhook] EDIT for ${table} rowId=${rowId} - AppSheet row:`, JSON.stringify(row).slice(0, 300))
           const mongoDoc = mapper.toMongo(row)
+          console.log(`[Webhook] EDIT mapped to mongoDoc:`, JSON.stringify(mongoDoc).slice(0, 300))
+
           
           let filter: any
           try {

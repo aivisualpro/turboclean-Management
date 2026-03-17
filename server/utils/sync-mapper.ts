@@ -56,24 +56,38 @@ export const DealersMapper = {
     }
   },
   toMongo(appSheetRow: any): Record<string, any> {
-    return {
+    const doc: Record<string, any> = {
       dealer: appSheetRow.dealer || '',
       phone: appSheetRow.phone || '',
       email: appSheetRow.email || '',
       address: appSheetRow.address || '',
       notes: appSheetRow.notes || '',
-      isTaxApplied: appSheetRow['isTaxApplied?'] !== undefined 
-        ? String(appSheetRow['isTaxApplied?']).trim().toLowerCase() === 'y' ||
-          String(appSheetRow['isTaxApplied?']).trim().toLowerCase() === 'yes' ||
-          String(appSheetRow['isTaxApplied?']).trim().toLowerCase() === 'true' ||
-          appSheetRow['isTaxApplied?'] === true ||
-          appSheetRow['isTaxApplied?'] === 1
-        : false,
-      taxPercentage: Number(appSheetRow.Tax) || 0,
       status: appSheetRow.status || 'Pending',
       createdAt: appSheetRow.createdAt ? new Date(appSheetRow.createdAt) : new Date(),
       updatedAt: new Date(),
     }
+    
+    // Process isTaxApplied ONLY if the key exists in the AppSheet row
+    const taxKeys = ['isTaxApplied?', 'isTaxApplied', 'IsTaxApplied', 'is tax applied', 'Tax Applied']
+    const hasTaxKey = taxKeys.some(k => appSheetRow[k] !== undefined)
+    if (hasTaxKey) {
+      const val = appSheetRow['isTaxApplied?'] ?? appSheetRow['isTaxApplied'] ?? appSheetRow['IsTaxApplied'] ?? appSheetRow['is tax applied'] ?? appSheetRow['Tax Applied']
+      if (val !== undefined && val !== null && val !== '') {
+        const str = String(val).trim().toLowerCase()
+        doc.isTaxApplied = str === 'y' || str === 'yes' || str === 'true' || val === true || val === 1
+      } else {
+        doc.isTaxApplied = false
+      }
+    }
+    
+    // Process Tax ONLY if the key exists
+    const percKeys = ['Tax', 'tax', 'Tax Percentage', 'taxPercentage']
+    const hasPercKey = percKeys.some(k => appSheetRow[k] !== undefined)
+    if (hasPercKey) {
+      doc.taxPercentage = Number(appSheetRow.Tax ?? appSheetRow.tax ?? appSheetRow['Tax Percentage'] ?? appSheetRow.taxPercentage) || 0
+    }
+    
+    return doc
   },
 }
 

@@ -79,29 +79,29 @@ function handleStatusChange(id: string, status: DealerStatus) {
   toast.success(`Status updated to ${status}`)
 }
 
-function handleToggleTax(d: Dealer) {
-  console.log('[handleToggleTax] Clicked! Dealer:', d.dealerName, 'Current tax state:', d.isTaxApplied)
-  const newVal = !d.isTaxApplied
-  console.log('[handleToggleTax] Setting new state to:', newVal)
+function handleToggleTax(d: Dealer, val?: boolean) {
+  const newVal = val !== undefined ? val : !d.isTaxApplied
+  console.log('[handleToggleTax] Clicked! Dealer:', d.dealerName, 'id=', d.id, 'Current tax state:', d.isTaxApplied, 'Setting to:', newVal)
   
   toast.success(newVal ? 'Tax enabled' : 'Tax disabled')
   
-  // Call the API manually here to bypass useDealers just in case it's broken
-  const updates = {
+  const updates: Record<string, any> = {
     isTaxApplied: newVal,
-    ...(newVal ? {} : { taxPercentage: 0 }),
+  }
+  if (!newVal) {
+    updates.taxPercentage = 0
   }
   
   // Optimistic UI update
   d.isTaxApplied = newVal
   if (!newVal) d.taxPercentage = 0
   
-  console.log('[handleToggleTax] Fetching PATCH /api/dealers/', d.id)
+  console.log('[handleToggleTax] Sending PATCH body=', JSON.stringify(updates))
   $fetch(`/api/dealers/${d.id}`, {
     method: 'PATCH',
-    body: Object.assign({}, updates) // clone to avoid proxy issues
-  }).then(res => {
-    console.log('[handleToggleTax] Success applying API!', res)
+    body: updates,
+  }).then((res: any) => {
+    console.log('[handleToggleTax] API response:', JSON.stringify(res))
   }).catch(err => {
     console.error('[handleToggleTax] API FAILED', err)
     toast.error('Failed to update tax in database')
@@ -110,8 +110,10 @@ function handleToggleTax(d: Dealer) {
   })
 }
 
-function handleTaxPercentageChange(d: Dealer, val: string) {
+function handleTaxPercentageChange(d: Dealer, inputEl: EventTarget | null) {
+  const val = (inputEl as HTMLInputElement)?.value ?? '0'
   const num = parseFloat(val) || 0
+  console.log('[handleTaxPercentageChange] dealer=', d.dealerName, 'id=', d.id, 'raw=', val, 'parsed=', num)
   patchDealer(d.id, { taxPercentage: num })
 }
 
@@ -351,10 +353,11 @@ async function handleDeleteAllServices() {
                         {{ d.status }}
                       </Badge>
                     </td>
-                    <td class="p-4 text-center cursor-pointer" @click.stop="handleToggleTax(d)">
+                    <td class="p-4 text-center cursor-pointer" @click.stop>
                       <Switch
                         :checked="d.isTaxApplied"
-                        class="data-[state=checked]:bg-emerald-500 pointer-events-none"
+                        @update:checked="(val: boolean) => handleToggleTax(d, val)"
+                        class="data-[state=checked]:bg-emerald-500"
                       />
                     </td>
                     <td class="p-4" @click.stop>
@@ -362,7 +365,7 @@ async function handleDeleteAllServices() {
                         <Input
                           type="number"
                           :model-value="d.taxPercentage"
-                          @change="(e: Event) => handleTaxPercentageChange(d, (e.target as HTMLInputElement).value)"
+                          @blur="(e: FocusEvent) => handleTaxPercentageChange(d, e.target)"
                           class="w-20 h-7 text-xs tabular-nums"
                           step="0.01"
                           min="0"
