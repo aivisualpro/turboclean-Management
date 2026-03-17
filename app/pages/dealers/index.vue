@@ -8,7 +8,7 @@ import { cn } from '~/lib/utils'
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Dealers', icon: 'i-lucide-building-2' })
 
-const { dealers, authorised, pending, rejected, updateDealer, deleteDealer, deleteAllDealerServices, fetchDealers } = useDealers()
+const { dealers, authorised, pending, rejected, updateDealer, patchDealer, deleteDealer, deleteAllDealerServices, fetchDealers } = useDealers()
 
 // Real-time: auto-refresh when AppSheet changes dealers or their services
 useLiveSync(['Dealers', 'DealerServices'], () => fetchDealers())
@@ -77,6 +77,42 @@ function handleDelete(id: string) {
 function handleStatusChange(id: string, status: DealerStatus) {
   updateDealer(id, { status })
   toast.success(`Status updated to ${status}`)
+}
+
+function handleToggleTax(d: Dealer) {
+  console.log('[handleToggleTax] Clicked! Dealer:', d.dealerName, 'Current tax state:', d.isTaxApplied)
+  const newVal = !d.isTaxApplied
+  console.log('[handleToggleTax] Setting new state to:', newVal)
+  
+  toast.success(newVal ? 'Tax enabled' : 'Tax disabled')
+  
+  // Call the API manually here to bypass useDealers just in case it's broken
+  const updates = {
+    isTaxApplied: newVal,
+    ...(newVal ? {} : { taxPercentage: 0 }),
+  }
+  
+  // Optimistic UI update
+  d.isTaxApplied = newVal
+  if (!newVal) d.taxPercentage = 0
+  
+  console.log('[handleToggleTax] Fetching PATCH /api/dealers/', d.id)
+  $fetch(`/api/dealers/${d.id}`, {
+    method: 'PATCH',
+    body: Object.assign({}, updates) // clone to avoid proxy issues
+  }).then(res => {
+    console.log('[handleToggleTax] Success applying API!', res)
+  }).catch(err => {
+    console.error('[handleToggleTax] API FAILED', err)
+    toast.error('Failed to update tax in database')
+    // Revert
+    d.isTaxApplied = !newVal
+  })
+}
+
+function handleTaxPercentageChange(d: Dealer, val: string) {
+  const num = parseFloat(val) || 0
+  patchDealer(d.id, { taxPercentage: num })
 }
 
 function openAddForm() {
@@ -267,6 +303,12 @@ async function handleDeleteAllServices() {
                     <th class="p-4 text-left font-medium text-muted-foreground whitespace-nowrap">
                       Status
                     </th>
+                    <th class="p-4 text-center font-medium text-muted-foreground whitespace-nowrap">
+                      Tax Applied
+                    </th>
+                    <th class="p-4 text-left font-medium text-muted-foreground whitespace-nowrap">
+                      Tax %
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -309,14 +351,36 @@ async function handleDeleteAllServices() {
                         {{ d.status }}
                       </Badge>
                     </td>
+                    <td class="p-4 text-center cursor-pointer" @click.stop="handleToggleTax(d)">
+                      <Switch
+                        :checked="d.isTaxApplied"
+                        class="data-[state=checked]:bg-emerald-500 pointer-events-none"
+                      />
+                    </td>
+                    <td class="p-4" @click.stop>
+                      <div v-if="d.isTaxApplied" class="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          :model-value="d.taxPercentage"
+                          @change="(e: Event) => handleTaxPercentageChange(d, (e.target as HTMLInputElement).value)"
+                          class="w-20 h-7 text-xs tabular-nums"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          placeholder="0"
+                        />
+                        <span class="text-xs text-muted-foreground">%</span>
+                      </div>
+                      <span v-else class="text-xs text-muted-foreground">—</span>
+                    </td>
                   </tr>
                   <tr v-if="filteredList.length === 0">
-                    <td colspan="6" class="p-8 text-center text-muted-foreground">
+                    <td colspan="8" class="p-8 text-center text-muted-foreground">
                       No dealers found
                     </td>
                   </tr>
                   <tr v-if="displayList.length > 0">
-                    <td colspan="6" class="p-0 border-0">
+                    <td colspan="8" class="p-0 border-0">
                       <div ref="loadMoreTrigger" class="h-4 w-full"></div>
                     </td>
                   </tr>

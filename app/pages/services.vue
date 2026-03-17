@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, Search, Download, Upload, Pencil, Trash2, Loader2 } from 'lucide-vue-next'
+import { Plus, Search, Download, Upload, Pencil, Trash2, Loader2, Sparkles, FileText, LayoutGrid, List } from 'lucide-vue-next'
 import { refDebounced } from '@vueuse/core'
 import { toast } from 'vue-sonner'
 import { useServices } from '~/composables/useServices'
@@ -15,6 +15,7 @@ useLiveSync('Services', () => fetchServices())
 const searchValue = ref('')
 const debouncedSearch = refDebounced(searchValue, 250)
 const showImport = ref(false)
+const viewMode = ref<'grid' | 'list'>('grid')
 
 // Search filter
 function filterBySearch(list: any[]) {
@@ -130,6 +131,27 @@ function handleSave() {
   }
 }
 
+// ─── Color Palette for Cards ────────────────────────────
+const cardColors = [
+  { bg: 'from-violet-500/10 to-violet-500/5', border: 'border-violet-500/15', icon: 'text-violet-500', dot: 'bg-violet-500', avatar: 'bg-violet-500' },
+  { bg: 'from-blue-500/10 to-blue-500/5', border: 'border-blue-500/15', icon: 'text-blue-500', dot: 'bg-blue-500', avatar: 'bg-blue-500' },
+  { bg: 'from-emerald-500/10 to-emerald-500/5', border: 'border-emerald-500/15', icon: 'text-emerald-500', dot: 'bg-emerald-500', avatar: 'bg-emerald-500' },
+  { bg: 'from-amber-500/10 to-amber-500/5', border: 'border-amber-500/15', icon: 'text-amber-500', dot: 'bg-amber-500', avatar: 'bg-amber-500' },
+  { bg: 'from-rose-500/10 to-rose-500/5', border: 'border-rose-500/15', icon: 'text-rose-500', dot: 'bg-rose-500', avatar: 'bg-rose-500' },
+  { bg: 'from-cyan-500/10 to-cyan-500/5', border: 'border-cyan-500/15', icon: 'text-cyan-500', dot: 'bg-cyan-500', avatar: 'bg-cyan-500' },
+  { bg: 'from-fuchsia-500/10 to-fuchsia-500/5', border: 'border-fuchsia-500/15', icon: 'text-fuchsia-500', dot: 'bg-fuchsia-500', avatar: 'bg-fuchsia-500' },
+  { bg: 'from-teal-500/10 to-teal-500/5', border: 'border-teal-500/15', icon: 'text-teal-500', dot: 'bg-teal-500', avatar: 'bg-teal-500' },
+]
+
+function getCardColor(index: number) {
+  return cardColors[index % cardColors.length]!
+}
+
+// Service initial for the avatar
+function getInitials(name: string): string {
+  return name.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?'
+}
+
 // ─── Export ─────────────────────────────────────────────
 function exportToCsv() {
   const data = filteredList.value
@@ -166,10 +188,33 @@ function exportToCsv() {
 
     <ClientOnly>
       <Teleport to="#page-header-actions">
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1.5 sm:gap-2">
+          <!-- Mobile search -->
+          <div class="relative sm:hidden">
+            <Icon name="lucide:search" class="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+            <Input v-model="searchValue" placeholder="Search..." class="pl-8 w-32 h-8 text-sm" />
+          </div>
+          <!-- Desktop search -->
           <div class="relative hidden sm:block">
             <Icon name="lucide:search" class="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
             <Input v-model="searchValue" placeholder="Search services..." class="pl-8 w-40 md:w-56 h-8 text-sm" />
+          </div>
+          <!-- View toggle -->
+          <div class="hidden sm:flex items-center gap-0.5 rounded-md border bg-muted/50 p-0.5">
+            <button
+              @click="viewMode = 'grid'"
+              class="rounded-sm p-1 transition-all"
+              :class="viewMode === 'grid' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'"
+            >
+              <LayoutGrid class="size-3.5" />
+            </button>
+            <button
+              @click="viewMode = 'list'"
+              class="rounded-sm p-1 transition-all"
+              :class="viewMode === 'list' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'"
+            >
+              <List class="size-3.5" />
+            </button>
           </div>
           <Button variant="outline" size="sm" class="h-8 gap-2" @click="exportToCsv">
             <Download class="size-4" />
@@ -187,69 +232,193 @@ function exportToCsv() {
       </Teleport>
     </ClientOnly>
 
-    <div class="flex-1 min-h-0 rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden">
-      <div class="h-full overflow-auto">
-        <table class="w-full text-sm caption-bottom border-collapse">
-          <TableHeader class="sticky top-0 z-10 bg-muted/95 backdrop-blur shadow-sm">
-            <TableRow>
-              <TableHead class="w-1/3">Service</TableHead>
-              <TableHead class="w-1/2">Description</TableHead>
-              <TableHead class="text-right w-[100px]">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            <TableRow v-for="s in filteredList" :key="s.id" class="hover:bg-muted/50">
-              <TableCell class="font-medium text-xs">{{ s.service }}</TableCell>
-              <TableCell class="text-xs text-muted-foreground">{{ s.description }}</TableCell>
-              <TableCell class="text-right">
-                <div class="flex items-center justify-end gap-1">
-                  <Button variant="ghost" size="icon" class="size-7" title="Edit" @click="openEditForm(s)">
-                    <Pencil class="size-3.5" />
-                  </Button>
-                  <Button variant="ghost" size="icon" class="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Delete" @click="confirmDelete(s.id)">
-                    <Trash2 class="size-3.5" />
-                  </Button>
+    <!-- Stats Bar -->
+    <div class="flex items-center gap-3 mb-3 px-0.5">
+      <div class="flex items-center gap-2 text-sm text-muted-foreground">
+        <div class="flex items-center justify-center size-7 rounded-lg bg-primary/10">
+          <Sparkles class="size-3.5 text-primary" />
+        </div>
+        <span class="tabular-nums font-medium text-foreground">{{ filteredList.length }}</span>
+        <span class="hidden sm:inline">service{{ filteredList.length !== 1 ? 's' : '' }}</span>
+        <span class="sm:hidden">total</span>
+      </div>
+      <span v-if="debouncedSearch" class="text-xs text-muted-foreground">
+        filtered from {{ services.length }}
+      </span>
+    </div>
+
+    <!-- Main Content -->
+    <div class="flex-1 min-h-0 overflow-auto">
+
+      <!-- Loading -->
+      <div v-if="isLoading" class="flex items-center justify-center h-full">
+        <div class="flex flex-col items-center gap-3">
+          <div class="relative">
+            <div class="size-12 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+              <Loader2 class="size-6 animate-spin text-primary" />
+            </div>
+          </div>
+          <p class="text-sm text-muted-foreground animate-pulse">Loading services...</p>
+        </div>
+      </div>
+
+      <!-- Empty State -->
+      <div v-else-if="filteredList.length === 0" class="flex items-center justify-center h-full">
+        <div class="flex flex-col items-center gap-4 max-w-sm text-center px-6">
+          <div class="size-16 rounded-2xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
+            <FileText class="size-8 text-muted-foreground/50" />
+          </div>
+          <div>
+            <h3 class="text-base font-semibold text-foreground mb-1">
+              {{ debouncedSearch ? 'No results found' : 'No services yet' }}
+            </h3>
+            <p class="text-sm text-muted-foreground">
+              {{ debouncedSearch
+                ? `Try adjusting your search for "${debouncedSearch}"`
+                : 'Get started by adding your first service.'
+              }}
+            </p>
+          </div>
+          <Button v-if="!debouncedSearch" size="sm" class="gap-2" @click="openAddForm">
+            <Plus class="size-4" />
+            Add Service
+          </Button>
+        </div>
+      </div>
+
+      <!-- ─── GRID VIEW ──────────────────────────────────────── -->
+      <div v-else-if="viewMode === 'grid'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
+        <div
+          v-for="(s, i) in filteredList"
+          :key="s.id"
+          class="group relative rounded-xl border bg-card overflow-hidden transition-all duration-200 hover:shadow-md hover:shadow-black/5 hover:-translate-y-0.5 hover:border-primary/20"
+        >
+          <!-- Gradient top accent -->
+          <div class="h-1 w-full bg-gradient-to-r" :class="getCardColor(i).bg" />
+
+          <div class="p-4">
+            <!-- Header: Avatar + Name -->
+            <div class="flex items-start justify-between gap-3 mb-3">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <div
+                  class="size-9 rounded-lg flex items-center justify-center shrink-0 text-xs font-bold text-white shadow-sm"
+                  :class="getCardColor(i).avatar"
+                >
+                  {{ getInitials(s.service) }}
                 </div>
-              </TableCell>
-            </TableRow>
-            <TableRow v-if="isLoading">
-              <TableCell :colspan="3" class="text-center py-10">
-                <Loader2 class="size-6 animate-spin text-muted-foreground mx-auto" />
-              </TableCell>
-            </TableRow>
-            <TableRow v-if="!isLoading && filteredList.length === 0">
-              <TableCell :colspan="3" class="text-center py-10 text-muted-foreground">
-                No services found.
-              </TableCell>
-            </TableRow>
-          </TableBody>
-        </table>
+                <div class="min-w-0">
+                  <h3 class="text-sm font-semibold text-foreground leading-tight truncate">
+                    {{ s.service }}
+                  </h3>
+                  <p class="text-[10px] text-muted-foreground/70 mt-0.5 tabular-nums">
+                    Added {{ new Date(s.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) }}
+                  </p>
+                </div>
+              </div>
+
+              <!-- Actions (visible on hover for desktop, always visible on mobile) -->
+              <div class="flex items-center gap-0.5 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-150">
+                <Button variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-foreground" title="Edit" @click="openEditForm(s)">
+                  <Pencil class="size-3" />
+                </Button>
+                <Button variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10" title="Delete" @click="confirmDelete(s.id)">
+                  <Trash2 class="size-3" />
+                </Button>
+              </div>
+            </div>
+
+            <!-- Description -->
+            <p
+              v-if="s.description"
+              class="text-xs text-muted-foreground leading-relaxed line-clamp-2"
+            >
+              {{ s.description }}
+            </p>
+            <p v-else class="text-xs text-muted-foreground/40 italic">
+              No description
+            </p>
+          </div>
+        </div>
+
+        <!-- Add Card -->
+        <button
+          @click="openAddForm"
+          class="group rounded-xl border-2 border-dashed hover:border-primary/30 bg-card/50 hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center min-h-[120px] gap-2 cursor-pointer"
+        >
+          <div class="size-9 rounded-lg bg-muted/80 group-hover:bg-primary/15 flex items-center justify-center transition-colors">
+            <Plus class="size-4 text-muted-foreground group-hover:text-primary transition-colors" />
+          </div>
+          <span class="text-xs font-medium text-muted-foreground group-hover:text-primary transition-colors">Add Service</span>
+        </button>
+      </div>
+
+      <!-- ─── LIST VIEW ──────────────────────────────────────── -->
+      <div v-else class="space-y-2">
+        <div
+          v-for="(s, i) in filteredList"
+          :key="s.id"
+          class="group flex items-center gap-3 sm:gap-4 px-3 sm:px-4 py-3 rounded-xl border bg-card hover:shadow-sm hover:border-primary/20 transition-all duration-200"
+        >
+          <!-- Color dot -->
+          <div class="size-2 rounded-full shrink-0" :class="getCardColor(i).dot" />
+
+          <!-- Content -->
+          <div class="flex-1 min-w-0">
+            <h3 class="text-sm font-medium text-foreground truncate">{{ s.service }}</h3>
+            <p v-if="s.description" class="text-xs text-muted-foreground truncate mt-0.5">{{ s.description }}</p>
+          </div>
+
+          <!-- Date (hidden on mobile) -->
+          <span class="hidden md:block text-[11px] text-muted-foreground/60 tabular-nums whitespace-nowrap">
+            {{ new Date(s.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) }}
+          </span>
+
+          <!-- Actions -->
+          <div class="flex items-center gap-0.5 shrink-0 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+            <Button variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-foreground" title="Edit" @click="openEditForm(s)">
+              <Pencil class="size-3" />
+            </Button>
+            <Button variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10" title="Delete" @click="confirmDelete(s.id)">
+              <Trash2 class="size-3" />
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
 
     <!-- Service Form Sidebar -->
     <Sheet v-model:open="showForm">
       <SheetContent side="right" class="sm:max-w-md w-full overflow-y-auto p-0 flex flex-col">
-        <SheetHeader class="px-6 py-4 border-b shrink-0">
-          <SheetTitle>{{ editingId ? 'Edit Service' : 'Add Service' }}</SheetTitle>
-          <SheetDescription>Enter service details.</SheetDescription>
+        <SheetHeader class="px-6 py-5 border-b shrink-0 bg-gradient-to-r from-primary/5 to-transparent">
+          <div class="flex items-center gap-3">
+            <div class="size-10 rounded-xl bg-primary/15 flex items-center justify-center">
+              <Icon :name="editingId ? 'i-lucide-pencil' : 'i-lucide-plus'" class="size-5 text-primary" />
+            </div>
+            <div>
+              <SheetTitle class="text-base">{{ editingId ? 'Edit Service' : 'New Service' }}</SheetTitle>
+              <SheetDescription class="text-xs">{{ editingId ? 'Update the service details below.' : 'Fill in the details to create a new service.' }}</SheetDescription>
+            </div>
+          </div>
         </SheetHeader>
 
-        <div class="space-y-4 px-6 py-6 flex-1">
-          <div class="space-y-1.5">
-            <Label>Service Name</Label>
-            <Input v-model="formData.service" placeholder="Interior Cleaning" />
+        <div class="space-y-5 px-6 py-6 flex-1">
+          <div class="space-y-2">
+            <Label class="text-xs font-medium">Service Name</Label>
+            <Input v-model="formData.service" placeholder="e.g. Interior Cleaning" class="h-10" />
           </div>
           
-          <div class="space-y-1.5">
-            <Label>Description</Label>
-            <Input v-model="formData.description" placeholder="Full interior detailing..." />
+          <div class="space-y-2">
+            <Label class="text-xs font-medium">Description</Label>
+            <Textarea v-model="formData.description" placeholder="Full interior detailing, dashboard polish..." class="min-h-[100px] resize-none" />
           </div>
         </div>
 
-        <SheetFooter class="gap-2 px-6 py-4 border-t shrink-0">
-          <Button variant="outline" @click="showForm = false">Cancel</Button>
-          <Button @click="handleSave">Save Service</Button>
+        <SheetFooter class="gap-2 px-6 py-4 border-t shrink-0 bg-muted/30">
+          <Button variant="outline" @click="showForm = false" class="flex-1 sm:flex-none">Cancel</Button>
+          <Button @click="handleSave" class="flex-1 sm:flex-none gap-2">
+            <Icon :name="editingId ? 'i-lucide-check' : 'i-lucide-plus'" class="size-4" />
+            {{ editingId ? 'Save Changes' : 'Create Service' }}
+          </Button>
         </SheetFooter>
       </SheetContent>
     </Sheet>
@@ -260,12 +429,12 @@ function exportToCsv() {
         <AlertDialogHeader>
           <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
           <AlertDialogDescription>
-            This will permanently delete this service from the <code class="bg-muted px-1 rounded">turboCleanServices</code> collection.
+            This will permanently delete this service. This action cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction @click="handleDelete" class="bg-destructive text-destructive-foreground hover:bg-destructive/90">Continue</AlertDialogAction>
+          <AlertDialogAction @click="handleDelete" class="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

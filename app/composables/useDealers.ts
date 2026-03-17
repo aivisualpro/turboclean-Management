@@ -33,6 +33,8 @@ export interface Dealer {
   address: string
   contacts: DealerContact[]
   status: DealerStatus
+  isTaxApplied: boolean
+  taxPercentage: number
   services?: DealerService[]
   createdAt: string
   updatedAt: string
@@ -84,7 +86,7 @@ export function useDealers() {
     })
   }
 
-  function updateDealer(id: string, updates: Partial<Pick<Dealer, 'dealerName' | 'address' | 'status' | 'contacts'>>) {
+  function updateDealer(id: string, updates: Partial<Pick<Dealer, 'dealerName' | 'address' | 'status' | 'contacts' | 'isTaxApplied' | 'taxPercentage'>>) {
     // For now, optimistic update UI, should add PUT /api/dealers/:id
     const idx = dealers.value.findIndex(d => d.id === id)
     if (idx === -1) return
@@ -95,8 +97,39 @@ export function useDealers() {
       address: updates.address ?? existing.address,
       contacts: updates.contacts ?? existing.contacts,
       status: updates.status ?? existing.status,
+      isTaxApplied: updates.isTaxApplied ?? existing.isTaxApplied,
+      taxPercentage: updates.taxPercentage ?? existing.taxPercentage,
       createdAt: existing.createdAt,
       updatedAt: new Date().toISOString(),
+    }
+  }
+
+  /** Patch a dealer field and sync to backend + AppSheet */
+  async function patchDealer(id: string, updates: Record<string, any>) {
+    console.log('[patchDealer] called with id=', id, 'updates=', updates)
+    // Optimistic: update UI immediately
+    const idx = dealers.value.findIndex(d => d.id === id)
+    if (idx === -1) {
+      console.error('[patchDealer] dealer not found in state:', id)
+      return
+    }
+    const existing = dealers.value[idx]!
+    const snapshot = { ...existing }
+
+    // Use Object.assign to trigger Vue reactivity properly
+    Object.assign(existing, updates, { updatedAt: new Date().toISOString() })
+
+    // Background: API call
+    try {
+      const result = await $fetch(`/api/dealers/${id}`, {
+        method: 'PATCH',
+        body: updates,
+      })
+      console.log('[patchDealer] API success:', result)
+    } catch (err) {
+      // Rollback on failure
+      console.error('[patchDealer] API failed:', err)
+      dealers.value[idx] = snapshot
     }
   }
 
@@ -170,6 +203,7 @@ export function useDealers() {
     fetchDealers,
     addDealer,
     updateDealer,
+    patchDealer,
     deleteDealer,
     importDealers,
     importDealerServices,

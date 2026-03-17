@@ -50,6 +50,8 @@ export const DealersMapper = {
       email: mongoDoc.email || '',
       address: mongoDoc.address || '',
       notes: mongoDoc.notes || '',
+      'isTaxApplied?': mongoDoc.isTaxApplied ? 'Y' : 'N',
+      Tax: Number(mongoDoc.taxPercentage) || 0,
       status: mongoDoc.status || 'Pending',
     }
   },
@@ -60,6 +62,14 @@ export const DealersMapper = {
       email: appSheetRow.email || '',
       address: appSheetRow.address || '',
       notes: appSheetRow.notes || '',
+      isTaxApplied: appSheetRow['isTaxApplied?'] !== undefined 
+        ? String(appSheetRow['isTaxApplied?']).trim().toLowerCase() === 'y' ||
+          String(appSheetRow['isTaxApplied?']).trim().toLowerCase() === 'yes' ||
+          String(appSheetRow['isTaxApplied?']).trim().toLowerCase() === 'true' ||
+          appSheetRow['isTaxApplied?'] === true ||
+          appSheetRow['isTaxApplied?'] === 1
+        : false,
+      taxPercentage: Number(appSheetRow.Tax) || 0,
       status: appSheetRow.status || 'Pending',
       createdAt: appSheetRow.createdAt ? new Date(appSheetRow.createdAt) : new Date(),
       updatedAt: new Date(),
