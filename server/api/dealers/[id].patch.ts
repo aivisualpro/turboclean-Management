@@ -23,13 +23,14 @@ export default defineEventHandler(async (event) => {
 
     // Only set fields that are explicitly provided
     if (body.isTaxApplied !== undefined) updateDoc.isTaxApplied = Boolean(body.isTaxApplied)
-    if (body.taxPercentage !== undefined) updateDoc.taxPercentage = Number(body.taxPercentage) || 0
+    if (body.taxPercentage !== undefined) updateDoc.taxPercentage = Number(body.taxPercentage)
     if (body.dealer !== undefined) updateDoc.dealer = body.dealer
     if (body.phone !== undefined) updateDoc.phone = body.phone
     if (body.email !== undefined) updateDoc.email = body.email
     if (body.address !== undefined) updateDoc.address = body.address
     if (body.notes !== undefined) updateDoc.notes = body.notes
     if (body.status !== undefined) updateDoc.status = body.status
+    if (body.contacts !== undefined) updateDoc.contacts = body.contacts
 
     console.log('[PATCH] updateDoc to $set=', JSON.stringify(updateDoc))
 
@@ -43,23 +44,38 @@ export default defineEventHandler(async (event) => {
     const verified = await db.collection('turboCleanDealers').findOne({ _id: new ObjectId(id) })
     console.log('[PATCH] Verified doc: isTaxApplied=', verified?.isTaxApplied, 'taxPercentage=', verified?.taxPercentage)
 
-    // ── Sync to AppSheet (only fields that exist in AppSheet) ──
-    const appSheetRow: Record<string, any> = { _id: id }
-    if (updateDoc.dealer !== undefined) appSheetRow.dealer = updateDoc.dealer
-    if (updateDoc.phone !== undefined) appSheetRow.phone = updateDoc.phone
-    if (updateDoc.email !== undefined) appSheetRow.email = updateDoc.email
-    if (updateDoc.address !== undefined) appSheetRow.address = updateDoc.address
-    if (updateDoc.notes !== undefined) appSheetRow.notes = updateDoc.notes
-    if (updateDoc.status !== undefined) appSheetRow.status = updateDoc.status
-    if (updateDoc.isTaxApplied !== undefined) appSheetRow.isTaxApplied = updateDoc.isTaxApplied
-    if (updateDoc.taxPercentage !== undefined) appSheetRow.taxPercentage = updateDoc.taxPercentage
+    // ── Sync to AppSheet — but NOT isTaxApplied / taxPercentage ──
+    // These are web-only fields. Sending them to AppSheet triggers a webhook
+    // echo that overwrites MongoDB back to the old values. We manage them
+    // exclusively in MongoDB.
+    const hasNonTaxFields = (
+      body.dealer !== undefined ||
+      body.phone !== undefined ||
+      body.email !== undefined ||
+      body.address !== undefined ||
+      body.notes !== undefined ||
+      body.status !== undefined ||
+      body.contacts !== undefined
+    )
 
-    console.log('[PATCH] AppSheet sync row=', JSON.stringify(appSheetRow))
-    try {
-      const appSheetResult = await appSheetEdit('Dealers', [appSheetRow])
-      console.log('[PATCH] AppSheet sync result=', JSON.stringify(appSheetResult)?.slice(0, 300))
-    } catch (syncErr: any) {
-      console.error('[PATCH] AppSheet sync FAILED:', syncErr.message)
+    if (hasNonTaxFields) {
+      const appSheetRow: Record<string, any> = { _id: id }
+      if (updateDoc.dealer !== undefined) appSheetRow.dealer = updateDoc.dealer
+      if (updateDoc.phone !== undefined) appSheetRow.phone = updateDoc.phone
+      if (updateDoc.email !== undefined) appSheetRow.email = updateDoc.email
+      if (updateDoc.address !== undefined) appSheetRow.address = updateDoc.address
+      if (updateDoc.notes !== undefined) appSheetRow.notes = updateDoc.notes
+      if (updateDoc.status !== undefined) appSheetRow.status = updateDoc.status
+
+      console.log('[PATCH] AppSheet sync row=', JSON.stringify(appSheetRow))
+      try {
+        const appSheetResult = await appSheetEdit('Dealers', [appSheetRow])
+        console.log('[PATCH] AppSheet sync result=', JSON.stringify(appSheetResult)?.slice(0, 300))
+      } catch (syncErr: any) {
+        console.error('[PATCH] AppSheet sync FAILED:', syncErr.message)
+      }
+    } else {
+      console.log('[PATCH] Skipping AppSheet sync — only tax fields changed (no echo webhook).')
     }
 
     // Delayed re-verification: check if webhook overwrites the value
@@ -74,7 +90,13 @@ export default defineEventHandler(async (event) => {
     }, 3000)
 
     console.log('[PATCH] ── END ──')
-    return { success: true, matchedCount: result.matchedCount, modifiedCount: result.modifiedCount }
+    return {
+      success: true,
+      matchedCount: result.matchedCount,
+      modifiedCount: result.modifiedCount,
+      isTaxApplied: verified?.isTaxApplied,
+      taxPercentage: verified?.taxPercentage,
+    }
   } catch (error: any) {
     console.error('[PATCH] ERROR:', error.message)
     throw createError({ statusCode: 500, statusMessage: error.message })
