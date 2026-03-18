@@ -57,21 +57,26 @@ export const DealersMapper = {
   },
   toMongo(appSheetRow: any): Record<string, any> {
     const doc: Record<string, any> = {
-      dealer: appSheetRow.dealer || '',
-      phone: appSheetRow.phone || '',
-      email: appSheetRow.email || '',
-      address: appSheetRow.address || '',
-      notes: appSheetRow.notes || '',
-      status: appSheetRow.status || 'Pending',
-      createdAt: appSheetRow.createdAt ? new Date(appSheetRow.createdAt) : new Date(),
       updatedAt: new Date(),
     }
 
-    if (appSheetRow.isTaxApplied !== undefined) {
-      doc.isTaxApplied = appSheetRow.isTaxApplied === true || appSheetRow.isTaxApplied === 'true'
+    if (appSheetRow.dealer !== undefined && appSheetRow.dealer !== null) doc.dealer = appSheetRow.dealer
+    if (appSheetRow.phone !== undefined && appSheetRow.phone !== null) doc.phone = appSheetRow.phone
+    if (appSheetRow.email !== undefined && appSheetRow.email !== null) doc.email = appSheetRow.email
+    if (appSheetRow.address !== undefined && appSheetRow.address !== null) doc.address = appSheetRow.address
+    if (appSheetRow.notes !== undefined && appSheetRow.notes !== null) doc.notes = appSheetRow.notes
+    if (appSheetRow.status !== undefined && appSheetRow.status !== null) doc.status = appSheetRow.status
+    if (appSheetRow.createdAt !== undefined && appSheetRow.createdAt !== null) doc.createdAt = new Date(appSheetRow.createdAt)
+
+    if (appSheetRow.isTaxApplied !== undefined && appSheetRow.isTaxApplied !== null && appSheetRow.isTaxApplied !== '') {
+      const v = appSheetRow.isTaxApplied
+      doc.isTaxApplied = v === true || v === 1 || v === '1' || (typeof v === 'string' && ['true', 'yes', 'y'].includes(v.toLowerCase()))
+      console.log(`[Mapper] Mapped isTaxApplied: raw="${v}" -> ${doc.isTaxApplied}`)
     }
-    if (appSheetRow.taxPercentage !== undefined) {
-      doc.taxPercentage = Number(appSheetRow.taxPercentage) || 0
+    
+    if (appSheetRow.taxPercentage !== undefined && appSheetRow.taxPercentage !== null && appSheetRow.taxPercentage !== '') {
+      doc.taxPercentage = Number(appSheetRow.taxPercentage)
+      console.log(`[Mapper] Mapped taxPercentage: raw="${appSheetRow.taxPercentage}" -> ${doc.taxPercentage}`)
     }
 
     return doc

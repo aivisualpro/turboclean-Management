@@ -159,8 +159,34 @@ export default defineEventHandler(async (event) => {
             filter = { _id: rowId }
           }
 
+          // For Dealers: preserve isTaxApplied and taxPercentage if AppSheet didn't send them
+          // OR if we just updated them ourselves from the Web UI (within 10 seconds)
+          if (table === 'Dealers') {
+            const existing = await collection.findOne(filter)
+            if (existing) {
+              const now = Date.now()
+              const lastUpdate = existing.updatedAt instanceof Date ? existing.updatedAt.getTime() : (typeof existing.updatedAt === 'string' ? new Date(existing.updatedAt).getTime() : 0)
+              const recentlyByUI = existing.lastUpdatedBy === 'web-ui' && (now - lastUpdate) < 10000 // 10 second guard
+
+              if (recentlyByUI) {
+                console.log(`[Webhook] Ignoring AppSheet tax updates for ${rowId} because Web UI updated it ${now - lastUpdate}ms ago.`)
+                // Preserve what's in DB
+                mongoDoc.isTaxApplied = existing.isTaxApplied
+                mongoDoc.taxPercentage = existing.taxPercentage
+              } else {
+                // Not recently via UI, so if AppSheet didn't send them, preserve them anyway
+                if (mongoDoc.isTaxApplied === undefined && existing.isTaxApplied !== undefined) {
+                  mongoDoc.isTaxApplied = existing.isTaxApplied
+                }
+                if (mongoDoc.taxPercentage === undefined && existing.taxPercentage !== undefined) {
+                  mongoDoc.taxPercentage = existing.taxPercentage
+                }
+              }
+            }
+          }
+
           const updateResult = await collection.updateOne(filter, {
-            $set: { ...mongoDoc, updatedAt: new Date() },
+            $set: { ...mongoDoc, updatedAt: new Date(), lastUpdatedBy: 'appsheet-webhook' },
           })
 
           results.push({

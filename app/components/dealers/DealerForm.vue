@@ -28,6 +28,8 @@ const contactMethods: { value: PreferredContactMethod, label: string }[] = [
 const dealerName = ref('')
 const address = ref('')
 const status = ref<DealerStatus>('Pending')
+const isTaxApplied = ref(false)
+const taxPercentage = ref(0)
 const contacts = ref<DealerContact[]>([])
 
 watch(() => props.dealer, (d) => {
@@ -35,6 +37,8 @@ watch(() => props.dealer, (d) => {
     dealerName.value = d.dealerName
     address.value = d.address
     status.value = d.status
+    isTaxApplied.value = d.isTaxApplied
+    taxPercentage.value = d.taxPercentage
     contacts.value = JSON.parse(JSON.stringify(d.contacts))
   }
   else {
@@ -134,6 +138,8 @@ function onSubmit() {
       dealerName: dealerName.value.trim(),
       address: address.value.trim(),
       status: status.value,
+      isTaxApplied: isTaxApplied.value,
+      taxPercentage: taxPercentage.value,
       contacts: cleanContacts,
     })
     toast.success('Dealer updated')
@@ -143,6 +149,8 @@ function onSubmit() {
       dealerName: dealerName.value.trim(),
       address: address.value.trim(),
       status: status.value,
+      isTaxApplied: isTaxApplied.value,
+      taxPercentage: taxPercentage.value,
       contacts: cleanContacts,
     })
     toast.success('Dealer added')
@@ -185,6 +193,17 @@ function onSubmit() {
                 </SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div class="flex items-center justify-between border rounded-lg p-3 bg-muted/5">
+            <div class="space-y-0.5">
+              <Label class="text-sm">Apply Tax</Label>
+              <p class="text-[11px] text-muted-foreground">Apply dealer-specific tax to all work orders.</p>
+            </div>
+            <Switch v-model:checked="isTaxApplied" />
+          </div>
+          <div v-if="isTaxApplied" class="grid gap-2 animate-in fade-in slide-in-from-top-1">
+            <Label>Tax Percentage (%)</Label>
+            <Input type="number" step="0.01" v-model.number="taxPercentage" placeholder="0.00" />
           </div>
         </div>
 

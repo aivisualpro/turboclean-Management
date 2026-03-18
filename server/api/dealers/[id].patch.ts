@@ -17,7 +17,8 @@ export default defineEventHandler(async (event) => {
     const { db } = await connectToDatabase()
 
     const updateDoc: Record<string, any> = {
-      updatedAt: new Date()
+      updatedAt: new Date(),
+      lastUpdatedBy: 'web-ui'
     }
 
     // Only set fields that are explicitly provided

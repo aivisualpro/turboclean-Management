@@ -87,21 +87,8 @@ export function useDealers() {
   }
 
   function updateDealer(id: string, updates: Partial<Pick<Dealer, 'dealerName' | 'address' | 'status' | 'contacts' | 'isTaxApplied' | 'taxPercentage'>>) {
-    // For now, optimistic update UI, should add PUT /api/dealers/:id
-    const idx = dealers.value.findIndex(d => d.id === id)
-    if (idx === -1) return
-    const existing = dealers.value[idx]!
-    dealers.value[idx] = {
-      id: existing.id,
-      dealerName: updates.dealerName ?? existing.dealerName,
-      address: updates.address ?? existing.address,
-      contacts: updates.contacts ?? existing.contacts,
-      status: updates.status ?? existing.status,
-      isTaxApplied: updates.isTaxApplied ?? existing.isTaxApplied,
-      taxPercentage: updates.taxPercentage ?? existing.taxPercentage,
-      createdAt: existing.createdAt,
-      updatedAt: new Date().toISOString(),
-    }
+    // Call patchDealer to handle both optimistic UI and API persistence
+    return patchDealer(id, updates)
   }
 
   /** Patch a dealer field and sync to backend + AppSheet */
