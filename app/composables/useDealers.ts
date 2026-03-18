@@ -106,18 +106,18 @@ export function useDealers() {
 
   /** Patch a dealer field and sync to backend + AppSheet */
   async function patchDealer(id: string, updates: Record<string, any>) {
-    console.log('[patchDealer] called with id=', id, 'updates=', updates)
+    console.log('[patchDealer] called with id=', id, 'updates=', JSON.stringify(updates))
     // Optimistic: update UI immediately
     const idx = dealers.value.findIndex(d => d.id === id)
     if (idx === -1) {
       console.error('[patchDealer] dealer not found in state:', id)
       return
     }
-    const existing = dealers.value[idx]!
-    const snapshot = { ...existing }
+    const snapshot = { ...dealers.value[idx]! }
 
-    // Use Object.assign to trigger Vue reactivity properly
-    Object.assign(existing, updates, { updatedAt: new Date().toISOString() })
+    // Replace the entire array item to guarantee Vue reactivity triggers v-if etc.
+    dealers.value[idx] = { ...snapshot, ...updates, updatedAt: new Date().toISOString() }
+    console.log('[patchDealer] optimistic update done, isTaxApplied=', dealers.value[idx]!.isTaxApplied)
 
     // Background: API call
     try {

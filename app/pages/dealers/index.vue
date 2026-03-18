@@ -79,35 +79,24 @@ function handleStatusChange(id: string, status: DealerStatus) {
   toast.success(`Status updated to ${status}`)
 }
 
-function handleToggleTax(d: Dealer, val?: boolean) {
+async function handleToggleTax(d: Dealer, val?: boolean) {
   const newVal = val !== undefined ? val : !d.isTaxApplied
-  console.log('[handleToggleTax] Clicked! Dealer:', d.dealerName, 'id=', d.id, 'Current tax state:', d.isTaxApplied, 'Setting to:', newVal)
+  console.log('[handleToggleTax] dealer=', d.dealerName, 'id=', d.id, 'setting isTaxApplied=', newVal)
   
-  toast.success(newVal ? 'Tax enabled' : 'Tax disabled')
+  toast.success(`Tax ${newVal ? 'enabled' : 'disabled'} for ${d.dealerName} (id: ${d.id})`)
   
-  const updates: Record<string, any> = {
-    isTaxApplied: newVal,
-  }
+  const updates: Record<string, any> = { isTaxApplied: newVal }
   if (!newVal) {
     updates.taxPercentage = 0
   }
   
-  // Optimistic UI update
-  d.isTaxApplied = newVal
-  if (!newVal) d.taxPercentage = 0
-  
-  console.log('[handleToggleTax] Sending PATCH body=', JSON.stringify(updates))
-  $fetch(`/api/dealers/${d.id}`, {
-    method: 'PATCH',
-    body: updates,
-  }).then((res: any) => {
-    console.log('[handleToggleTax] API response:', JSON.stringify(res))
-  }).catch(err => {
-    console.error('[handleToggleTax] API FAILED', err)
-    toast.error('Failed to update tax in database')
-    // Revert
-    d.isTaxApplied = !newVal
-  })
+  try {
+    await patchDealer(d.id, updates)
+    toast.success(`Saved to DB: isTaxApplied=${newVal}`)
+  } catch (err: any) {
+    console.error('[handleToggleTax] patchDealer error:', err)
+    toast.error(`PATCH FAILED: ${err?.message || err}`)
+  }
 }
 
 function handleTaxPercentageChange(d: Dealer, inputEl: EventTarget | null) {
@@ -355,6 +344,7 @@ async function handleDeleteAllServices() {
                     </td>
                     <td class="p-4 text-center cursor-pointer" @click.stop>
                       <Switch
+                        :key="`tax-${d.id}-${d.isTaxApplied}`"
                         :checked="d.isTaxApplied"
                         @update:checked="(val: boolean) => handleToggleTax(d, val)"
                         class="data-[state=checked]:bg-emerald-500"

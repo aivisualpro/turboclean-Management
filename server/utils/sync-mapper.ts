@@ -50,8 +50,8 @@ export const DealersMapper = {
       email: mongoDoc.email || '',
       address: mongoDoc.address || '',
       notes: mongoDoc.notes || '',
-      'isTaxApplied?': mongoDoc.isTaxApplied ? 'Y' : 'N',
-      Tax: Number(mongoDoc.taxPercentage) || 0,
+      isTaxApplied: mongoDoc.isTaxApplied === true,
+      taxPercentage: Number(mongoDoc.taxPercentage) || 0,
       status: mongoDoc.status || 'Pending',
     }
   },
@@ -66,27 +66,14 @@ export const DealersMapper = {
       createdAt: appSheetRow.createdAt ? new Date(appSheetRow.createdAt) : new Date(),
       updatedAt: new Date(),
     }
-    
-    // Process isTaxApplied ONLY if the key exists in the AppSheet row
-    const taxKeys = ['isTaxApplied?', 'isTaxApplied', 'IsTaxApplied', 'is tax applied', 'Tax Applied']
-    const hasTaxKey = taxKeys.some(k => appSheetRow[k] !== undefined)
-    if (hasTaxKey) {
-      const val = appSheetRow['isTaxApplied?'] ?? appSheetRow['isTaxApplied'] ?? appSheetRow['IsTaxApplied'] ?? appSheetRow['is tax applied'] ?? appSheetRow['Tax Applied']
-      if (val !== undefined && val !== null && val !== '') {
-        const str = String(val).trim().toLowerCase()
-        doc.isTaxApplied = str === 'y' || str === 'yes' || str === 'true' || val === true || val === 1
-      } else {
-        doc.isTaxApplied = false
-      }
+
+    if (appSheetRow.isTaxApplied !== undefined) {
+      doc.isTaxApplied = appSheetRow.isTaxApplied === true || appSheetRow.isTaxApplied === 'true'
     }
-    
-    // Process Tax ONLY if the key exists
-    const percKeys = ['Tax', 'tax', 'Tax Percentage', 'taxPercentage']
-    const hasPercKey = percKeys.some(k => appSheetRow[k] !== undefined)
-    if (hasPercKey) {
-      doc.taxPercentage = Number(appSheetRow.Tax ?? appSheetRow.tax ?? appSheetRow['Tax Percentage'] ?? appSheetRow.taxPercentage) || 0
+    if (appSheetRow.taxPercentage !== undefined) {
+      doc.taxPercentage = Number(appSheetRow.taxPercentage) || 0
     }
-    
+
     return doc
   },
 }

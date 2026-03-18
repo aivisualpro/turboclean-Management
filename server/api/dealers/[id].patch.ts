@@ -9,8 +9,6 @@ export default defineEventHandler(async (event) => {
     console.log('[PATCH /api/dealers/:id] ── START ──')
     console.log('[PATCH] id=', id)
     console.log('[PATCH] raw body=', JSON.stringify(body))
-    console.log('[PATCH] body.isTaxApplied=', body.isTaxApplied, 'type=', typeof body.isTaxApplied)
-    console.log('[PATCH] body.taxPercentage=', body.taxPercentage, 'type=', typeof body.taxPercentage)
 
     if (!id || id.length !== 24) {
       console.error('[PATCH] Invalid ID! length=', id?.length)
@@ -43,7 +41,6 @@ export default defineEventHandler(async (event) => {
     // Verify the write by re-reading the document
     const verified = await db.collection('turboCleanDealers').findOne({ _id: new ObjectId(id) })
     console.log('[PATCH] Verified doc: isTaxApplied=', verified?.isTaxApplied, 'taxPercentage=', verified?.taxPercentage)
-    console.log('[PATCH] ── END ──')
 
     // ── Sync to AppSheet (only fields that exist in AppSheet) ──
     const appSheetRow: Record<string, any> = { _id: id }
@@ -53,13 +50,29 @@ export default defineEventHandler(async (event) => {
     if (updateDoc.address !== undefined) appSheetRow.address = updateDoc.address
     if (updateDoc.notes !== undefined) appSheetRow.notes = updateDoc.notes
     if (updateDoc.status !== undefined) appSheetRow.status = updateDoc.status
-    if (updateDoc.isTaxApplied !== undefined) appSheetRow['isTaxApplied?'] = updateDoc.isTaxApplied ? 'Y' : 'N'
-    if (updateDoc.taxPercentage !== undefined) appSheetRow.Tax = updateDoc.taxPercentage
+    if (updateDoc.isTaxApplied !== undefined) appSheetRow.isTaxApplied = updateDoc.isTaxApplied
+    if (updateDoc.taxPercentage !== undefined) appSheetRow.taxPercentage = updateDoc.taxPercentage
 
-    appSheetEdit('Dealers', [appSheetRow]).catch(err =>
-      console.error('[Sync] Failed to edit dealer in AppSheet:', err)
-    )
+    console.log('[PATCH] AppSheet sync row=', JSON.stringify(appSheetRow))
+    try {
+      const appSheetResult = await appSheetEdit('Dealers', [appSheetRow])
+      console.log('[PATCH] AppSheet sync result=', JSON.stringify(appSheetResult)?.slice(0, 300))
+    } catch (syncErr: any) {
+      console.error('[PATCH] AppSheet sync FAILED:', syncErr.message)
+    }
 
+    // Delayed re-verification: check if webhook overwrites the value
+    setTimeout(async () => {
+      try {
+        const { db: db2 } = await connectToDatabase()
+        const recheck = await db2.collection('turboCleanDealers').findOne({ _id: new ObjectId(id) })
+        console.log('[PATCH] 3s RE-CHECK: isTaxApplied=', recheck?.isTaxApplied, 'taxPercentage=', recheck?.taxPercentage)
+      } catch (e: any) {
+        console.error('[PATCH] 3s RE-CHECK failed:', e.message)
+      }
+    }, 3000)
+
+    console.log('[PATCH] ── END ──')
     return { success: true, matchedCount: result.matchedCount, modifiedCount: result.modifiedCount }
   } catch (error: any) {
     console.error('[PATCH] ERROR:', error.message)
