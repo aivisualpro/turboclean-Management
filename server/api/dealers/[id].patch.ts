@@ -54,7 +54,7 @@ export default defineEventHandler(async (event) => {
     if (updateDoc.address !== undefined) appSheetRow.address = updateDoc.address
     if (updateDoc.notes !== undefined) appSheetRow.notes = updateDoc.notes
     if (updateDoc.status !== undefined) appSheetRow.status = updateDoc.status
-    if (updateDoc.isTaxApplied !== undefined) appSheetRow.isTaxApplied = updateDoc.isTaxApplied
+    if (updateDoc.isTaxApplied !== undefined) appSheetRow.isTaxApplied = updateDoc.isTaxApplied ? 'Y' : 'N'
     if (updateDoc.taxPercentage !== undefined) appSheetRow.taxPercentage = updateDoc.taxPercentage
 
     // Only sync if there are actual fields to send (beyond _id)

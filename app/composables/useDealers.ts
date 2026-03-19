@@ -94,19 +94,20 @@ export function useDealers() {
   /** Patch a dealer field and sync to backend + AppSheet */
   async function patchDealer(id: string, updates: Record<string, any>) {
     console.log('[patchDealer] called with id=', id, 'updates=', JSON.stringify(updates))
-    // Optimistic: update UI immediately
+    // Optimistic: update UI immediately (if dealer is in local state)
     const idx = dealers.value.findIndex(d => d.id === id)
-    if (idx === -1) {
-      console.error('[patchDealer] dealer not found in state:', id)
-      return
+    let snapshot: Dealer | null = null
+
+    if (idx !== -1) {
+      snapshot = { ...dealers.value[idx]! }
+      // Replace the entire array item to guarantee Vue reactivity triggers v-if etc.
+      dealers.value[idx] = { ...snapshot, ...updates, updatedAt: new Date().toISOString() }
+      console.log('[patchDealer] optimistic update done, isTaxApplied=', dealers.value[idx]!.isTaxApplied)
+    } else {
+      console.warn('[patchDealer] dealer not found in state — will still call API. id=', id)
     }
-    const snapshot = { ...dealers.value[idx]! }
 
-    // Replace the entire array item to guarantee Vue reactivity triggers v-if etc.
-    dealers.value[idx] = { ...snapshot, ...updates, updatedAt: new Date().toISOString() }
-    console.log('[patchDealer] optimistic update done, isTaxApplied=', dealers.value[idx]!.isTaxApplied)
-
-    // Background: API call
+    // Always make the API call regardless of local state
     try {
       const result: any = await $fetch(`/api/dealers/${id}`, {
         method: 'PATCH',
@@ -115,22 +116,32 @@ export function useDealers() {
       console.log('[patchDealer] API success:', result)
 
       // Sync confirmed values from the API response into local state.
-      // This ensures the UI always reflects what is actually in MongoDB.
-      if (result && idx !== -1) {
-        const current = dealers.value[idx]
+      // Re-find index as it may have changed if dealers were refetched.
+      const confirmedIdx = dealers.value.findIndex(d => d.id === id)
+      if (result && confirmedIdx !== -1) {
+        const current = dealers.value[confirmedIdx]
         if (current) {
-          dealers.value[idx] = {
+          dealers.value[confirmedIdx] = {
             ...current,
             isTaxApplied: result.isTaxApplied !== undefined ? result.isTaxApplied : current.isTaxApplied,
             taxPercentage: result.taxPercentage !== undefined ? result.taxPercentage : current.taxPercentage,
           }
-          console.log('[patchDealer] confirmed from DB — isTaxApplied=', dealers.value[idx]!.isTaxApplied, 'taxPercentage=', dealers.value[idx]!.taxPercentage)
+          console.log('[patchDealer] confirmed from DB — isTaxApplied=', dealers.value[confirmedIdx]!.isTaxApplied, 'taxPercentage=', dealers.value[confirmedIdx]!.taxPercentage)
         }
       }
+
+      // If dealers weren't loaded yet, trigger a refresh to load fresh data
+      if (idx === -1) {
+        console.log('[patchDealer] dealers state was empty, fetching fresh data...')
+        await fetchDealers()
+      }
     } catch (err) {
-      // Rollback on failure
+      // Rollback on failure (only if we had a snapshot)
       console.error('[patchDealer] API failed:', err)
-      dealers.value[idx] = snapshot
+      if (snapshot && idx !== -1 && dealers.value[idx]) {
+        dealers.value[idx] = snapshot
+      }
+      throw err // Re-throw so callers can handle it
     }
   }
 

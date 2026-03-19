@@ -50,7 +50,7 @@ export const DealersMapper = {
       email: mongoDoc.email || '',
       address: mongoDoc.address || '',
       notes: mongoDoc.notes || '',
-      isTaxApplied: mongoDoc.isTaxApplied === true,
+      isTaxApplied: mongoDoc.isTaxApplied === true ? 'Y' : 'N',
       taxPercentage: Number(mongoDoc.taxPercentage) || 0,
       status: mongoDoc.status || 'Pending',
     }
