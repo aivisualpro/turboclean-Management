@@ -70,8 +70,8 @@ export function useDealers() {
     }
   }
 
-  // Fetch on client init if empty
-  if (import.meta.client && dealers.value.length === 0) {
+  // Fetch on client init (always, to ensure fresh data)
+  if (import.meta.client) {
     fetchDealers()
   }
 
@@ -108,11 +108,25 @@ export function useDealers() {
 
     // Background: API call
     try {
-      const result = await $fetch(`/api/dealers/${id}`, {
+      const result: any = await $fetch(`/api/dealers/${id}`, {
         method: 'PATCH',
         body: updates,
       })
       console.log('[patchDealer] API success:', result)
+
+      // Sync confirmed values from the API response into local state.
+      // This ensures the UI always reflects what is actually in MongoDB.
+      if (result && idx !== -1) {
+        const current = dealers.value[idx]
+        if (current) {
+          dealers.value[idx] = {
+            ...current,
+            isTaxApplied: result.isTaxApplied !== undefined ? result.isTaxApplied : current.isTaxApplied,
+            taxPercentage: result.taxPercentage !== undefined ? result.taxPercentage : current.taxPercentage,
+          }
+          console.log('[patchDealer] confirmed from DB — isTaxApplied=', dealers.value[idx]!.isTaxApplied, 'taxPercentage=', dealers.value[idx]!.taxPercentage)
+        }
+      }
     } catch (err) {
       // Rollback on failure
       console.error('[patchDealer] API failed:', err)
