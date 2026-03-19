@@ -308,7 +308,7 @@ async function handleDeleteAllServices() {
                     :key="d.id"
                     class="border-b cursor-pointer transition-colors hover:bg-muted/30"
                     :class="{ 'bg-muted/50': selectedDealer === d.id }"
-                    @click="navigateTo(`/dealers/${d.id}/services`)"
+                    @click="navigateTo(`/dealers/${d.id}/details`)"
                   >
                     <td class="p-4 font-medium">
                       {{ d.dealerName }}

@@ -29,13 +29,14 @@ const dealer = computed(() => dealers.value.find(d => d.id === dealerId))
 const activeTabLabel = computed(() => {
   const pathEnd = route.path.split('/').pop()
   const tabLabels: Record<string, string> = {
+    details: 'Details',
     services: 'Services',
     contacts: 'Contacts',
     'work-orders': 'Work Orders',
     invoices: 'Invoices',
     emails: 'Emails',
   }
-  return tabLabels[pathEnd || ''] || 'Services'
+  return tabLabels[pathEnd || ''] || 'Details'
 })
 
 // Set header dynamically
@@ -92,6 +93,7 @@ function handleStatusChange(status: DealerStatus) {
 
 // Tab navigation
 const tabs = [
+  { id: 'details', label: 'Details', icon: 'i-lucide-info', path: 'details' },
   { id: 'services', label: 'Services', icon: 'i-lucide-briefcase', path: 'services' },
   { id: 'contacts', label: 'Contacts', icon: 'i-lucide-users', path: 'contacts' },
   { id: 'work-orders', label: 'Work Orders', icon: 'i-lucide-wrench', path: 'work-orders' },
@@ -101,7 +103,7 @@ const tabs = [
 
 const activeTab = computed(() => {
   const pathEnd = route.path.split('/').pop()
-  return tabs.find(t => t.path === pathEnd)?.id || 'services'
+  return tabs.find(t => t.path === pathEnd)?.id || 'details'
 })
 </script>
 

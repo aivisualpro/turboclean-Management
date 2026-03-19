@@ -44,29 +44,21 @@ export default defineEventHandler(async (event) => {
     const verified = await db.collection('turboCleanDealers').findOne({ _id: new ObjectId(id) })
     console.log('[PATCH] Verified doc: isTaxApplied=', verified?.isTaxApplied, 'taxPercentage=', verified?.taxPercentage)
 
-    // ── Sync to AppSheet — but NOT isTaxApplied / taxPercentage ──
-    // These are web-only fields. Sending them to AppSheet triggers a webhook
-    // echo that overwrites MongoDB back to the old values. We manage them
-    // exclusively in MongoDB.
-    const hasNonTaxFields = (
-      body.dealer !== undefined ||
-      body.phone !== undefined ||
-      body.email !== undefined ||
-      body.address !== undefined ||
-      body.notes !== undefined ||
-      body.status !== undefined ||
-      body.contacts !== undefined
-    )
+    // ── Sync ALL changed fields to AppSheet ──
+    // The webhook handler already preserves tax fields from MongoDB,
+    // so it is safe to sync isTaxApplied/taxPercentage to AppSheet.
+    const appSheetRow: Record<string, any> = { _id: id }
+    if (updateDoc.dealer !== undefined) appSheetRow.dealer = updateDoc.dealer
+    if (updateDoc.phone !== undefined) appSheetRow.phone = updateDoc.phone
+    if (updateDoc.email !== undefined) appSheetRow.email = updateDoc.email
+    if (updateDoc.address !== undefined) appSheetRow.address = updateDoc.address
+    if (updateDoc.notes !== undefined) appSheetRow.notes = updateDoc.notes
+    if (updateDoc.status !== undefined) appSheetRow.status = updateDoc.status
+    if (updateDoc.isTaxApplied !== undefined) appSheetRow.isTaxApplied = updateDoc.isTaxApplied
+    if (updateDoc.taxPercentage !== undefined) appSheetRow.taxPercentage = updateDoc.taxPercentage
 
-    if (hasNonTaxFields) {
-      const appSheetRow: Record<string, any> = { _id: id }
-      if (updateDoc.dealer !== undefined) appSheetRow.dealer = updateDoc.dealer
-      if (updateDoc.phone !== undefined) appSheetRow.phone = updateDoc.phone
-      if (updateDoc.email !== undefined) appSheetRow.email = updateDoc.email
-      if (updateDoc.address !== undefined) appSheetRow.address = updateDoc.address
-      if (updateDoc.notes !== undefined) appSheetRow.notes = updateDoc.notes
-      if (updateDoc.status !== undefined) appSheetRow.status = updateDoc.status
-
+    // Only sync if there are actual fields to send (beyond _id)
+    if (Object.keys(appSheetRow).length > 1) {
       console.log('[PATCH] AppSheet sync row=', JSON.stringify(appSheetRow))
       try {
         const appSheetResult = await appSheetEdit('Dealers', [appSheetRow])
@@ -75,7 +67,7 @@ export default defineEventHandler(async (event) => {
         console.error('[PATCH] AppSheet sync FAILED:', syncErr.message)
       }
     } else {
-      console.log('[PATCH] Skipping AppSheet sync — only tax fields changed (no echo webhook).')
+      console.log('[PATCH] No fields to sync to AppSheet.')
     }
 
     // Delayed re-verification: check if webhook overwrites the value

@@ -2,8 +2,8 @@
 const route = useRoute()
 const id = route.params.id as string
 
-// Redirect /dealers/:id to /dealers/:id/services
-navigateTo(`/dealers/${id}/services`, { replace: true })
+// Redirect /dealers/:id to /dealers/:id/details
+navigateTo(`/dealers/${id}/details`, { replace: true })
 </script>
 
 <template>
