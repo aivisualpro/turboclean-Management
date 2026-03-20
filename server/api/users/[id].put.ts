@@ -11,7 +11,7 @@ export default defineEventHandler(async (event) => {
     const body = await readBody(event)
     const { db } = await connectToDatabase()
     
-    const updateDoc = {
+    const updateDoc: Record<string, any> = {
       name: body.name,
       email: body.email,
       phone: body.phone,
@@ -20,24 +20,36 @@ export default defineEventHandler(async (event) => {
       role: body.role,
       status: body.status,
       password: body.password,
-      updatedAt: new Date()
+      updatedAt: new Date(),
+      lastUpdatedBy: 'web-ui',
     }
     
     // Remove undefined fields
-    Object.keys(updateDoc).forEach(key => (updateDoc as any)[key] === undefined && delete (updateDoc as any)[key])
+    Object.keys(updateDoc).forEach(key => updateDoc[key] === undefined && delete updateDoc[key])
 
     await db.collection('turboCleanAppUsers').updateOne(
       { _id: new ObjectId(id) },
       { $set: updateDoc }
     )
 
-    // ── Sync to AppSheet ──
-    const appSheetRow: any = { _id: id, ...updateDoc }
-    if (appSheetRow.updatedAt) appSheetRow.updatedAt = appSheetRow.updatedAt.toISOString()
-    if (Array.isArray(appSheetRow.registerDealers)) appSheetRow.registerDealers = appSheetRow.registerDealers.join(' , ')
-    appSheetEdit('AppUsers', [appSheetRow]).catch(err =>
-      console.error('[Sync] Failed to edit user in AppSheet:', err)
-    )
+    // ── Sync to AppSheet (fire-and-forget) ──
+    // Exclude registerDealers — it stores MongoDB ObjectIds which AppSheet doesn't understand.
+    // The webhook echo handler will detect this as a web-ui update and skip the write-back.
+    const appSheetRow: any = { _id: id }
+    if (updateDoc.name !== undefined) appSheetRow.name = updateDoc.name
+    if (updateDoc.email !== undefined) appSheetRow.email = updateDoc.email
+    if (updateDoc.phone !== undefined) appSheetRow.phone = updateDoc.phone
+    if (updateDoc.address !== undefined) appSheetRow.address = updateDoc.address
+    if (updateDoc.role !== undefined) appSheetRow.role = updateDoc.role
+    if (updateDoc.status !== undefined) appSheetRow.status = updateDoc.status
+    if (updateDoc.password !== undefined) appSheetRow.password = updateDoc.password
+    // NOTE: registerDealers intentionally NOT synced (MongoDB stores IDs, AppSheet stores names)
+
+    if (Object.keys(appSheetRow).length > 1) {
+      appSheetEdit('AppUsers', [appSheetRow]).catch(err =>
+        console.error('[Sync] Failed to edit user in AppSheet:', err)
+      )
+    }
 
     return { success: true }
   } catch (error: any) {

@@ -190,6 +190,15 @@ export default defineEventHandler(async (event) => {
             }
           }
 
+          // For AppUsers: ALWAYS preserve registerDealers from MongoDB.
+          // MongoDB stores dealer ObjectIds, AppSheet stores dealer names as comma-separated text.
+          // The mapper would convert names back to an array of name-strings, corrupting the ID array.
+          if (existing && table === 'AppUsers') {
+            if (existing.registerDealers !== undefined) {
+              mongoDoc.registerDealers = existing.registerDealers
+            }
+          }
+
           // Ensure mongoDoc doesn't forcefully overwrite lastUpdatedBy from the mapper
           delete mongoDoc.lastUpdatedBy
 

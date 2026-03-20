@@ -70,6 +70,18 @@ export default defineEventHandler(async (event) => {
           }
         }
 
+        // For AppUsers: snapshot registerDealers before replace
+        let dealersSnapshot: Map<string, string[]> | null = null
+        if (tableName === 'AppUsers') {
+          const existingDocs = await collection.find({}, { projection: { _id: 1, registerDealers: 1 } }).toArray()
+          dealersSnapshot = new Map()
+          for (const doc of existingDocs) {
+            if (Array.isArray(doc.registerDealers)) {
+              dealersSnapshot.set(doc._id.toString(), doc.registerDealers)
+            }
+          }
+        }
+
         // Delete all existing data and re-insert
         await collection.deleteMany({})
         const docs = appSheetRows.map((row: any) => {
@@ -81,6 +93,11 @@ export default defineEventHandler(async (event) => {
             const snap = taxSnapshot.get(rowId)!
             if (snap.isTaxApplied !== undefined) mongoDoc.isTaxApplied = snap.isTaxApplied
             if (snap.taxPercentage !== undefined) mongoDoc.taxPercentage = snap.taxPercentage
+          }
+
+          // Restore registerDealers from snapshot
+          if (dealersSnapshot && rowId && dealersSnapshot.has(rowId)) {
+            mongoDoc.registerDealers = dealersSnapshot.get(rowId)!
           }
 
           if (rowId && rowId.length === 24) {
@@ -114,6 +131,14 @@ export default defineEventHandler(async (event) => {
                   if (existing.taxPercentage !== undefined) {
                     mongoDoc.taxPercentage = existing.taxPercentage
                   }
+                }
+              }
+
+              // For AppUsers: preserve registerDealers (MongoDB stores IDs, AppSheet stores names)
+              if (tableName === 'AppUsers') {
+                const existing = await collection.findOne({ _id: new ObjectId(rowId) })
+                if (existing && Array.isArray(existing.registerDealers)) {
+                  mongoDoc.registerDealers = existing.registerDealers
                 }
               }
 
