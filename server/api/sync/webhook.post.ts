@@ -161,35 +161,40 @@ export default defineEventHandler(async (event) => {
 
           const existing = await collection.findOne(filter)
           
-          let actualLastUpdatedBy = 'appsheet-webhook'
-          
-          if (existing) {
-            // Echo prevention: If the web-ui updated this document less than 15 seconds ago,
-            // this webhook is almost certainly just an echo of our own API's appSheetEdit() call.
-            // We should preserve the 'web-ui' attribution.
-            if (existing.lastUpdatedBy === 'web-ui' && existing.updatedAt) {
-              const timeDiff = new Date().getTime() - new Date(existing.updatedAt).getTime()
-              if (timeDiff < 15000) {
-                actualLastUpdatedBy = 'web-ui'
-              }
-            }
-
-            // For Dealers: ALWAYS preserve isTaxApplied and taxPercentage from MongoDB.
-            if (table === 'Dealers') {
-              if (existing.isTaxApplied !== undefined) {
-                mongoDoc.isTaxApplied = existing.isTaxApplied
-              }
-              if (existing.taxPercentage !== undefined) {
-                mongoDoc.taxPercentage = existing.taxPercentage
-              }
+          // Echo prevention: If the web-ui updated this document recently,
+          // this webhook is just an echo of our own appSheetEdit() call.
+          // SKIP the MongoDB write entirely to prevent any overwriting.
+          if (existing && existing.lastUpdatedBy === 'web-ui' && existing.updatedAt) {
+            const timeDiff = new Date().getTime() - new Date(existing.updatedAt).getTime()
+            if (timeDiff < 30000) {
+              console.log(`[Webhook] ECHO detected for ${table}/${rowId} — skipping MongoDB write (web-ui updated ${Math.round(timeDiff/1000)}s ago)`)
+              results.push({
+                success: true,
+                action: 'edited',
+                id: rowId,
+                matched: 0,
+                modified: 0,
+                isEcho: true,
+              })
+              break
             }
           }
 
-          // Ensure mongoDoc doesn't forcefully overwrite it from the mapper
+          // For Dealers: ALWAYS preserve isTaxApplied and taxPercentage from MongoDB.
+          if (existing && table === 'Dealers') {
+            if (existing.isTaxApplied !== undefined) {
+              mongoDoc.isTaxApplied = existing.isTaxApplied
+            }
+            if (existing.taxPercentage !== undefined) {
+              mongoDoc.taxPercentage = existing.taxPercentage
+            }
+          }
+
+          // Ensure mongoDoc doesn't forcefully overwrite lastUpdatedBy from the mapper
           delete mongoDoc.lastUpdatedBy
 
           const updateResult = await collection.updateOne(filter, {
-            $set: { ...mongoDoc, updatedAt: new Date(), lastUpdatedBy: actualLastUpdatedBy },
+            $set: { ...mongoDoc, updatedAt: new Date(), lastUpdatedBy: 'appsheet-webhook' },
           })
 
           results.push({
@@ -198,7 +203,7 @@ export default defineEventHandler(async (event) => {
             id: rowId,
             matched: updateResult.matchedCount,
             modified: updateResult.modifiedCount,
-            isEcho: actualLastUpdatedBy === 'web-ui',
+            isEcho: false,
           })
           break
         }

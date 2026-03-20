@@ -36,10 +36,8 @@ export default defineEventHandler(async (event) => {
     // Verify the write
     const verified = await db.collection('turboCleanDealers').findOne({ _id: new ObjectId(id) })
 
-    // ── Sync NON-TAX fields to AppSheet (fire-and-forget) ──
-    // isTaxApplied and taxPercentage are MongoDB-only fields.
-    // NEVER send them to AppSheet — it triggers the "Sync Dealers Edit" bot
-    // which fires a webhook right back, creating an infinite echo loop.
+    // ── Sync changed fields to AppSheet (fire-and-forget) ──
+    // The webhook handler will detect this as an echo and skip the write-back.
     const appSheetRow: Record<string, any> = { _id: id }
     if (updateDoc.dealer !== undefined) appSheetRow.dealer = updateDoc.dealer
     if (updateDoc.phone !== undefined) appSheetRow.phone = updateDoc.phone
@@ -47,7 +45,8 @@ export default defineEventHandler(async (event) => {
     if (updateDoc.address !== undefined) appSheetRow.address = updateDoc.address
     if (updateDoc.notes !== undefined) appSheetRow.notes = updateDoc.notes
     if (updateDoc.status !== undefined) appSheetRow.status = updateDoc.status
-    // NOTE: isTaxApplied and taxPercentage are intentionally NOT synced to AppSheet
+    if (updateDoc.isTaxApplied !== undefined) appSheetRow.isTaxApplied = updateDoc.isTaxApplied ? 'Y' : 'N'
+    if (updateDoc.taxPercentage !== undefined) appSheetRow.taxPercentage = updateDoc.taxPercentage
 
     if (Object.keys(appSheetRow).length > 1) {
       appSheetEdit('Dealers', [appSheetRow])
