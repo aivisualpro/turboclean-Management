@@ -190,6 +190,27 @@ async function handleToggleTax(d: Dealer, val?: boolean) {
   }
 }
 
+// Debounced tax percentage save
+const taxPercentageTimers = new Map<string, ReturnType<typeof setTimeout>>()
+function handleTaxPercentageChange(d: Dealer, value: string) {
+  const num = parseFloat(value) || 0
+  // Optimistic local update
+  const idx = dealers.value.findIndex(x => x.id === d.id)
+  if (idx !== -1) {
+    dealers.value.splice(idx, 1, { ...dealers.value[idx]!, taxPercentage: num })
+  }
+  // Clear old timer for this dealer
+  if (taxPercentageTimers.has(d.id)) clearTimeout(taxPercentageTimers.get(d.id)!)
+  taxPercentageTimers.set(d.id, setTimeout(async () => {
+    try {
+      await patchDealer(d.id, { taxPercentage: num })
+      toast.success(`Tax set to ${num}% for ${d.dealerName}`)
+    } catch (err: any) {
+      toast.error(`Failed: ${err?.message || err}`)
+    }
+  }, 800))
+}
+
 function openAddForm() {
   editingDealer.value = null
   showForm.value = true
@@ -569,22 +590,41 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
                     </div>
 
                     <!-- ── Tax Toggle Row ── -->
-                    <label class="mt-4 pt-3 border-t border-border/40 flex items-center justify-between cursor-pointer group/tax" @click.stop>
-                      <div class="flex items-center gap-2">
-                        <div class="size-7 rounded-lg flex items-center justify-center transition-colors duration-300" :class="d.isTaxApplied ? 'bg-emerald-500/10' : 'bg-muted/50 group-hover/tax:bg-emerald-500/5'">
-                          <ShieldCheck class="size-3.5" :class="d.isTaxApplied ? 'text-emerald-600' : 'text-muted-foreground/50 group-hover/tax:text-emerald-600/50'" />
+                    <div class="mt-4 pt-3 border-t border-border/40" @click.stop>
+                      <label class="flex items-center justify-between cursor-pointer group/tax">
+                        <div class="flex items-center gap-2">
+                          <div class="size-7 rounded-lg flex items-center justify-center transition-colors duration-300" :class="d.isTaxApplied ? 'bg-emerald-500/10' : 'bg-muted/50 group-hover/tax:bg-emerald-500/5'">
+                            <ShieldCheck class="size-3.5" :class="d.isTaxApplied ? 'text-emerald-600' : 'text-muted-foreground/50 group-hover/tax:text-emerald-600/50'" />
+                          </div>
+                          <div>
+                            <p class="text-xs font-medium" :class="d.isTaxApplied ? 'text-foreground' : 'text-muted-foreground group-hover/tax:text-foreground'">Tax Settings</p>
+                            <p class="text-[10px] text-muted-foreground">{{ d.isTaxApplied ? `${d.taxPercentage}% applied` : 'Not applied' }}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p class="text-xs font-medium" :class="d.isTaxApplied ? 'text-foreground' : 'text-muted-foreground group-hover/tax:text-foreground'">Tax Settings</p>
-                          <p class="text-[10px] text-muted-foreground">{{ d.isTaxApplied ? `${d.taxPercentage}% applied` : 'Not applied' }}</p>
+                        <Switch
+                          :checked="d.isTaxApplied"
+                          @update:checked="(val: boolean) => handleToggleTax(d, val)"
+                          class="data-[state=checked]:bg-emerald-500"
+                        />
+                      </label>
+                      <!-- Tax Percentage Input -->
+                      <div v-if="d.isTaxApplied" class="mt-2.5 flex items-center gap-2 pl-9">
+                        <label class="text-[11px] text-muted-foreground whitespace-nowrap">Rate:</label>
+                        <div class="relative flex-1 max-w-[100px]">
+                          <input
+                            type="number"
+                            :value="d.taxPercentage"
+                            @input="(e: Event) => handleTaxPercentageChange(d, (e.target as HTMLInputElement).value)"
+                            step="0.1"
+                            min="0"
+                            max="100"
+                            class="w-full h-7 px-2 pr-6 text-xs rounded-md border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500 tabular-nums"
+                            placeholder="0"
+                          />
+                          <span class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span>
                         </div>
                       </div>
-                      <Switch
-                        :checked="d.isTaxApplied"
-                        @update:checked="(val: boolean) => handleToggleTax(d, val)"
-                        class="data-[state=checked]:bg-emerald-500"
-                      />
-                    </label>
+                    </div>
                   </div>
 
                   <!-- Card Footer -->

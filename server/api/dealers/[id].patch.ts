@@ -1,21 +1,13 @@
 import { connectToDatabase } from '../../utils/mongodb'
 import { ObjectId } from 'mongodb'
 import { appSheetEdit } from '../../utils/appsheet'
-import * as fs from 'fs'
 
 export default defineEventHandler(async (event) => {
   try {
     const id = getRouterParam(event, 'id')
     const body = await readBody(event)
-    const logMsg = `\n--- [PATCH] ${new Date().toISOString()} ---\nID: ${id}\nBODY: ${JSON.stringify(body)}\n`
-    fs.appendFileSync('/tmp/patch.log', logMsg)
-    
-    console.log('[PATCH /api/dealers/:id] ── START ──')
-    console.log('[PATCH] id=', id)
-    console.log('[PATCH] raw body=', JSON.stringify(body))
 
     if (!id || id.length !== 24) {
-      console.error('[PATCH] Invalid ID! length=', id?.length)
       throw createError({ statusCode: 400, statusMessage: 'Invalid dealer ID' })
     }
     const { db } = await connectToDatabase()
@@ -36,20 +28,18 @@ export default defineEventHandler(async (event) => {
     if (body.status !== undefined) updateDoc.status = body.status
     if (body.contacts !== undefined) updateDoc.contacts = body.contacts
 
-    console.log('[PATCH] updateDoc to $set=', JSON.stringify(updateDoc))
-
     const result = await db.collection('turboCleanDealers').updateOne(
       { _id: new ObjectId(id) },
       { $set: updateDoc }
     )
-    console.log('[PATCH] MongoDB result: matchedCount=', result.matchedCount, 'modifiedCount=', result.modifiedCount)
 
-    // Verify the write by re-reading the document
+    // Verify the write
     const verified = await db.collection('turboCleanDealers').findOne({ _id: new ObjectId(id) })
-    console.log('[PATCH] Verified doc: isTaxApplied=', verified?.isTaxApplied, 'taxPercentage=', verified?.taxPercentage)
 
-    // ── Fire-and-forget: Sync to AppSheet in background ──
-    // This is non-blocking so the HTTP response returns immediately after MongoDB write
+    // ── Sync NON-TAX fields to AppSheet (fire-and-forget) ──
+    // isTaxApplied and taxPercentage are MongoDB-only fields.
+    // NEVER send them to AppSheet — it triggers the "Sync Dealers Edit" bot
+    // which fires a webhook right back, creating an infinite echo loop.
     const appSheetRow: Record<string, any> = { _id: id }
     if (updateDoc.dealer !== undefined) appSheetRow.dealer = updateDoc.dealer
     if (updateDoc.phone !== undefined) appSheetRow.phone = updateDoc.phone
@@ -57,17 +47,13 @@ export default defineEventHandler(async (event) => {
     if (updateDoc.address !== undefined) appSheetRow.address = updateDoc.address
     if (updateDoc.notes !== undefined) appSheetRow.notes = updateDoc.notes
     if (updateDoc.status !== undefined) appSheetRow.status = updateDoc.status
-    if (updateDoc.isTaxApplied !== undefined) appSheetRow.isTaxApplied = updateDoc.isTaxApplied ? 'Y' : 'N'
-    if (updateDoc.taxPercentage !== undefined) appSheetRow.taxPercentage = updateDoc.taxPercentage
+    // NOTE: isTaxApplied and taxPercentage are intentionally NOT synced to AppSheet
 
     if (Object.keys(appSheetRow).length > 1) {
-      // Non-blocking — don't await
       appSheetEdit('Dealers', [appSheetRow])
-        .then(() => console.log('[PATCH] AppSheet sync accepted.'))
-        .catch(e => console.error('[PATCH] AppSheet sync FAILED (non-blocking):', e?.message))
+        .catch(e => console.error('[PATCH] AppSheet sync failed:', e?.message))
     }
 
-    console.log('[PATCH] ── END ──')
     return {
       success: true,
       matchedCount: result.matchedCount,
