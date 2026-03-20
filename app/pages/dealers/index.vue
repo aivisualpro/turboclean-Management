@@ -591,7 +591,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
 
                     <!-- ── Tax Toggle Row ── -->
                     <div class="mt-4 pt-3 border-t border-border/40" @click.stop>
-                      <label class="flex items-center justify-between cursor-pointer group/tax">
+                      <div class="flex items-center justify-between cursor-pointer group/tax">
                         <div class="flex items-center gap-2">
                           <div class="size-7 rounded-lg flex items-center justify-center transition-colors duration-300" :class="d.isTaxApplied ? 'bg-emerald-500/10' : 'bg-muted/50 group-hover/tax:bg-emerald-500/5'">
                             <ShieldCheck class="size-3.5" :class="d.isTaxApplied ? 'text-emerald-600' : 'text-muted-foreground/50 group-hover/tax:text-emerald-600/50'" />
@@ -606,7 +606,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
                           @update:checked="(val: boolean) => handleToggleTax(d, val)"
                           class="data-[state=checked]:bg-emerald-500"
                         />
-                      </label>
+                      </div>
                       <!-- Tax Percentage Input -->
                       <div v-if="d.isTaxApplied" class="mt-2.5 flex items-center gap-2 pl-9">
                         <label class="text-[11px] text-muted-foreground whitespace-nowrap">Rate:</label>
