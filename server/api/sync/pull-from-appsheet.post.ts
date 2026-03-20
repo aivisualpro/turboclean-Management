@@ -57,11 +57,32 @@ export default defineEventHandler(async (event) => {
       const collection = db.collection(collectionName)
 
       if (mode === 'replace') {
+        // For Dealers: snapshot tax fields before replace so we can restore them
+        let taxSnapshot: Map<string, { isTaxApplied?: boolean; taxPercentage?: number }> | null = null
+        if (tableName === 'Dealers') {
+          const existingDocs = await collection.find({}, { projection: { _id: 1, isTaxApplied: 1, taxPercentage: 1 } }).toArray()
+          taxSnapshot = new Map()
+          for (const doc of existingDocs) {
+            taxSnapshot.set(doc._id.toString(), {
+              isTaxApplied: doc.isTaxApplied,
+              taxPercentage: doc.taxPercentage,
+            })
+          }
+        }
+
         // Delete all existing data and re-insert
         await collection.deleteMany({})
         const docs = appSheetRows.map((row: any) => {
           const mongoDoc = mapper.toMongo(row)
           const rowId = row._id || row.id
+
+          // Restore tax fields from snapshot
+          if (taxSnapshot && rowId && taxSnapshot.has(rowId)) {
+            const snap = taxSnapshot.get(rowId)!
+            if (snap.isTaxApplied !== undefined) mongoDoc.isTaxApplied = snap.isTaxApplied
+            if (snap.taxPercentage !== undefined) mongoDoc.taxPercentage = snap.taxPercentage
+          }
+
           if (rowId && rowId.length === 24) {
             try {
               return { ...mongoDoc, _id: new ObjectId(rowId) }
@@ -82,6 +103,20 @@ export default defineEventHandler(async (event) => {
 
           if (rowId && rowId.length === 24) {
             try {
+              // For Dealers: preserve web-only tax fields from MongoDB
+              // AppSheet may hold stale values that would overwrite user settings
+              if (tableName === 'Dealers') {
+                const existing = await collection.findOne({ _id: new ObjectId(rowId) })
+                if (existing) {
+                  if (existing.isTaxApplied !== undefined) {
+                    mongoDoc.isTaxApplied = existing.isTaxApplied
+                  }
+                  if (existing.taxPercentage !== undefined) {
+                    mongoDoc.taxPercentage = existing.taxPercentage
+                  }
+                }
+              }
+
               await collection.updateOne(
                 { _id: new ObjectId(rowId) },
                 { $set: { ...mongoDoc, updatedAt: new Date() } },

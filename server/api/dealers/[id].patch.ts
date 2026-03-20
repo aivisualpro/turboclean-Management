@@ -1,11 +1,15 @@
 import { connectToDatabase } from '../../utils/mongodb'
 import { ObjectId } from 'mongodb'
 import { appSheetEdit } from '../../utils/appsheet'
+import * as fs from 'fs'
 
 export default defineEventHandler(async (event) => {
   try {
     const id = getRouterParam(event, 'id')
     const body = await readBody(event)
+    const logMsg = `\n--- [PATCH] ${new Date().toISOString()} ---\nID: ${id}\nBODY: ${JSON.stringify(body)}\n`
+    fs.appendFileSync('/tmp/patch.log', logMsg)
+    
     console.log('[PATCH /api/dealers/:id] ── START ──')
     console.log('[PATCH] id=', id)
     console.log('[PATCH] raw body=', JSON.stringify(body))
@@ -44,9 +48,8 @@ export default defineEventHandler(async (event) => {
     const verified = await db.collection('turboCleanDealers').findOne({ _id: new ObjectId(id) })
     console.log('[PATCH] Verified doc: isTaxApplied=', verified?.isTaxApplied, 'taxPercentage=', verified?.taxPercentage)
 
-    // ── Sync ALL changed fields to AppSheet ──
-    // The webhook handler already preserves tax fields from MongoDB,
-    // so it is safe to sync isTaxApplied/taxPercentage to AppSheet.
+    // ── Fire-and-forget: Sync to AppSheet in background ──
+    // This is non-blocking so the HTTP response returns immediately after MongoDB write
     const appSheetRow: Record<string, any> = { _id: id }
     if (updateDoc.dealer !== undefined) appSheetRow.dealer = updateDoc.dealer
     if (updateDoc.phone !== undefined) appSheetRow.phone = updateDoc.phone
@@ -57,29 +60,12 @@ export default defineEventHandler(async (event) => {
     if (updateDoc.isTaxApplied !== undefined) appSheetRow.isTaxApplied = updateDoc.isTaxApplied ? 'Y' : 'N'
     if (updateDoc.taxPercentage !== undefined) appSheetRow.taxPercentage = updateDoc.taxPercentage
 
-    // Only sync if there are actual fields to send (beyond _id)
     if (Object.keys(appSheetRow).length > 1) {
-      console.log('[PATCH] AppSheet sync row=', JSON.stringify(appSheetRow))
-      try {
-        const appSheetResult = await appSheetEdit('Dealers', [appSheetRow])
-        console.log('[PATCH] AppSheet sync result=', JSON.stringify(appSheetResult)?.slice(0, 300))
-      } catch (syncErr: any) {
-        console.error('[PATCH] AppSheet sync FAILED:', syncErr.message)
-      }
-    } else {
-      console.log('[PATCH] No fields to sync to AppSheet.')
+      // Non-blocking — don't await
+      appSheetEdit('Dealers', [appSheetRow])
+        .then(() => console.log('[PATCH] AppSheet sync accepted.'))
+        .catch(e => console.error('[PATCH] AppSheet sync FAILED (non-blocking):', e?.message))
     }
-
-    // Delayed re-verification: check if webhook overwrites the value
-    setTimeout(async () => {
-      try {
-        const { db: db2 } = await connectToDatabase()
-        const recheck = await db2.collection('turboCleanDealers').findOne({ _id: new ObjectId(id) })
-        console.log('[PATCH] 3s RE-CHECK: isTaxApplied=', recheck?.isTaxApplied, 'taxPercentage=', recheck?.taxPercentage)
-      } catch (e: any) {
-        console.error('[PATCH] 3s RE-CHECK failed:', e.message)
-      }
-    }, 3000)
 
     console.log('[PATCH] ── END ──')
     return {

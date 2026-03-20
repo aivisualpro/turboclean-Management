@@ -100,8 +100,9 @@ export function useDealers() {
 
     if (idx !== -1) {
       snapshot = { ...dealers.value[idx]! }
-      // Replace the entire array item to guarantee Vue reactivity triggers v-if etc.
-      dealers.value[idx] = { ...snapshot, ...updates, updatedAt: new Date().toISOString() }
+      // Use splice to guarantee Vue reactivity triggers consistently in Nuxt useState arrays
+      const newSnapshot = { ...snapshot, ...updates, updatedAt: new Date().toISOString() }
+      dealers.value.splice(idx, 1, newSnapshot)
       console.log('[patchDealer] optimistic update done, isTaxApplied=', dealers.value[idx]!.isTaxApplied)
     } else {
       console.warn('[patchDealer] dealer not found in state — will still call API. id=', id)
@@ -121,11 +122,12 @@ export function useDealers() {
       if (result && confirmedIdx !== -1) {
         const current = dealers.value[confirmedIdx]
         if (current) {
-          dealers.value[confirmedIdx] = {
+          const updatedCurrent = {
             ...current,
             isTaxApplied: result.isTaxApplied !== undefined ? result.isTaxApplied : current.isTaxApplied,
             taxPercentage: result.taxPercentage !== undefined ? result.taxPercentage : current.taxPercentage,
           }
+          dealers.value.splice(confirmedIdx, 1, updatedCurrent)
           console.log('[patchDealer] confirmed from DB — isTaxApplied=', dealers.value[confirmedIdx]!.isTaxApplied, 'taxPercentage=', dealers.value[confirmedIdx]!.taxPercentage)
         }
       }
@@ -139,7 +141,7 @@ export function useDealers() {
       // Rollback on failure (only if we had a snapshot)
       console.error('[patchDealer] API failed:', err)
       if (snapshot && idx !== -1 && dealers.value[idx]) {
-        dealers.value[idx] = snapshot
+        dealers.value.splice(idx, 1, snapshot)
       }
       throw err // Re-throw so callers can handle it
     }

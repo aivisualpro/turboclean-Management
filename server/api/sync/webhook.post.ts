@@ -159,26 +159,37 @@ export default defineEventHandler(async (event) => {
             filter = { _id: rowId }
           }
 
-          // For Dealers: ALWAYS preserve isTaxApplied and taxPercentage from MongoDB.
-          // These are web-only fields — AppSheet may hold stale values and will
-          // send them back via webhook, which would silently overwrite user settings.
-          // Solution: always read the current MongoDB value and restore it.
-          if (table === 'Dealers') {
-            const existing = await collection.findOne(filter)
-            if (existing) {
-              // Force-preserve tax fields regardless of what AppSheet sent
+          const existing = await collection.findOne(filter)
+          
+          let actualLastUpdatedBy = 'appsheet-webhook'
+          
+          if (existing) {
+            // Echo prevention: If the web-ui updated this document less than 15 seconds ago,
+            // this webhook is almost certainly just an echo of our own API's appSheetEdit() call.
+            // We should preserve the 'web-ui' attribution.
+            if (existing.lastUpdatedBy === 'web-ui' && existing.updatedAt) {
+              const timeDiff = new Date().getTime() - new Date(existing.updatedAt).getTime()
+              if (timeDiff < 15000) {
+                actualLastUpdatedBy = 'web-ui'
+              }
+            }
+
+            // For Dealers: ALWAYS preserve isTaxApplied and taxPercentage from MongoDB.
+            if (table === 'Dealers') {
               if (existing.isTaxApplied !== undefined) {
                 mongoDoc.isTaxApplied = existing.isTaxApplied
               }
               if (existing.taxPercentage !== undefined) {
                 mongoDoc.taxPercentage = existing.taxPercentage
               }
-              console.log(`[Webhook] Preserved tax fields for ${rowId}: isTaxApplied=${mongoDoc.isTaxApplied}, taxPercentage=${mongoDoc.taxPercentage}`)
             }
           }
 
+          // Ensure mongoDoc doesn't forcefully overwrite it from the mapper
+          delete mongoDoc.lastUpdatedBy
+
           const updateResult = await collection.updateOne(filter, {
-            $set: { ...mongoDoc, updatedAt: new Date(), lastUpdatedBy: 'appsheet-webhook' },
+            $set: { ...mongoDoc, updatedAt: new Date(), lastUpdatedBy: actualLastUpdatedBy },
           })
 
           results.push({
@@ -187,6 +198,7 @@ export default defineEventHandler(async (event) => {
             id: rowId,
             matched: updateResult.matchedCount,
             modified: updateResult.modifiedCount,
+            isEcho: actualLastUpdatedBy === 'web-ui',
           })
           break
         }
@@ -223,8 +235,10 @@ export default defineEventHandler(async (event) => {
 
     // ── Emit real-time events for all successful operations ──
     for (const r of results) {
-      if (r.success) {
+      if (r.success && !r.isEcho) {
         emitSyncEvent({ table, action: r.action || action.toLowerCase(), id: r.id || '' })
+      } else if (r.isEcho) {
+        console.log(`[Webhook] Skipped SSE broadcast to frontend for echo event on ${table}/${r.id}`)
       }
     }
 

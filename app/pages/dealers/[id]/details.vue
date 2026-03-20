@@ -129,7 +129,6 @@ const primaryContact = computed(() => props.dealer.contacts?.[0] || null)
               </div>
             </div>
             <Switch
-              :key="`detail-tax-${dealer.id}-${dealer.isTaxApplied}`"
               :checked="dealer.isTaxApplied"
               @update:checked="handleToggleTax"
               class="data-[state=checked]:bg-emerald-500"
