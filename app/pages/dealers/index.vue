@@ -591,7 +591,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
 
                     <!-- ── Tax Toggle Row ── -->
                     <div class="mt-4 pt-3 border-t border-border/40" @click.stop>
-                      <div class="flex items-center justify-between cursor-pointer group/tax">
+                      <div class="flex items-center justify-between cursor-pointer group/tax" @click="() => handleToggleTax(d, !d.isTaxApplied)">
                         <div class="flex items-center gap-2">
                           <div class="size-7 rounded-lg flex items-center justify-center transition-colors duration-300" :class="d.isTaxApplied ? 'bg-emerald-500/10' : 'bg-muted/50 group-hover/tax:bg-emerald-500/5'">
                             <ShieldCheck class="size-3.5" :class="d.isTaxApplied ? 'text-emerald-600' : 'text-muted-foreground/50 group-hover/tax:text-emerald-600/50'" />
@@ -601,11 +601,19 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
                             <p class="text-[10px] text-muted-foreground">{{ d.isTaxApplied ? `${d.taxPercentage}% applied` : 'Not applied' }}</p>
                           </div>
                         </div>
-                        <Switch
-                          :checked="d.isTaxApplied"
-                          @update:checked="(val: boolean) => handleToggleTax(d, val)"
-                          class="data-[state=checked]:bg-emerald-500"
-                        />
+                        <!-- Custom toggle - no Radix, no hydration issues -->
+                        <button
+                          type="button"
+                          role="switch"
+                          :aria-checked="d.isTaxApplied"
+                          class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border-2 border-transparent transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          :class="d.isTaxApplied ? 'bg-emerald-500' : 'bg-input'"
+                        >
+                          <span
+                            class="pointer-events-none block size-4 rounded-full bg-background shadow-sm ring-0 transition-transform duration-200"
+                            :class="d.isTaxApplied ? 'translate-x-4' : 'translate-x-0'"
+                          />
+                        </button>
                       </div>
                       <!-- Tax Percentage Input -->
                       <div v-if="d.isTaxApplied" class="mt-2.5 flex items-center gap-2 pl-9">
