@@ -49,13 +49,19 @@ export default defineEventHandler(async (event) => {
     // Strategy B: If no dealer matches (like when testing from a developer email), 
     // extract invoice number from "Re: Invoice D-INV-XXXXX" and find the attached dealer.
     if (!dealer && emailData.subject) {
-      const invoiceMatch = emailData.subject.match(/(D-INV-\d{8}-\d{4})/i)
+      // Match both D-INV-12345678-1234 and W-INV-2026-01037 formats
+      const invoiceMatch = emailData.subject.match(/((?:D|W)-INV-[\d\-]+)/i)
       if (invoiceMatch) {
         const invNumber = invoiceMatch[1].toUpperCase()
         const invoice = await db.collection('turboCleanInvoices').findOne({ number: invNumber })
         if (invoice && invoice.dealerId) {
-          const { ObjectId } = require('mongodb')
-          dealer = await db.collection('turboCleanDealers').findOne({ _id: new ObjectId(invoice.dealerId) })
+          try {
+            const { ObjectId } = require('mongodb')
+            const dId = typeof invoice.dealerId === 'string' ? new ObjectId(invoice.dealerId) : invoice.dealerId
+            dealer = await db.collection('turboCleanDealers').findOne({ _id: dId })
+          } catch (err) {
+            console.error('[Webhooks: Resend Inbound] Dealer ID cast failed', err)
+          }
         }
       }
     }
