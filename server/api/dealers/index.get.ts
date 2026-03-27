@@ -1,11 +1,25 @@
 import { connectToDatabase } from '../../utils/mongodb'
 import { nanoid } from 'nanoid'
+import { getUserSession } from '../../utils/auth'
+import { ObjectId } from 'mongodb'
 
 export default defineEventHandler(async (event) => {
   try {
+    const session = await getUserSession(event)
     const { db } = await connectToDatabase()
     const collection = db.collection('turboCleanDealers')
-    const docs = await collection.find({}).sort({ _id: -1 }).toArray()
+
+    let query: any = {}
+    if (session && session.role !== 'Admin') {
+      const allowedIds = (session.registerDealers || []).reduce((acc: any[], id: string) => {
+        try { acc.push(new ObjectId(id)); return acc } catch { return acc }
+      }, [])
+      
+      if (allowedIds.length === 0) return []
+      query = { _id: { $in: allowedIds } }
+    }
+
+    const docs = await collection.find(query).sort({ _id: -1 }).toArray()
     
     return docs.map(doc => ({
       id: doc._id.toString(),

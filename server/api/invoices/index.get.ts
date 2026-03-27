@@ -40,7 +40,27 @@ export default defineEventHandler(async (event) => {
       if (query.dateEnd) matchQuery.date.$lte = (query.dateEnd as string).split('T')[0]
     }
 
+    // Auth Session filtering
+    const session = await import('../../utils/auth').then(m => m.getUserSession(event))
+    let allowedDealers: any[] = []
+
+    if (session && session.role !== 'Admin') {
+      const stringDealers = session.registerDealers || []
+      const objDealers = stringDealers.reduce((acc: any[], id: string) => {
+        try { acc.push(new ObjectId(id)); return acc } catch { return acc }
+      }, [])
+      allowedDealers = [...stringDealers, ...objDealers]
+      
+      if (allowedDealers.length === 0) {
+        return { invoices: [], meta: { total: 0, limit, skip, search } }
+      }
+      matchQuery.dealerId = { $in: allowedDealers }
+    }
+
     if (dealerFilter) {
+      if (session && session.role !== 'Admin' && (!session.registerDealers || !session.registerDealers.includes(dealerFilter))) {
+        return { invoices: [], meta: { total: 0, limit, skip, search } }
+      }
       const dbDealerQuery: any[] = [dealerFilter]
       try { dbDealerQuery.push(new ObjectId(dealerFilter)) } catch {}
       matchQuery.dealerId = { $in: dbDealerQuery }

@@ -57,6 +57,7 @@ export default defineEventHandler(async (event) => {
         name: user.name || '',
         email: user.email,
         role: user.role || 'User',
+        registerDealers: user.registerDealers || [],
       },
     }
   }

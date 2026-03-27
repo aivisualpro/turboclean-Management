@@ -33,9 +33,29 @@ export default defineEventHandler(async (event) => {
     // 1. Build optimized search query
     let matchQuery: any = {}
     
+    // Auth Session filtering
+    const session = await import('../../utils/auth').then(m => m.getUserSession(event))
+    let allowedDealers: any[] = []
+
+    if (session && session.role !== 'Admin') {
+      const stringDealers = session.registerDealers || []
+      const objDealers = stringDealers.reduce((acc: any[], id: string) => {
+        try { acc.push(new ObjectId(id)); return acc } catch { return acc }
+      }, [])
+      allowedDealers = [...stringDealers, ...objDealers]
+      
+      if (allowedDealers.length === 0) {
+        return { workOrders: [], meta: { total: 0, limit, skip, search } }
+      }
+      matchQuery.dealer = { $in: allowedDealers }
+    }
+    
     // Filter by specific dealer if provided
     const dealerIdFilter = (queryInfo.dealerId as string) || ''
     if (dealerIdFilter) {
+      if (session && session.role !== 'Admin' && (!session.registerDealers || !session.registerDealers.includes(dealerIdFilter))) {
+        return { workOrders: [], meta: { total: 0, limit, skip, search } }
+      }
       const dbDealerQuery: any[] = [dealerIdFilter]
       try {
         dbDealerQuery.push(new ObjectId(dealerIdFilter))

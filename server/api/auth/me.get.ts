@@ -1,4 +1,6 @@
 import { Buffer } from 'node:buffer'
+import { connectToDatabase } from '../../utils/mongodb'
+import { ObjectId } from 'mongodb'
 
 export default defineEventHandler(async (event) => {
   const token = getCookie(event, 'turbo_session')
@@ -17,12 +19,21 @@ export default defineEventHandler(async (event) => {
       return { user: null }
     }
 
+    const { db } = await connectToDatabase()
+    const dbUser = await db.collection('turboCleanAppUsers').findOne({ _id: new ObjectId(payload.userId) })
+
+    if (!dbUser) {
+      deleteCookie(event, 'turbo_session', { path: '/' })
+      return { user: null }
+    }
+
     return {
       user: {
-        id: payload.userId,
-        name: payload.name,
-        email: payload.email,
-        role: payload.role,
+        id: dbUser._id.toString(),
+        name: dbUser.name || payload.name,
+        email: dbUser.email || payload.email,
+        role: dbUser.role || payload.role,
+        registerDealers: dbUser.registerDealers || []
       },
     }
   }

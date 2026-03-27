@@ -3,6 +3,7 @@ interface AuthUser {
   name: string
   email: string
   role: string
+  registerDealers?: string[]
 }
 
 const useAuthState = () => {
