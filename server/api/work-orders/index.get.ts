@@ -36,11 +36,11 @@ export default defineEventHandler(async (event) => {
     // Filter by specific dealer if provided
     const dealerIdFilter = (queryInfo.dealerId as string) || ''
     if (dealerIdFilter) {
+      const dbDealerQuery: any[] = [dealerIdFilter]
       try {
-        matchQuery.dealer = new ObjectId(dealerIdFilter)
-      } catch {
-        matchQuery.dealer = dealerIdFilter
-      }
+        dbDealerQuery.push(new ObjectId(dealerIdFilter))
+      } catch {}
+      matchQuery.dealer = { $in: dbDealerQuery }
     }
 
     // Advanced filters

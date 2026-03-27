@@ -1,4 +1,5 @@
 import { connectToDatabase } from '../../utils/mongodb'
+import { ObjectId } from 'mongodb'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -12,15 +13,30 @@ export default defineEventHandler(async (event) => {
     const statusFilter = (query.status as string) || ''
     const dealerFilter = (query.dealerId as string) || ''
 
-    // Build mongo query
     const matchQuery: any = {}
 
-    if (statusFilter) {
-      matchQuery.status = statusFilter
+    // Payment Status filter (Paid / Unpaid)
+    if (query.paymentStatus && query.paymentStatus !== 'all') {
+      if (query.paymentStatus === 'paid') matchQuery.status = 'Paid'
+      else matchQuery.status = { $ne: 'Paid' } 
+    }
+
+    // Type filter (Daily / Weekly)
+    if (query.type && query.type !== 'all') {
+      matchQuery.type = query.type === 'weekly' ? 'Weekly' : 'Daily'
+    }
+
+    // Date Bounds filter
+    if (query.dateStart || query.dateEnd) {
+      matchQuery.date = {}
+      if (query.dateStart) matchQuery.date.$gte = new Date(query.dateStart as string)
+      if (query.dateEnd) matchQuery.date.$lte = new Date(query.dateEnd as string)
     }
 
     if (dealerFilter) {
-      matchQuery.dealerId = dealerFilter
+      const dbDealerQuery: any[] = [dealerFilter]
+      try { dbDealerQuery.push(new ObjectId(dealerFilter)) } catch {}
+      matchQuery.dealerId = { $in: dbDealerQuery }
     }
 
     if (search) {
@@ -70,6 +86,7 @@ export default defineEventHandler(async (event) => {
       paidAmount: inv.paidAmount || 0,
       paymentMethod: inv.paymentMethod || '',
       notes: inv.notes || '',
+      type: inv.type || 'Weekly', // Backwards compatibility for old invoices
       createdAt: inv.createdAt,
     }))
 

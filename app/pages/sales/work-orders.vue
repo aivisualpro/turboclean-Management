@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { toast } from 'vue-sonner'
 import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, DollarSign, Loader2, Download, Upload, Plus, Search, FileText } from 'lucide-vue-next'
 
@@ -11,6 +11,49 @@ const showImportModal = ref(false)
 const search = ref('')
 const lastUpdatedBy = ref('')
 const activeTab = ref<'all' | 'false' | 'true'>('all')
+
+const globalDatePreset = ref('today')
+const customStartDate = ref('')
+const customEndDate = ref('')
+
+const computedDates = computed(() => {
+  const d = new Date()
+  const preset = globalDatePreset.value
+  
+  if (preset === 'today') {
+    return { start: new Date(d.setHours(0,0,0,0)).toISOString(), end: new Date(d.setHours(23,59,59,999)).toISOString() }
+  }
+  if (preset === 'yesterday') {
+    const y = new Date()
+    y.setDate(y.getDate() - 1)
+    return { start: new Date(y.setHours(0,0,0,0)).toISOString(), end: new Date(y.setHours(23,59,59,999)).toISOString() }
+  }
+  if (preset === 'this_month') {
+    const start = new Date(d.getFullYear(), d.getMonth(), 1)
+    const end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999)
+    return { start: start.toISOString(), end: end.toISOString() }
+  }
+  if (preset === 'last_month') {
+    const start = new Date(d.getFullYear(), d.getMonth() - 1, 1)
+    const end = new Date(d.getFullYear(), d.getMonth(), 0, 23, 59, 59, 999)
+    return { start: start.toISOString(), end: end.toISOString() }
+  }
+  if (preset === 'this_year') {
+    const start = new Date(d.getFullYear(), 0, 1)
+    const end = new Date(d.getFullYear(), 11, 31, 23, 59, 59, 999)
+    return { start: start.toISOString(), end: end.toISOString() }
+  }
+  if (preset === 'last_year') {
+    const start = new Date(d.getFullYear() - 1, 0, 1)
+    const end = new Date(d.getFullYear() - 1, 11, 31, 23, 59, 59, 999)
+    return { start: start.toISOString(), end: end.toISOString() }
+  }
+  if (preset === 'custom' && customStartDate.value && customEndDate.value) {
+     return { start: new Date(customStartDate.value + 'T00:00:00.000Z').toISOString(), end: new Date(customEndDate.value + 'T23:59:59.999Z').toISOString() }
+  }
+  return { start: '', end: '' }
+})
+
 
 const expandedDealers = ref(new Set<string>())
 const expandedYears   = ref(new Set<string>())
@@ -46,6 +89,8 @@ async function fetchTree() {
       query: {
         isInvoiced: activeTab.value === 'all' ? '' : activeTab.value,
         lastUpdatedBy: lastUpdatedBy.value,
+        dateStart: computedDates.value.start,
+        dateEnd: computedDates.value.end,
       }
     })
     treeData.value = res.tree || []
@@ -86,8 +131,8 @@ async function fetchWorkOrders(reset = false) {
         isInvoiced: activeTab.value === 'all' ? '' : activeTab.value,
         lastUpdatedBy: lastUpdatedBy.value,
         dealerId: activeFilter.value.dealerId,
-        dateStart: activeFilter.value.dateStart,
-        dateEnd: activeFilter.value.dateEnd,
+        dateStart: activeFilter.value.dateStart || computedDates.value.start,
+        dateEnd: activeFilter.value.dateEnd || computedDates.value.end,
       }
     })
 
@@ -128,10 +173,10 @@ useLiveSync('WorkOrders', () => {
 })
 
 let searchTimeout: any
-watch([search, lastUpdatedBy, activeTab], () => {
+watch([search, lastUpdatedBy, activeTab, computedDates], () => {
   clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => {
-    fetchTree() // Tab/LastUpd may change totals
+    fetchTree() // Tab/LastUpd/Dates may change totals
     fetchWorkOrders(true)
   }, 300)
 })
@@ -229,6 +274,31 @@ async function handleExport() {
     toast.error('Failed to export')
   }
 }
+
+// ─── Document Generation ───────────────────────────────────────────────
+const generatingDaily = ref(false)
+const generatingWeekly = ref(false)
+
+async function handleGenerate(type: 'daily' | 'weekly') {
+  if (type === 'daily') generatingDaily.value = true
+  else generatingWeekly.value = true
+  
+  try {
+    const res: any = await $fetch('/api/invoices/generate', { method: 'POST', body: { type } })
+    if (res.generated > 0) {
+      toast.success(res.message)
+      fetchWorkOrders(true)
+    } else {
+      toast.info(res.message)
+    }
+  } catch (err: any) {
+    toast.error(`Failed to generate ${type} invoices`)
+  } finally {
+    if (type === 'daily') generatingDaily.value = false
+    else generatingWeekly.value = false
+  }
+}
+
 </script>
 
 <template>
@@ -238,6 +308,30 @@ async function handleExport() {
     <ClientOnly>
       <Teleport to="#page-header-actions">
         <div class="flex items-center gap-2">
+
+          <!-- Global Date Presets -->
+          <Select v-model="globalDatePreset">
+            <SelectTrigger class="w-[140px] h-8 text-sm font-medium bg-background shadow-sm">
+              <SelectValue placeholder="Date Range" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="today">Today</SelectItem>
+              <SelectItem value="yesterday">Yesterday</SelectItem>
+              <SelectItem value="this_month">This Month</SelectItem>
+              <SelectItem value="last_month">Last Month</SelectItem>
+              <SelectItem value="this_year">This Year</SelectItem>
+              <SelectItem value="last_year">Last Year</SelectItem>
+              <SelectItem value="all_time">All Time</SelectItem>
+              <SelectItem value="custom">Custom Date...</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <!-- Custom Date Input -->
+          <div v-if="globalDatePreset === 'custom'" class="flex items-center gap-1.5 animate-in fade-in zoom-in-95">
+            <Input type="date" v-model="customStartDate" class="h-8 text-xs w-[125px] flex-1 bg-background shadow-sm" />
+            <span class="text-muted-foreground text-xs font-medium">to</span>
+            <Input type="date" v-model="customEndDate" class="h-8 text-xs w-[125px] flex-1 bg-background shadow-sm" />
+          </div>
 
           <!-- General Search -->
           <div class="relative hidden sm:block">
@@ -250,9 +344,25 @@ async function handleExport() {
           <Button variant="outline" size="sm" class="h-8" @click="showImportModal = true">
             <Upload class="mr-1 size-4" /> Import
           </Button>
-          <Button size="sm" class="h-8">
-            <Plus class="mr-1 size-4" /> New
-          </Button>
+          
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button size="sm" class="h-8">
+                <Icon name="lucide:receipt" class="mr-1.5 size-4" /> Generate
+                <ChevronDown class="ml-1 size-3.5 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-48">
+              <DropdownMenuItem @click="handleGenerate('daily')" :disabled="generatingDaily" class="cursor-pointer">
+                <Icon :name="generatingDaily ? 'lucide:loader-2' : 'lucide:calendar-days'" :class="generatingDaily ? 'animate-spin': ''" class="mr-2 size-4 opacity-70" />
+                <span>Create Daily Invoices</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="handleGenerate('weekly')" :disabled="generatingWeekly" class="cursor-pointer">
+                <Icon :name="generatingWeekly ? 'lucide:loader-2' : 'lucide:calendar-range'" :class="generatingWeekly ? 'animate-spin': ''" class="mr-2 size-4 opacity-70" />
+                <span>Create Weekly Invoices</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </Teleport>
     </ClientOnly>
@@ -296,7 +406,7 @@ async function handleExport() {
                 <span class="truncate font-semibold" @click.stop="selectDealer(dealer)">{{ dealer.dealerName }}</span>
               </div>
               <span class="text-[10px] tabular-nums font-mono opacity-60 shrink-0 select-none">
-                {{ fmt(dealer.totalAmount) }}
+                <span class="opacity-70 mr-1.5">({{ dealer.count }})</span>{{ fmt(dealer.totalAmount) }}
               </span>
             </div>
 
@@ -315,7 +425,9 @@ async function handleExport() {
                     <CalendarIcon class="size-3.5 text-muted-foreground" />
                     <span @click.stop="selectYear(dealer, yr)">{{ yr.year }}</span>
                   </div>
-                  <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none">{{ fmt(yr.totalAmount) }}</span>
+                  <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none">
+                    <span class="opacity-70 mr-1.5">({{ yr.count }})</span>{{ fmt(yr.totalAmount) }}
+                  </span>
                 </div>
 
                 <!-- Months -->
@@ -333,7 +445,9 @@ async function handleExport() {
                         <CalendarDays class="size-3.5 text-muted-foreground" />
                         <span @click.stop="selectMonth(dealer, yr, mo)">{{ mo.month }}</span>
                       </div>
-                      <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none">{{ fmt(mo.totalAmount) }}</span>
+                      <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none">
+                        <span class="opacity-70 mr-1.5">({{ mo.count }})</span>{{ fmt(mo.totalAmount) }}
+                      </span>
                     </div>
 
                     <!-- Dates -->
@@ -348,7 +462,9 @@ async function handleExport() {
                           <CalendarClock class="size-3 text-muted-foreground" />
                           <span>{{ fmtDate(dt.date) }}</span>
                         </div>
-                        <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none">{{ fmt(dt.totalAmount) }}</span>
+                        <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none">
+                          <span class="opacity-70 mr-1.5">({{ dt.count }})</span>{{ fmt(dt.totalAmount) }}
+                        </span>
                       </div>
                     </div>
                   </div>
