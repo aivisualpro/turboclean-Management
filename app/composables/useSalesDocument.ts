@@ -148,6 +148,11 @@ export function generatePDF(doc: any, docType: 'Work Order' | 'Invoice' | 'Order
   if (docType === 'Invoice') {
     const formattedDate = (d?: string) => d ? new Date(d).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : ''
     
+    const isWeekly = doc.type === 'Weekly'
+    const topBarBg = isWeekly ? 'linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%)' : 'linear-gradient(90deg, #34d399 0%, #10b981 100%)'
+    const highlightColor = isWeekly ? '#f59e0b' : '#10b981'
+    const thAccentColor = isWeekly ? '#fbbf24' : '#34d399'
+    
     const lineRows = (doc.lineItems || []).map((li: any, i: number) => {
       const bg = i % 2 !== 0 ? '#f3f4f6' : '#ffffff'
       return `
@@ -176,7 +181,7 @@ export function generatePDF(doc: any, docType: 'Work Order' | 'Invoice' | 'Order
     <body style="margin:0;padding:0;font-family:'Inter',Arial,sans-serif;background:#f8fafc;color:#0f172a">
       <div class="print-wrapper" style="max-width:820px;margin:20px auto;background:#fff;border-radius:12px;box-shadow:0 10px 30px -5px rgba(0,0,0,0.05);overflow:hidden;border:1px solid #e2e8f0;box-sizing:border-box">
         <!-- Top Banner Bar -->
-        <div style="height:12px;background:linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%);width:100%"></div>
+        <div style="height:12px;background:${topBarBg};width:100%"></div>
         
         <div class="print-inner" style="padding:40px 40px;box-sizing:border-box">
           <!-- Header Matrix -->
@@ -233,7 +238,7 @@ export function generatePDF(doc: any, docType: 'Work Order' | 'Invoice' | 'Order
                       </tr>
                       <tr>
                         <td style="font-size:13px;color:#0f172a;font-weight:700;padding-top:16px;border-top:2px dashed #e2e8f0">Total</td>
-                        <td style="font-size:18px;color:#f59e0b;font-weight:800;text-align:right;padding-top:16px;border-top:2px dashed #e2e8f0">${fmtMoney(doc.total || 0)}</td>
+                        <td style="font-size:18px;color:${highlightColor};font-weight:800;text-align:right;padding-top:16px;border-top:2px dashed #e2e8f0">${fmtMoney(doc.total || 0)}</td>
                       </tr>
                     </table>
                   </div>
@@ -246,7 +251,7 @@ export function generatePDF(doc: any, docType: 'Work Order' | 'Invoice' | 'Order
           <div style="border:2px solid #0f172a;border-radius:8px;overflow:hidden;box-shadow:4px 4px 0px 0px rgba(15,23,42,0.06)">
             <table style="width:100%;border-collapse:collapse;table-layout:fixed;background:#fff">
               <thead>
-                <tr style="background:#0f172a;color:#fbbf24">
+                <tr style="background:#0f172a;color:${thAccentColor}">
                   <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:12%;letter-spacing:0.5px">DATE</th>
                   <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:13%;letter-spacing:0.5px">STOCK #</th>
                   <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:19%;letter-spacing:0.5px">VIN</th>

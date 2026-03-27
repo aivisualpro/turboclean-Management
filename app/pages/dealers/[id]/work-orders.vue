@@ -12,7 +12,7 @@ const search = ref('')
 const lastUpdatedBy = ref('')
 const activeTab = ref<'all' | 'false' | 'true'>('all')
 
-const globalDatePreset = ref('today')
+const globalDatePreset = ref('all_time')
 const customStartDate = ref('')
 const customEndDate = ref('')
 
@@ -363,7 +363,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
 </script>
 
 <template>
-  <div class="absolute inset-0 flex flex-col overflow-hidden bg-background">
+  <div class="h-full flex flex-col min-h-0">
 
     <!-- Top Tools Teleport -->
     <ClientOnly>

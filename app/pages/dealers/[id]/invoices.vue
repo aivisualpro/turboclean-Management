@@ -368,7 +368,7 @@ function sortIcon(field: string) {
 </script>
 
 <template>
-  <div class="absolute inset-0 flex flex-col overflow-hidden bg-background">
+  <div class="h-full flex flex-col min-h-0">
     <!-- Top Nav Action Bar -->
     <ClientOnly>
       <Teleport to="#page-header-actions">
