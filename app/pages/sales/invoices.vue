@@ -142,7 +142,7 @@ function handleDownload(inv: any) {
 async function updateInvoiceStatus(inv: any, newStatus: string) {
   if (!confirm(`Are you sure you want to mark this invoice as ${newStatus}?`)) return
   toast.promise(
-    $fetch(`/api/invoices/${inv.id}` as any, { method: 'PUT', body: { status: newStatus } }),
+    ($fetch as any)(`/api/invoices/${inv.id}`, { method: 'PUT', body: { status: newStatus } }),
     {
       loading: 'Updating status...',
       success: () => {
@@ -222,7 +222,7 @@ function handleEmailDialogSubmit() {
       invoiceData: doc,
     }
   }).then(() => {
-    $fetch(`/api/invoices/${inv.id}` as any, { method: 'PUT', body: { status: 'Emailed' } }).catch(() => {})
+    ($fetch as any)(`/api/invoices/${inv.id}`, { method: 'PUT', body: { status: 'Emailed' } }).catch(() => {})
   }).catch((err: any) => {
     toast.error('Email delivery failed: ' + (err.message || 'Unknown error'))
     // Revert optimistic status
@@ -396,7 +396,7 @@ function sortIcon(field: string) {
     </ClientOnly>
 
     <!-- Main Layout Grid -->
-    <div class="flex-1 min-h-0 flex flex-col md:flex-row gap-4 p-4 lg:px-8 max-w-[1600px] mx-auto w-full">
+    <div class="flex-1 min-h-0 flex flex-col md:flex-row gap-4 p-4 w-full">
       
       <!-- ─── Sidebar Tree ──────────────────────────────────────────────────────── -->
       <aside class="w-full md:w-80 shrink-0 flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm">

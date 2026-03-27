@@ -368,7 +368,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
     </ClientOnly>
 
     <!-- Main Layout Grid -->
-    <div class="flex-1 min-h-0 flex flex-col md:flex-row gap-4 p-4 lg:px-8 max-w-[1600px] mx-auto w-full">
+    <div class="flex-1 min-h-0 flex flex-col md:flex-row gap-4 p-4 w-full">
       
       <!-- ─── Sidebar Tree ──────────────────────────────────────────────────────── -->
       <aside class="w-full md:w-80 shrink-0 flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm">
@@ -543,6 +543,9 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                 <TableHead class="cursor-pointer select-none" @click="toggleSort('dealerServiceId')">
                   <div class="flex items-center gap-1">Service <Icon :name="sortIcon('dealerServiceId')" class="size-3 text-muted-foreground" /></div>
                 </TableHead>
+                <TableHead class="cursor-pointer select-none" @click="toggleSort('notes')">
+                  <div class="flex items-center gap-1">Notes <Icon :name="sortIcon('notes')" class="size-3 text-muted-foreground" /></div>
+                </TableHead>
                 <TableHead class="text-right cursor-pointer select-none" @click="toggleSort('amount')">
                   <div class="flex items-center justify-end gap-1">Amount <Icon :name="sortIcon('amount')" class="size-3 text-muted-foreground" /></div>
                 </TableHead>
@@ -573,7 +576,9 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                 <TableCell v-if="!activeFilter.dealerId" class="text-xs truncate max-w-[120px] font-semibold">{{ wo.dealerName }}</TableCell>
                 <TableCell class="text-xs truncate max-w-[120px]">
                   <span>{{ wo.dealerServiceId }}</span>
-                  <div v-if="wo.notes" class="text-[10px] text-muted-foreground truncate" :title="wo.notes">{{ wo.notes }}</div>
+                </TableCell>
+                <TableCell class="text-xs text-muted-foreground truncate max-w-[150px]" :title="wo.notes">
+                  {{ wo.notes || '—' }}
                 </TableCell>
                 <TableCell class="text-right text-xs tabular-nums">{{ fmt(wo.amount) }}</TableCell>
                 <TableCell class="text-right text-xs tabular-nums text-muted-foreground">{{ fmt(wo.tax) }}</TableCell>
