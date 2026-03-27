@@ -50,7 +50,11 @@ async function callAppSheet(tableName: string, payload: AppSheetRequest): Promis
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.error(`[AppSheet] Error ${response.status} for ${tableName}/${payload.Action}:`, errorText)
+      if (response.status === 404) {
+        console.warn(`[AppSheet] Row not found in ${tableName} for ${payload.Action} (normal if unsynced).`)
+      } else {
+        console.error(`[AppSheet] Error ${response.status} for ${tableName}/${payload.Action}:`, errorText)
+      }
       return null
     }
 

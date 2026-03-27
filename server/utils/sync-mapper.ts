@@ -142,6 +142,7 @@ export const WorkOrdersMapper = {
       total: Number(mongoDoc.total) || 0,
       notes: mongoDoc.notes || '',
       isInvoiced: mongoDoc.isInvoiced === true ? 'Y' : 'N',
+      isCustom: mongoDoc.isCustom === true ? 'Y' : 'N',
     }
   },
   toMongo(appSheetRow: any): Record<string, any> {
@@ -156,6 +157,7 @@ export const WorkOrdersMapper = {
       total: Number(appSheetRow.total) || 0,
       notes: appSheetRow.notes || '',
       isInvoiced: appSheetRow.isInvoiced === 'Y' || appSheetRow.isInvoiced === true,
+      isCustom: appSheetRow.isCustom === 'Y' || appSheetRow.isCustom === true,
       createdAt: appSheetRow.createdAt ? new Date(appSheetRow.createdAt) : new Date(),
       updatedAt: new Date(),
     }

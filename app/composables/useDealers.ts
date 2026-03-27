@@ -110,6 +110,7 @@ export function useDealers() {
 
     // Always make the API call regardless of local state
     try {
+      console.log(`[patchDealer] sending PATCH to /api/dealers/${id} with body=${JSON.stringify(updates)}`)
       const result: any = await $fetch(`/api/dealers/${id}`, {
         method: 'PATCH',
         body: updates,

@@ -20,7 +20,7 @@ export default defineEventHandler(async (event) => {
         preferredContactMethod: 'any'
       }],
       status: doc.status || 'Pending',
-      isTaxApplied: doc.isTaxApplied === true,
+      isTaxApplied: doc.isTaxApplied === true || doc.isTaxApplied === 'Y' || doc.isTaxApplied === 'true',
       taxPercentage: Number(doc.taxPercentage) || 0,
       services: doc.services || [],
       createdAt: doc.createdAt?.toISOString() || doc._id.getTimestamp().toISOString(),

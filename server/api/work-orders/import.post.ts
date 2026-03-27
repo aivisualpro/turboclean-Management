@@ -26,6 +26,7 @@ export default defineEventHandler(async (event) => {
       total: Number(wo.total) || 0,
       notes: wo.notes || '',
       isInvoiced: wo.isInvoiced === true,
+      isCustom: wo.isCustom === true,
       createdAt: new Date(),
       updatedAt: new Date(),
     }))

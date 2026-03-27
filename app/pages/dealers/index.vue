@@ -178,11 +178,19 @@ function handleStatusChange(id: string, status: DealerStatus) {
   toast.success(`Status updated to ${status}`)
 }
 
-async function handleToggleTax(d: Dealer, val?: boolean) {
-  const newVal = val !== undefined ? val : !d.isTaxApplied
+async function handleToggleTax(d: Dealer, val?: boolean | any) {
+  // Coerce val to a strict boolean, or fallback to flipping current state if event object
+  const newVal = typeof val === 'boolean' ? val : !d.isTaxApplied
+  console.log(`[handleToggleTax] dealer=${d.id} newVal=${newVal} currentVal=${d.isTaxApplied}`)
+  
   toast.success(`Tax ${newVal ? 'enabled' : 'disabled'} for ${d.dealerName}`)
-  const updates: Record<string, any> = { isTaxApplied: newVal }
-  if (!newVal) updates.taxPercentage = 0
+  
+  const updates: Record<string, any> = { 
+    isTaxApplied: !!newVal,
+    // Reset percentage to 0 only if disabling tax
+    ...(newVal === false ? { taxPercentage: 0 } : {})
+  }
+  
   try {
     await patchDealer(d.id, updates)
   } catch (err: any) {
@@ -501,136 +509,122 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
                   </div>
 
                   <!-- Card Body -->
-                  <div class="p-5 pt-5">
-                    <!-- Header: Avatar + Name + Status -->
-                    <div class="flex items-start gap-3.5">
-                      <!-- Avatar / Initials -->
+                  <div class="p-5">
+                    <!-- Row 1: Dealer (status) (Services) -->
+                    <div class="flex flex-wrap items-center gap-2.5">
+                      <!-- Avatar -->
                       <div class="relative shrink-0">
-                        <div class="size-12 rounded-xl border-2 flex items-center justify-center font-bold text-sm transition-all duration-300 group-hover:scale-105 group-hover:shadow-md"
+                        <div class="size-10 rounded-xl border-2 flex items-center justify-center font-bold text-xs"
                           :class="[getStatusConfig(d.status).bg, getStatusConfig(d.status).text, getStatusConfig(d.status).border]"
                         >
                           {{ getInitials(d.dealerName) }}
                         </div>
-                        <!-- Status dot indicator -->
-                        <div class="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full border-2 border-card transition-all duration-300"
+                        <div class="absolute -bottom-0.5 -right-0.5 size-3 rounded-full border-2 border-card"
                           :class="getStatusConfig(d.status).dot"
                         ></div>
                       </div>
 
-                      <!-- Name & Address -->
-                      <div class="flex-1 min-w-0">
-                        <div class="flex items-center gap-2">
-                          <h3 class="text-sm font-bold text-foreground truncate group-hover:text-primary transition-colors duration-200">
-                            {{ d.dealerName }}
-                          </h3>
-                          <ArrowUpRight class="size-3.5 text-muted-foreground/0 group-hover:text-primary/60 transition-all duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 shrink-0" />
-                        </div>
-                        <div class="flex items-center gap-1.5 mt-1" v-if="d.address">
-                          <MapPin class="size-3 text-muted-foreground/60 shrink-0" />
-                          <p class="text-[11px] text-muted-foreground truncate">{{ d.address }}</p>
-                        </div>
-                      </div>
+                      <!-- Name -->
+                      <h3 class="text-sm font-bold text-foreground truncate group-hover:text-primary transition-colors pr-1">
+                        {{ d.dealerName }}
+                        <ArrowUpRight class="inline size-3.5 text-muted-foreground/0 group-hover:text-primary/60 transition-all -translate-y-0.5" />
+                      </h3>
 
-                    </div>
-
-                    <!-- Status + Services Badge Row -->
-                    <div class="flex items-center gap-2 mt-4 flex-wrap">
+                      <!-- Status Badge -->
                       <Badge variant="outline"
                         :class="[getStatusConfig(d.status).bg, getStatusConfig(d.status).text, getStatusConfig(d.status).border]"
-                        class="text-[10px] px-2 py-0.5 gap-1.5 font-medium"
+                        class="text-[10px] px-2 py-0.5 gap-1.5 font-medium whitespace-nowrap"
                       >
                         <div class="size-1.5 rounded-full" :class="getStatusConfig(d.status).dot"></div>
                         {{ d.status }}
                       </Badge>
-                      <Badge v-if="d.services?.length" variant="secondary" class="text-[10px] px-2 py-0.5 gap-1 bg-muted/60">
+
+                      <!-- Services Badge -->
+                      <Badge v-if="d.services?.length" variant="secondary" class="text-[10px] px-2 py-0.5 gap-1 bg-muted/60 whitespace-nowrap">
                         <Briefcase class="size-2.5" />
                         {{ d.services.length }} service{{ d.services.length !== 1 ? 's' : '' }}
                       </Badge>
                     </div>
 
-                    <!-- Divider -->
-                    <div class="my-4 border-t border-border/60"></div>
-
-                    <!-- Contacts Preview -->
-                    <div class="space-y-2.5">
+                    <!-- Row 2: Contacts -->
+                    <div class="mt-4 px-2 py-2.5 rounded-lg bg-muted/30 border border-dashed border-border/60">
                       <template v-if="d.contacts.length > 0">
-                        <div class="flex items-center gap-2.5">
-                          <div class="size-7 rounded-lg bg-muted/50 flex items-center justify-center shrink-0">
-                            <Users class="size-3.5 text-muted-foreground" />
+                        <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                          <!-- Contact Name -->
+                          <div class="flex items-center gap-1.5 min-w-0">
+                            <Users class="size-3.5 text-muted-foreground shrink-0" />
+                            <span class="font-medium text-foreground truncate max-w-[120px]">{{ d.contacts[0]?.name }}</span>
+                            <Badge v-if="d.contacts.length > 1" variant="secondary" class="text-[9px] px-1.5 py-0 bg-muted shrink-0 ml-1">
+                              +{{ d.contacts.length - 1 }}
+                            </Badge>
                           </div>
-                          <div class="flex-1 min-w-0">
-                            <p class="text-xs font-medium text-foreground truncate">{{ d.contacts[0]?.name }}</p>
-                            <p class="text-[10px] text-muted-foreground">{{ d.contacts[0]?.designation || 'Contact' }}</p>
-                          </div>
-                          <Badge v-if="d.contacts.length > 1" variant="secondary" class="text-[9px] px-1.5 py-0 bg-muted/60 shrink-0">
-                            +{{ d.contacts.length - 1 }}
-                          </Badge>
-                        </div>
-
-                        <!-- Contact details -->
-                        <div class="flex items-center gap-3 pl-9">
+                          
+                          <!-- Phone -->
                           <div v-if="d.contacts[0]?.phones?.length" class="flex items-center gap-1.5 min-w-0">
                             <Phone class="size-3 text-muted-foreground/60 shrink-0" />
-                            <span class="text-[11px] text-muted-foreground tabular-nums truncate">{{ d.contacts[0]?.phones[0]?.number }}</span>
+                            <span class="text-muted-foreground tabular-nums truncate">{{ d.contacts[0]?.phones[0]?.number }}</span>
                           </div>
+
+                          <!-- Email -->
                           <div v-if="d.contacts[0]?.emails?.length" class="flex items-center gap-1.5 min-w-0">
                             <Mail class="size-3 text-muted-foreground/60 shrink-0" />
-                            <span class="text-[11px] text-muted-foreground truncate">{{ d.contacts[0]?.emails[0] }}</span>
+                            <span class="text-muted-foreground truncate max-w-[150px]">{{ d.contacts[0]?.emails[0] }}</span>
                           </div>
                         </div>
                       </template>
                       <template v-else>
-                        <div class="flex items-center gap-2.5 py-1">
-                          <div class="size-7 rounded-lg bg-muted/30 flex items-center justify-center shrink-0 border border-dashed border-border/60">
-                            <Users class="size-3.5 text-muted-foreground/40" />
-                          </div>
-                          <p class="text-[11px] text-muted-foreground/60 italic">No contacts added</p>
+                        <div class="flex items-center gap-2">
+                          <Users class="size-3.5 text-muted-foreground/40 shrink-0" />
+                          <span class="text-[11px] text-muted-foreground/60 italic">No contacts added</span>
                         </div>
                       </template>
                     </div>
 
-                    <!-- ── Tax Toggle Row ── -->
-                    <div class="mt-4 pt-3 border-t border-border/40" @click.stop>
-                      <div class="flex items-center justify-between cursor-pointer group/tax" @click="() => handleToggleTax(d, !d.isTaxApplied)">
-                        <div class="flex items-center gap-2">
-                          <div class="size-7 rounded-lg flex items-center justify-center transition-colors duration-300" :class="d.isTaxApplied ? 'bg-emerald-500/10' : 'bg-muted/50 group-hover/tax:bg-emerald-500/5'">
-                            <ShieldCheck class="size-3.5" :class="d.isTaxApplied ? 'text-emerald-600' : 'text-muted-foreground/50 group-hover/tax:text-emerald-600/50'" />
-                          </div>
-                          <div>
-                            <p class="text-xs font-medium" :class="d.isTaxApplied ? 'text-foreground' : 'text-muted-foreground group-hover/tax:text-foreground'">Tax Settings</p>
-                            <p class="text-[10px] text-muted-foreground">{{ d.isTaxApplied ? `${d.taxPercentage}% applied` : 'Not applied' }}</p>
+                    <!-- Row 3: Tax on/off and % inline -->
+                    <div class="mt-4 flex items-center justify-between border-t border-border/40 pt-4" @click.stop>
+                      <div class="flex items-center gap-3">
+                        <div class="size-7 rounded-lg flex items-center justify-center transition-colors duration-300 shrink-0" :class="d.isTaxApplied ? 'bg-emerald-500/10' : 'bg-muted/50'">
+                          <ShieldCheck class="size-3.5" :class="d.isTaxApplied ? 'text-emerald-600' : 'text-muted-foreground/50'" />
+                        </div>
+                        <div class="flex flex-col">
+                          <span class="text-xs font-medium" :class="d.isTaxApplied ? 'text-foreground' : 'text-muted-foreground'">Tax Settings</span>
+                          <span class="text-[10px] text-muted-foreground leading-none mt-0.5">{{ d.isTaxApplied ? 'Enabled' : 'Disabled' }}</span>
+                        </div>
+                      </div>
+
+                      <div class="flex items-center justify-end gap-3 flex-1 ml-4">
+                        <div v-if="d.isTaxApplied" class="flex items-center gap-2 animate-in fade-in zoom-in-95 duration-200">
+                          <label class="text-[11px] text-muted-foreground shrink-0">Rate:</label>
+                          <div class="relative w-24">
+                            <input
+                              type="number"
+                              :value="d.taxPercentage"
+                              @input="(e: Event) => handleTaxPercentageChange(d, (e.target as HTMLInputElement).value)"
+                              step="0.1"
+                              min="0"
+                              max="100"
+                              class="w-full h-7 px-2 pr-5 text-xs rounded-md border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500/50 tabular-nums shadow-sm"
+                              placeholder="0"
+                            />
+                            <span class="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground pointer-events-none">%</span>
                           </div>
                         </div>
-                        <!-- Custom toggle - no Radix, no hydration issues -->
+
+                        <!-- Standardized boolean toggle evaluation to forcefully prevent native objects leaking into params -->
+                        <!-- Native checkbox styled as toggle — guaranteed boolean -->
                         <button
                           type="button"
                           role="switch"
                           :aria-checked="d.isTaxApplied"
-                          class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border-2 border-transparent transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          @click.stop.prevent="handleToggleTax(d, !d.isTaxApplied)"
+                          class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                           :class="d.isTaxApplied ? 'bg-emerald-500' : 'bg-input'"
                         >
                           <span
-                            class="pointer-events-none block size-4 rounded-full bg-background shadow-sm ring-0 transition-transform duration-200"
-                            :class="d.isTaxApplied ? 'translate-x-4' : 'translate-x-0'"
+                            class="pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform duration-200 ease-in-out"
+                            :class="d.isTaxApplied ? 'translate-x-5' : 'translate-x-0'"
                           />
                         </button>
-                      </div>
-                      <!-- Tax Percentage Input -->
-                      <div v-if="d.isTaxApplied" class="mt-2.5 flex items-center gap-2 pl-9">
-                        <label class="text-[11px] text-muted-foreground whitespace-nowrap">Rate:</label>
-                        <div class="relative flex-1 max-w-[100px]">
-                          <input
-                            type="number"
-                            :value="d.taxPercentage"
-                            @input="(e: Event) => handleTaxPercentageChange(d, (e.target as HTMLInputElement).value)"
-                            step="0.1"
-                            min="0"
-                            max="100"
-                            class="w-full h-7 px-2 pr-6 text-xs rounded-md border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500 tabular-nums"
-                            placeholder="0"
-                          />
-                          <span class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span>
-                        </div>
                       </div>
                     </div>
                   </div>

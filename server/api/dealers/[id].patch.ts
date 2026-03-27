@@ -11,6 +11,7 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 400, statusMessage: 'Invalid dealer ID' })
     }
     const { db } = await connectToDatabase()
+    console.log(`[PATCH] Dealer ${id} - Body:`, JSON.stringify(body))
 
     const updateDoc: Record<string, any> = {
       updatedAt: new Date(),
@@ -28,10 +29,18 @@ export default defineEventHandler(async (event) => {
     if (body.status !== undefined) updateDoc.status = body.status
     if (body.contacts !== undefined) updateDoc.contacts = body.contacts
 
+    let filter: any
+    try {
+      filter = { _id: new ObjectId(id) }
+    } catch {
+      filter = { _id: id }
+    }
+
     const result = await db.collection('turboCleanDealers').updateOne(
-      { _id: new ObjectId(id) },
+      filter,
       { $set: updateDoc }
     )
+    console.log(`[PATCH] updateOne result: matched=${result.matchedCount}, modified=${result.modifiedCount}`)
 
     // Verify the write
     const verified = await db.collection('turboCleanDealers').findOne({ _id: new ObjectId(id) })
