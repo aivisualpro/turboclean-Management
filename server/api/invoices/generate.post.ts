@@ -1,5 +1,7 @@
 import { connectToDatabase } from '../../utils/mongodb'
 import { ObjectId } from 'mongodb'
+import { appSheetEdit } from '../../utils/appsheet'
+import { WorkOrdersMapper } from '../../utils/sync-mapper'
 
 function getISOWeek(date: Date): { year: number; week: number; weekStart: Date; weekEnd: Date } {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
@@ -129,6 +131,20 @@ export default defineEventHandler(async (event) => {
           { _id: { $in: updatedWoIds } },
           { $set: { isInvoiced: true } }
         )
+
+        // Sync updated WorkOrders back to AppSheet
+        try {
+          const rowsToSync = uninvoicedWOs.map((wo: any) => {
+            wo.isInvoiced = true
+            return WorkOrdersMapper.toAppSheet(wo)
+          })
+          
+          for (let i = 0; i < rowsToSync.length; i += 100) {
+            await appSheetEdit('WorkOrders', rowsToSync.slice(i, i + 100))
+          }
+        } catch (err) {
+          console.error('[AppSheet Sync Error] Failed to sync WorkOrders:', err)
+        }
       }
 
       return { success: true, generated: newInvoices.length, message: `Generated ${newInvoices.length} daily invoices.` }
