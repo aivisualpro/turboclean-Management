@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { Plus, Search, Pencil, Trash2, Check, ChevronsUpDown, X } from 'lucide-vue-next'
+import { Plus, Search, Pencil, Trash2 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
-import { useDealers } from '~/composables/useDealers'
 
 const { setHeader } = usePageHeader()
 setHeader({ title: 'App Users', icon: 'i-lucide-users' })
@@ -11,31 +10,6 @@ const userList = computed(() => users.value || [])
 
 // Real-time: auto-refresh when AppSheet changes users
 useLiveSync('AppUsers', () => refresh())
-
-// Fetch dealers for multi-select
-const { dealers, fetchDealers } = useDealers()
-if (import.meta.client && dealers.value.length === 0) fetchDealers()
-const dealerSearch = ref('')
-const dealerPopoverOpen = ref(false)
-
-const filteredDealers = computed(() => {
-  const q = dealerSearch.value.toLowerCase()
-  if (!q) return dealers.value
-  return dealers.value.filter(d => d.dealerName.toLowerCase().includes(q))
-})
-
-function toggleDealer(dealerId: string) {
-  const idx = formData.registerDealers.indexOf(dealerId)
-  if (idx >= 0) {
-    formData.registerDealers.splice(idx, 1)
-  } else {
-    formData.registerDealers.push(dealerId)
-  }
-}
-
-function getDealerName(id: string): string {
-  return dealers.value.find(d => d.id === id)?.dealerName || id
-}
 
 const searchValue = ref('')
 const displayList = computed(() => {
@@ -48,70 +22,17 @@ const displayList = computed(() => {
   )
 })
 
-const showForm = ref(false)
 const showDeleteDialog = ref(false)
-const editingId = ref<string | null>(null)
-
-const showPassword = ref(false)
-function generatePassword() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$*'
-  let pass = ''
-  for (let i = 0; i < 12; i++) pass += chars.charAt(Math.floor(Math.random() * chars.length))
-  formData.password = pass
-  showPassword.value = true
-}
-
-const formData = reactive({
-  name: '',
-  email: '',
-  phone: '',
-  address: '',
-  registerDealers: [] as string[],
-  role: 'User',
-  status: 'Active',
-  password: '',
-})
-
-function openAddForm() {
-  editingId.value = null
-  Object.assign(formData, {
-    name: '',
-    email: '',
-    phone: '',
-    address: '',
-    registerDealers: [],
-    role: 'User',
-    status: 'Active',
-    password: '',
-  })
-  dealerSearch.value = ''
-  showForm.value = true
-}
-
-function openEditForm(user: any) {
-  editingId.value = user.id
-  Object.assign(formData, {
-    name: user.name || '',
-    email: user.email || '',
-    phone: user.phone || '',
-    address: user.address || '',
-    registerDealers: Array.isArray(user.registerDealers) ? [...user.registerDealers] : [],
-    role: user.role || 'User',
-    status: user.status || 'Active',
-    password: user.password || '',
-  })
-  dealerSearch.value = ''
-  showForm.value = true
-}
+const deletingId = ref<string | null>(null)
 
 function confirmDelete(id: string) {
-  editingId.value = id
+  deletingId.value = id
   showDeleteDialog.value = true
 }
 
 function handleDelete() {
-  if (!editingId.value) return
-  const deleteId = editingId.value
+  if (!deletingId.value) return
+  const deleteId = deletingId.value
 
   // ── Optimistic: remove from UI immediately ──
   const removedUser = users.value?.find(u => u.id === deleteId)
@@ -131,72 +52,6 @@ function handleDelete() {
   })
 }
 
-function handleSave() {
-  if (!formData.name) {
-    toast.error('Name is required')
-    return
-  }
-
-  const snapshot = { ...formData }
-
-  if (editingId.value) {
-    // ── Optimistic Edit: update in UI immediately ──
-    const idx = users.value?.findIndex(u => u.id === editingId.value) ?? -1
-    const oldData = idx >= 0 ? { ...users.value![idx] } : null
-
-    if (idx >= 0 && users.value) {
-      users.value[idx] = { ...users.value[idx], ...snapshot }
-    }
-    showForm.value = false
-    toast.success('User updated successfully')
-
-    // ── Background: fire API call silently ──
-    $fetch(`/api/users/${editingId.value}`, {
-      method: 'PUT',
-      body: snapshot,
-    }).catch(() => {
-      // Rollback on failure
-      if (oldData && idx >= 0 && users.value) {
-        users.value[idx] = oldData
-      }
-      toast.error('Failed to update user — reverted')
-    })
-  } else {
-    // ── Optimistic Add: add to UI immediately with temp id ──
-    const tempId = `temp-${Date.now()}`
-    const tempUser = {
-      id: tempId,
-      ...snapshot,
-      createdAt: new Date().toISOString(),
-    }
-    if (users.value) {
-      users.value.unshift(tempUser)
-    }
-    showForm.value = false
-    toast.success('User created successfully')
-
-    // ── Background: fire API call, then swap temp id for real id ──
-    $fetch<{ success: boolean; id: string }>('/api/users', {
-      method: 'POST',
-      body: snapshot,
-    }).then((res) => {
-      // Replace temp id with real server id
-      if (users.value) {
-        const tempIdx = users.value.findIndex(u => u.id === tempId)
-        if (tempIdx >= 0) {
-          users.value[tempIdx] = { ...users.value[tempIdx], id: res.id }
-        }
-      }
-    }).catch(() => {
-      // Rollback: remove the optimistically added user
-      if (users.value) {
-        users.value = users.value.filter(u => u.id !== tempId)
-      }
-      toast.error('Failed to create user — removed')
-    })
-  }
-}
-
 </script>
 
 <template>
@@ -211,7 +66,7 @@ function handleSave() {
               <Input v-model="searchValue" placeholder="Search users..." class="pl-9 h-9 bg-background cursor-text" />
             </form>
             <div class="flex items-center gap-2 shrink-0">
-              <Button size="sm" class="h-9 px-3 gap-2" @click="openAddForm">
+              <Button size="sm" class="h-9 px-3 gap-2" @click="navigateTo('/users/new')">
                 <Plus class="size-4" />
                 <span class="hidden lg:inline">Add User</span>
               </Button>
@@ -227,7 +82,6 @@ function handleSave() {
                 <th class="p-4 text-left font-medium text-muted-foreground">Phone</th>
                 <th class="p-4 text-left font-medium text-muted-foreground">Email</th>
                 <th class="p-4 text-left font-medium text-muted-foreground">Address</th>
-                <th class="p-4 text-left font-medium text-muted-foreground">Registered Dealers</th>
                 <th class="p-4 text-left font-medium text-muted-foreground">App Role</th>
                 <th class="p-4 text-left font-medium text-muted-foreground">Status</th>
                 <th class="p-4 text-right font-medium text-muted-foreground">Actions</th>
@@ -237,7 +91,8 @@ function handleSave() {
               <tr 
                 v-for="u in displayList" 
                 :key="u.id" 
-                class="border-b hover:bg-muted/30 transition-colors"
+                class="border-b hover:bg-muted/30 transition-colors cursor-pointer"
+                @click="navigateTo(`/users/${u.id}`)"
                 v-if="!pending"
               >
                 <td class="p-4 font-medium">
@@ -253,14 +108,6 @@ function handleSave() {
                   {{ u.address || '—' }}
                 </td>
                 <td class="p-4">
-                  <div v-if="u.registerDealers?.length" class="flex flex-wrap gap-1 max-w-[200px]">
-                    <Badge v-for="dId in u.registerDealers" :key="dId" variant="outline" class="text-[10px] px-1.5 py-0 bg-blue-500/10 text-blue-600 border-blue-500/20 truncate max-w-[150px]">
-                      {{ getDealerName(dId) }}
-                    </Badge>
-                  </div>
-                  <span v-else class="text-muted-foreground">—</span>
-                </td>
-                <td class="p-4">
                   <Badge variant="outline" class="text-[10px] px-1.5 py-0" :class="u.role === 'Admin' ? 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20' : 'bg-gray-500/10 text-gray-600 border-gray-500/20'">
                     {{ u.role }}
                   </Badge>
@@ -270,9 +117,9 @@ function handleSave() {
                     {{ u.status }}
                   </Badge>
                 </td>
-                <td class="p-4 text-right">
+                <td class="p-4 text-right" @click.stop>
                   <div class="flex items-center justify-end gap-1">
-                    <Button variant="ghost" size="icon" class="size-7" title="Edit" @click="openEditForm(u)">
+                    <Button variant="ghost" size="icon" class="size-7" title="Edit" @click="navigateTo(`/users/${u.id}`)">
                       <Pencil class="size-3.5" />
                     </Button>
                     <Button variant="ghost" size="icon" class="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Delete" @click="confirmDelete(u.id)">
@@ -282,12 +129,12 @@ function handleSave() {
                 </td>
               </tr>
               <tr v-if="pending">
-                <td colspan="8" class="p-8 text-center text-muted-foreground">
+                <td colspan="7" class="p-8 text-center text-muted-foreground">
                   Loading users...
                 </td>
               </tr>
               <tr v-else-if="displayList.length === 0">
-                <td colspan="8" class="p-8 text-center text-muted-foreground">
+                <td colspan="7" class="p-8 text-center text-muted-foreground">
                   No users found
                 </td>
               </tr>
@@ -296,129 +143,6 @@ function handleSave() {
         </div>
       </div>
     </div>
-
-    <!-- User Form Sidebar -->
-    <Sheet v-model:open="showForm">
-      <SheetContent side="right" class="sm:max-w-md w-full overflow-y-auto p-0 flex flex-col">
-        <SheetHeader class="px-6 py-4 border-b shrink-0">
-          <SheetTitle>{{ editingId ? 'Edit User' : 'Add User' }}</SheetTitle>
-          <SheetDescription>Enter user configuration details.</SheetDescription>
-        </SheetHeader>
-
-        <div class="space-y-4 px-6 py-6 flex-1">
-          <div class="space-y-1.5">
-            <Label>Name</Label>
-            <Input v-model="formData.name" placeholder="John Doe" />
-          </div>
-          
-          <div class="grid grid-cols-2 gap-4">
-            <div class="space-y-1.5">
-              <Label>Email</Label>
-              <Input v-model="formData.email" placeholder="john@example.com" type="email" />
-            </div>
-            <div class="space-y-1.5">
-              <Label>Phone</Label>
-              <Input v-model="formData.phone" placeholder="+1..." />
-            </div>
-          </div>
-          
-          <div class="space-y-1.5">
-            <Label>Address</Label>
-            <Input v-model="formData.address" placeholder="123 Main St..." />
-          </div>
-
-          <div class="space-y-1.5">
-            <div class="flex items-center justify-between">
-              <Label>Password</Label>
-              <button type="button" class="text-xs text-primary font-medium hover:underline" @click="generatePassword">Suggest password</button>
-            </div>
-            <div class="relative">
-              <Input v-model="formData.password" placeholder="••••••••" :type="showPassword ? 'text' : 'password'" />
-              <Button variant="ghost" size="icon" type="button" class="absolute right-0 top-0 size-9 text-muted-foreground" @click="showPassword = !showPassword">
-                <Icon :name="showPassword ? 'i-lucide-eye-off' : 'i-lucide-eye'" class="size-4" />
-              </Button>
-            </div>
-            <p class="text-[10px] text-muted-foreground" v-if="editingId">Leave blank to keep current password</p>
-          </div>
-
-          <!-- Register Dealers Multi-Select -->
-          <div class="space-y-1.5">
-            <Label>Register Dealers</Label>
-            <Popover v-model:open="dealerPopoverOpen">
-              <PopoverTrigger as-child>
-                <Button variant="outline" role="combobox" :aria-expanded="dealerPopoverOpen" class="w-full justify-between h-auto min-h-9 font-normal">
-                  <div v-if="formData.registerDealers.length" class="flex flex-wrap gap-1 py-0.5">
-                    <Badge v-for="dId in formData.registerDealers" :key="dId" variant="secondary" class="text-[11px] px-1.5 py-0 gap-1 shrink-0">
-                      {{ getDealerName(dId) }}
-                      <X class="size-3 cursor-pointer opacity-60 hover:opacity-100" @click.stop="toggleDealer(dId)" />
-                    </Badge>
-                  </div>
-                  <span v-else class="text-muted-foreground">Select dealers...</span>
-                  <ChevronsUpDown class="ml-2 size-4 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent class="w-[--reka-popover-trigger-width] p-0" align="start">
-                <Command>
-                  <CommandInput v-model="dealerSearch" placeholder="Search dealers..." />
-                  <CommandEmpty>No dealers found.</CommandEmpty>
-                  <CommandList class="max-h-48">
-                    <CommandGroup>
-                      <CommandItem
-                        v-for="d in filteredDealers"
-                        :key="d.id"
-                        :value="d.dealerName"
-                        @select.prevent="toggleDealer(d.id)"
-                        class="cursor-pointer"
-                      >
-                        <div class="flex items-center gap-2 w-full">
-                          <div class="size-4 shrink-0 rounded border flex items-center justify-center" :class="formData.registerDealers.includes(d.id) ? 'bg-primary border-primary' : 'border-muted-foreground/30'">
-                            <Check v-if="formData.registerDealers.includes(d.id)" class="size-3 text-primary-foreground" />
-                          </div>
-                          <span class="truncate">{{ d.dealerName }}</span>
-                        </div>
-                      </CommandItem>
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-            <p class="text-[10px] text-muted-foreground">{{ formData.registerDealers.length }} dealer{{ formData.registerDealers.length !== 1 ? 's' : '' }} selected</p>
-          </div>
-          
-          <div class="grid grid-cols-2 gap-4">
-            <div class="space-y-1.5">
-              <Label>App Role</Label>
-              <Select v-model="formData.role">
-                <SelectTrigger>
-                  <SelectValue placeholder="Select role" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Admin">Admin</SelectItem>
-                  <SelectItem value="User">User</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div class="space-y-1.5">
-              <Label>Status</Label>
-              <Select v-model="formData.status">
-                <SelectTrigger>
-                  <SelectValue placeholder="Select status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Active">Active</SelectItem>
-                  <SelectItem value="Inactive">Inactive</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </div>
-
-        <SheetFooter class="gap-2 px-6 py-4 border-t shrink-0">
-          <Button variant="outline" @click="showForm = false">Cancel</Button>
-          <Button @click="handleSave">Save User</Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
 
     <!-- Delete Confirmation -->
     <AlertDialog v-model:open="showDeleteDialog">

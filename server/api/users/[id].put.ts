@@ -33,8 +33,6 @@ export default defineEventHandler(async (event) => {
     )
 
     // ── Sync to AppSheet (fire-and-forget) ──
-    // Exclude registerDealers — it stores MongoDB ObjectIds which AppSheet doesn't understand.
-    // The webhook echo handler will detect this as a web-ui update and skip the write-back.
     const appSheetRow: any = { _id: id }
     if (updateDoc.name !== undefined) appSheetRow.name = updateDoc.name
     if (updateDoc.email !== undefined) appSheetRow.email = updateDoc.email
@@ -43,7 +41,14 @@ export default defineEventHandler(async (event) => {
     if (updateDoc.role !== undefined) appSheetRow.role = updateDoc.role
     if (updateDoc.status !== undefined) appSheetRow.status = updateDoc.status
     if (updateDoc.password !== undefined) appSheetRow.password = updateDoc.password
-    // NOTE: registerDealers intentionally NOT synced (MongoDB stores IDs, AppSheet stores names)
+    
+    if (updateDoc.registerDealers !== undefined) {
+      if (!updateDoc.registerDealers.length) {
+        appSheetRow.registerDealers = ''
+      } else {
+        appSheetRow.registerDealers = updateDoc.registerDealers.join(' , ')
+      }
+    }
 
     if (Object.keys(appSheetRow).length > 1) {
       appSheetEdit('AppUsers', [appSheetRow]).catch(err =>
