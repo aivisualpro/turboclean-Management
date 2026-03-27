@@ -14,8 +14,8 @@ setHeader({ title: isNew ? 'Add User' : 'Edit User', icon: 'i-lucide-user' })
 const { dealers, fetchDealers } = useDealers()
 if (import.meta.client && dealers.value.length === 0) fetchDealers()
 
-const { data: users, pending } = await useFetch<any[]>('/api/users')
-const { data: workspacesRes } = await useFetch<any>('/api/workspaces')
+const { data: users, pending } = useFetch<any[]>('/api/users', { lazy: true })
+const { data: workspacesRes } = useFetch<any>('/api/workspaces', { lazy: true })
 
 const formData = reactive({
   name: '',
@@ -320,7 +320,7 @@ async function handleDelete() {
           </Card>
           
           <div class="flex justify-end pt-4">
-             <Button class="gap-2 w-full md:w-auto" :disabled="isSaving" @click="handleSave">
+             <Button class="gap-2 w-full md:w-auto" :disabled="isSaving || pending" @click="handleSave">
                <Save class="size-4" />
                {{ isSaving ? 'Saving...' : 'Save User Settings' }}
              </Button>
