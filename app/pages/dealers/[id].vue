@@ -102,6 +102,7 @@ const tabs = [
 ]
 
 const activeTab = computed(() => {
+  if (route.path.includes('/emails')) return 'emails'
   const pathEnd = route.path.split('/').pop()
   return tabs.find(t => t.path === pathEnd)?.id || 'details'
 })

@@ -19,6 +19,10 @@ export default defineEventHandler(async (event) => {
       }
     }
 
+    if (queryInfo.dealerId) {
+      matchQuery.dealer = new ObjectId(queryInfo.dealerId as string)
+    }
+
     // 2. Filter: lastUpdatedBy
     if (queryInfo.lastUpdatedBy) {
       matchQuery.lastUpdatedBy = { $regex: queryInfo.lastUpdatedBy, $options: 'i' }

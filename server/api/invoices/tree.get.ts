@@ -17,6 +17,10 @@ export default defineEventHandler(async (event) => {
       }
     }
 
+    if (queryInfo.dealerId) {
+      matchQuery.dealerId = queryInfo.dealerId as string
+    }
+
     // Filter: Type (Daily vs Weekly)
     if (queryInfo.type && queryInfo.type !== 'all') {
       matchQuery.type = queryInfo.type === 'weekly' ? 'Weekly' : 'Daily'

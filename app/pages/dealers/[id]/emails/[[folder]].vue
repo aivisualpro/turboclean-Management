@@ -1,15 +1,27 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import type { Dealer } from '~/composables/useDealers'
 import { Mail, Clock, Inbox as InboxIcon, Loader2, Send, Archive, FileText, CornerUpLeft, Search, Paperclip, MoreHorizontal, UserCircle2 } from 'lucide-vue-next'
 
 const props = defineProps<{ dealer: Dealer }>()
+const route = useRoute()
 
 const emails = ref<any[]>([])
 const loading = ref(true)
-const activeFolder = ref<'inbox' | 'sent'>('sent') // Start on sent until inbound is connected
+const activeFolder = ref<'inbox' | 'sent'>((route.params.folder as any) || 'sent')
 const selectedEmail = ref<any>(null)
 const searchQuery = ref('')
+
+watch(() => route.params.folder, (newFolder) => {
+  activeFolder.value = (newFolder as any) || 'sent'
+  // Auto-select the first newest email in the newly active folder
+  const available = emails.value
+    .filter(e => e.folder === activeFolder.value)
+    .sort((a,b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
+  
+  selectedEmail.value = available.length > 0 ? available[0] : null
+})
 
 onMounted(async () => {
   try {
@@ -27,9 +39,13 @@ onMounted(async () => {
       receivedAt: e.sentAt || e.receivedAt || new Date().toISOString()
     }))
     
-    // Auto-select newest
+    // Auto-select newest within active folder
     if (emails.value.length > 0) {
-      selectedEmail.value = emails.value.sort((a,b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())[0]
+      const available = emails.value
+        .filter(e => e.folder === activeFolder.value)
+        .sort((a,b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
+      
+      selectedEmail.value = available.length > 0 ? available[0] : null
     }
   } catch (e) {
     console.error(e)
@@ -75,22 +91,22 @@ const formatDate = (d: string) => {
       </div>
       
       <div class="space-y-1">
-        <button 
-          @click="activeFolder = 'inbox'; selectedEmail = null" 
-          class="w-full flex items-center justify-between px-3 py-2 rounded-md transition-colors text-left"
+        <NuxtLink 
+          :to="`/dealers/${props.dealer.id}/emails/inbox`"
+          class="w-full flex items-center justify-between px-3 py-2 rounded-md transition-colors text-left no-underline"
           :class="activeFolder === 'inbox' ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'"
         >
           <div class="flex items-center gap-2"><InboxIcon class="size-4 opacity-80" /> Inbox</div>
           <span class="text-[10px] font-mono opacity-60">{{ folderCounts.inbox }}</span>
-        </button>
-        <button 
-          @click="activeFolder = 'sent'; selectedEmail = null" 
-          class="w-full flex items-center justify-between px-3 py-2 rounded-md transition-colors text-left"
+        </NuxtLink>
+        <NuxtLink 
+          :to="`/dealers/${props.dealer.id}/emails/sent`"
+          class="w-full flex items-center justify-between px-3 py-2 rounded-md transition-colors text-left no-underline"
           :class="activeFolder === 'sent' ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'"
         >
           <div class="flex items-center gap-2"><Send class="size-4 opacity-80" /> Sent</div>
           <span class="text-[10px] font-mono opacity-60">{{ folderCounts.sent }}</span>
-        </button>
+        </NuxtLink>
       </div>
     </div>
 
