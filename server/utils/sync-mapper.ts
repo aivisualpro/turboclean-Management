@@ -144,6 +144,7 @@ export const WorkOrdersMapper = {
       isInvoiced: mongoDoc.isInvoiced === true ? 'Y' : 'N',
       isCustom: mongoDoc.isCustom === true ? 'Y' : 'N',
       Upload: mongoDoc.upload || '',
+      lastUpdatedBy: mongoDoc.lastUpdatedBy || '',
     }
   },
   toMongo(appSheetRow: any): Record<string, any> {
@@ -153,13 +154,14 @@ export const WorkOrdersMapper = {
       stockNumber: appSheetRow.stockNumber || '',
       vin: appSheetRow.vin || '',
       dealerServiceId: appSheetRow.dealerServiceId || '',
-      amount: Number(appSheetRow.amount) || 0,
-      tax: Number(appSheetRow.tax) || 0,
-      total: Number(appSheetRow.total) || 0,
+      amount: parseFloat(String(appSheetRow.amount || '').replace(/[^\d.-]/g, '')) || 0,
+      tax: parseFloat(String(appSheetRow.tax || '').replace(/[^\d.-]/g, '')) || 0,
+      total: parseFloat(String(appSheetRow.total || '').replace(/[^\d.-]/g, '')) || 0,
       notes: appSheetRow.notes || '',
       isInvoiced: appSheetRow.isInvoiced === 'Y' || appSheetRow.isInvoiced === true,
       isCustom: appSheetRow.isCustom === 'Y' || appSheetRow.isCustom === true,
       upload: appSheetRow.Upload || '',
+      lastUpdatedBy: appSheetRow.lastUpdatedBy || '',
       createdAt: appSheetRow.createdAt ? new Date(appSheetRow.createdAt) : new Date(),
       updatedAt: new Date(),
     }

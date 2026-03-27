@@ -74,6 +74,7 @@ const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-US', { mon
 
 function getAppSheetImageUrl(fileName: string | undefined | null) {
   if (!fileName) return null
+  if (fileName.startsWith('http://') || fileName.startsWith('https://')) return fileName
   // The fileName coming from AppSheet usually starts with "/" e.g., "/699b1f1de586aba4c8f0daf7-Vernon Chevrolet/..."
   const encodedName = encodeURIComponent(fileName)
   return `https://www.appsheet.com/template/gettablefileurl?appName=ZRZOperationsAPP-109704988&tableName=WorkOrders&fileName=${encodedName}`

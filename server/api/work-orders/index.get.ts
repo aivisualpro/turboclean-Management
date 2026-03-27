@@ -42,6 +42,28 @@ export default defineEventHandler(async (event) => {
         matchQuery.dealer = dealerIdFilter
       }
     }
+
+    // Advanced filters
+    if (queryInfo.dateStart || queryInfo.dateEnd) {
+      matchQuery.date = {}
+      if (queryInfo.dateStart) matchQuery.date.$gte = new Date(queryInfo.dateStart as string)
+      if (queryInfo.dateEnd) matchQuery.date.$lte = new Date(queryInfo.dateEnd as string)
+    }
+
+    if (queryInfo.isInvoiced !== undefined && queryInfo.isInvoiced !== '') {
+      const isInv = queryInfo.isInvoiced === 'true'
+      if (isInv) {
+        // we can just match cleanly without nested $or if possible, but safely we use $in
+        matchQuery.isInvoiced = { $in: [true, 'true', 'yes'] }
+      } else {
+        matchQuery.isInvoiced = { $in: [false, 'false', 'no', null, ''] }
+      }
+    }
+
+    if (queryInfo.lastUpdatedBy) {
+      matchQuery.lastUpdatedBy = { $regex: queryInfo.lastUpdatedBy, $options: 'i' }
+    }
+
     
     if (search) {
       const q = search.toLowerCase()
@@ -167,6 +189,7 @@ export default defineEventHandler(async (event) => {
         total: Number(wo.total) || 0,
         notes: wo.notes || '',
         upload: wo.upload || '',
+        lastUpdatedBy: wo.lastUpdatedBy || '',
         isInvoiced: wo.isInvoiced === true || wo.isInvoiced === 'true' || wo.isInvoiced === 'yes'
       }
     })
