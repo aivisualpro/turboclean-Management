@@ -736,8 +736,8 @@ async function handleGenerate(type: 'daily' | 'weekly') {
           </div>
 
           <div class="space-y-2">
-            <Label>Total</Label>
-            <Input type="number" step="0.01" v-model="editForm.total" />
+            <Label>Total (Auto-computed)</Label>
+            <Input type="number" step="0.01" v-model="editForm.total" disabled class="bg-muted/30 opacity-80" />
           </div>
 
           <div class="space-y-2 col-span-2">

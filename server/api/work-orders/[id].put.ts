@@ -28,14 +28,66 @@ export default defineEventHandler(async (event) => {
     updateData.lastUpdatedBy = 'Admin' // or extract from session if available
     updateData.updatedAt = new Date()
 
-    const result = await collection.updateOne(
+    const result = await collection.findOneAndUpdate(
       { _id: new ObjectId(id) },
-      { $set: updateData }
+      { $set: updateData },
+      { returnDocument: 'after' }
     )
 
-    if (result.matchedCount === 0) {
+    if (!result) {
       throw createError({ statusCode: 404, statusMessage: 'Work Order not found' })
     }
+
+    // Fire-and-forget background tasks (AppSheet sync + Invoice Propagation)
+    ;(async () => {
+      try {
+        // 1. AppSheet Sync
+        const { appSheetEdit } = await import('../../utils/appsheet')
+        const { WorkOrdersMapper } = await import('../../utils/sync-mapper')
+        appSheetEdit('WorkOrders', [WorkOrdersMapper.toAppSheet(result)]).catch(err => {
+          console.error('[AppSheet Sync Error] Failed to sync WorkOrder update:', err)
+        })
+
+        // 2. Auto-Update Parent Invoices
+        // If this work order is linked to any daily or weekly invoice, propagate the changes directly.
+        const invoicesCollection = db.collection('turboCleanInvoices')
+        const relatedInvoices = await invoicesCollection.find({ 'lineItems.workOrderId': id }).toArray()
+
+        for (const inv of relatedInvoices) {
+          let updatedLineItems = false
+          const nextLineItems = inv.lineItems.map((li: any) => {
+            if (li.workOrderId === id) {
+              updatedLineItems = true
+              const svcName = result.dealerServiceId || li.serviceName
+              return {
+                ...li,
+                amount: Number(result.amount) || 0,
+                tax: Number(result.tax) || 0,
+                total: Number(result.total) || 0,
+                stockNumber: result.stockNumber || '',
+                vin: result.vin || '',
+                serviceName: svcName,
+                description: `${svcName} – Stock# ${result.stockNumber || 'N/A'} (VIN: ${result.vin || 'N/A'})`
+              }
+            }
+            return li
+          })
+
+          if (updatedLineItems) {
+            const subtotal = nextLineItems.reduce((s: number, li: any) => s + (li.amount || 0), 0)
+            const taxTotal = nextLineItems.reduce((s: number, li: any) => s + (li.tax || 0), 0)
+            const total = nextLineItems.reduce((s: number, li: any) => s + (li.total || 0), 0)
+            
+            await invoicesCollection.updateOne(
+              { _id: inv._id },
+              { $set: { lineItems: nextLineItems, subtotal, taxTotal, total } }
+            )
+          }
+        }
+      } catch (err) {
+        console.error('[Background Propagation Error]:', err)
+      }
+    })()
 
     return { success: true, message: 'Work Order updated successfully' }
   } catch (error: any) {
