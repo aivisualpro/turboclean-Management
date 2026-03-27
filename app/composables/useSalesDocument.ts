@@ -201,7 +201,7 @@ export function generatePDF(doc: any, docType: 'Work Order' | 'Invoice' | 'Order
               
               <!-- Center: Logo -->
               <td style="width:24%;text-align:center;vertical-align:top;padding:0 10px">
-                <img src="${origin}/invoice%20logo.png" style="max-width:140px;height:auto;object-fit:contain;margin-top:15px" alt="ZRZ OPS" onerror="this.style.display='none'" />
+                <img src="${origin}/invoice%20logo.png?v=${Date.now()}" style="max-width:140px;height:auto;object-fit:contain;margin-top:15px" alt="ZRZ OPS" onerror="this.style.display='none'" />
               </td>
               
               <!-- Right Side: Date & Financials -->

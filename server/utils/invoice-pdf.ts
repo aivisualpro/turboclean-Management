@@ -6,8 +6,8 @@ import { join } from 'path'
 let _logoBase64: string | null = null
 
 function getLogoBase64(): string {
-  // Use a highly available absolute URL so email clients (like Gmail/Outlook) don't strip the Base64 image.
-  return 'https://raw.githubusercontent.com/aivisualpro/turboclean-Management/main/public/invoice%20logo.png'
+  // Use a highly available absolute URL, plus cache buster to fetch the latest logo
+  return `https://raw.githubusercontent.com/aivisualpro/turboclean-Management/main/public/invoice%20logo.png?v=${Date.now()}`
 }
 
 /**
