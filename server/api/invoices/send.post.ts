@@ -176,13 +176,24 @@ export default defineEventHandler(async (event) => {
       await db.collection('turboCleanEmailLogs').insertOne({
         dealerId,
         invoiceId,
-        email,
+        email, // Legacy
         subject,
         type: 'Invoice',
         invoiceType: invoiceType || 'Unknown',
         attachmentCount: attachments.length,
         status: 'Sent',
-        sentAt: new Date().toISOString()
+        sentAt: new Date().toISOString(),
+        
+        // Mailbox UI Support Fields:
+        folder: 'sent',
+        from: 'billing@zrzops.com',
+        to: email,
+        bodyHtml: emailHtml,
+        receivedAt: new Date().toISOString(), // Fallback for unified sorting
+        attachments: attachments.map(att => ({
+          filename: att.filename,
+          content: `data:${att.contentType || 'application/pdf'};base64,${Buffer.isBuffer(att.content) ? att.content.toString('base64') : Buffer.from(att.content).toString('base64')}`
+        }))
       })
     }
 
