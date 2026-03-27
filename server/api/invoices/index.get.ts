@@ -29,8 +29,8 @@ export default defineEventHandler(async (event) => {
     // Date Bounds filter
     if (query.dateStart || query.dateEnd) {
       matchQuery.date = {}
-      if (query.dateStart) matchQuery.date.$gte = new Date(query.dateStart as string)
-      if (query.dateEnd) matchQuery.date.$lte = new Date(query.dateEnd as string)
+      if (query.dateStart) matchQuery.date.$gte = (query.dateStart as string).split('T')[0]
+      if (query.dateEnd) matchQuery.date.$lte = (query.dateEnd as string).split('T')[0]
     }
 
     if (dealerFilter) {

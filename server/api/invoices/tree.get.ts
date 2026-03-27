@@ -22,11 +22,11 @@ export default defineEventHandler(async (event) => {
       matchQuery.type = queryInfo.type === 'weekly' ? 'Weekly' : 'Daily'
     }
 
-    // Filter: Date Range
+    // Filter: Date Range (Invoices store date natively as YYYY-MM-DD string)
     if (queryInfo.dateStart || queryInfo.dateEnd) {
       matchQuery.date = {}
-      if (queryInfo.dateStart) matchQuery.date.$gte = new Date(queryInfo.dateStart as string)
-      if (queryInfo.dateEnd) matchQuery.date.$lte = new Date(queryInfo.dateEnd as string)
+      if (queryInfo.dateStart) matchQuery.date.$gte = (queryInfo.dateStart as string).split('T')[0]
+      if (queryInfo.dateEnd) matchQuery.date.$lte = (queryInfo.dateEnd as string).split('T')[0]
     }
 
     const pipeline = [
@@ -37,7 +37,7 @@ export default defineEventHandler(async (event) => {
             dealer: "$dealerName",
             dealerId: "$dealerId",
             // The grouped date
-            date: { $dateToString: { format: "%Y-%m-%d", date: "$date", timezone: "UTC" } }
+            date: "$date"
           },
           totalAmount: { $sum: { $toDouble: "$total" } },
           totalPaid: { $sum: { $toDouble: "$paidAmount" } },

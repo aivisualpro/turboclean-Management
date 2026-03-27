@@ -2,7 +2,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { toast } from 'vue-sonner'
 import { generatePDF, downloadPDF, calcLineTotal } from '~/composables/useSalesDocument'
-import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, Loader2, Download, Search, FileText, FileSpreadsheet, Eye } from 'lucide-vue-next'
+import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, Loader2, Download, Search, FileText, FileSpreadsheet, Eye, Mail } from 'lucide-vue-next'
 
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Invoices', icon: 'i-lucide-receipt' })
@@ -137,6 +137,33 @@ function handleDownload(inv: any) {
   downloadPDF(doc, 'Invoice')
 }
 
+const isEmailing = ref(false)
+async function handleEmail(inv: any) {
+  const dealerEmail = prompt('Enter dealer email to send this invoice to:', inv.dealerEmail || '')
+  if (!dealerEmail) return
+
+  isEmailing.value = true
+  try {
+    const doc = toSalesDoc(inv)
+    const htmlPayload = generatePDF(doc, 'Invoice')
+    
+    await $fetch('/api/invoices/send', {
+      method: 'POST' as any,
+      body: {
+        html: htmlPayload,
+        email: dealerEmail,
+        subject: `Invoice ${doc.number} from Turbo Clean`
+      }
+    })
+    toast.success('Invoice emailed successfully to ' + dealerEmail)
+  } catch (err: any) {
+    console.error(err)
+    toast.error('Failed to email invoice: ' + err.message)
+  } finally {
+    isEmailing.value = false
+  }
+}
+
 function toSalesDoc(inv: any) {
   return {
     id: inv.id,
@@ -147,6 +174,9 @@ function toSalesDoc(inv: any) {
     status: inv.status,
     date: inv.date,
     dueDate: inv.dueDate,
+    weekStart: inv.weekStart,
+    weekEnd: inv.weekEnd,
+    type: inv.type,
     paidAmount: inv.paidAmount || 0,
     paymentMethod: inv.paymentMethod || '',
     notes: inv.notes || '',
@@ -154,9 +184,13 @@ function toSalesDoc(inv: any) {
       id: li.workOrderId || li.invoiceId || '',
       description: li.description || `Invoice #${li.number}` || '',
       quantity: 1,
-      unitPrice: li.amount || li.total || 0,
+      unitPrice: li.amount || li.total || li.unitPrice || 0,
       discount: 0,
       tax: li.tax || li.taxTotal || 0,
+      date: li.date,
+      stockNumber: li.stockNumber,
+      vin: li.vin,
+      serviceName: li.serviceName || li.serviceId,
     })),
     subtotal: inv.subtotal,
     taxTotal: inv.taxTotal,
@@ -496,6 +530,11 @@ function sortIcon(field: string) {
           </DialogTitle>
           <div class="flex gap-2">
             <Button variant="outline" size="sm" @click="showPreview = false">Close</Button>
+            <Button variant="secondary" size="sm" :disabled="isEmailing" @click="handleEmail(selectedInvoice)">
+              <Loader2 v-if="isEmailing" class="mr-1 size-4 animate-spin" />
+              <Mail v-else class="mr-1 size-4" /> 
+              {{ isEmailing ? 'Sending...' : 'Email Dealer' }}
+            </Button>
             <Button size="sm" @click="handleDownload(selectedInvoice)">
               <Download class="mr-1 size-4" /> Download PDF
             </Button>
