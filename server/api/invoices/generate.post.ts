@@ -177,15 +177,13 @@ export default defineEventHandler(async (event) => {
         invoiceCounter++
         const invNumber = `W-INV-${group.year}-${String(invoiceCounter).padStart(5, '0')}`
 
-        const lineItems = group.dailyInvoices.map((dInv: any) => ({
-          invoiceId: dInv._id.toString(),
-          date: dInv.date,
-          description: `Daily Invoice #${dInv.number} (${dInv.date})`,
-          number: dInv.number,
-          amount: dInv.subtotal,
-          tax: dInv.taxTotal,
-          total: dInv.total,
-        }))
+        const lineItems = group.dailyInvoices.flatMap((dInv: any) => {
+          return (dInv.lineItems || []).map((li: any) => ({
+            ...li,
+            invoiceId: dInv._id.toString(),
+            dailyInvoiceTag: dInv.number
+          }))
+        })
 
         // Sort linearly by date
         lineItems.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())

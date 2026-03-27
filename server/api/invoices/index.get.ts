@@ -23,7 +23,14 @@ export default defineEventHandler(async (event) => {
 
     // Type filter (Daily / Weekly)
     if (query.type && query.type !== 'all') {
-      matchQuery.type = query.type === 'weekly' ? 'Weekly' : 'Daily'
+      if (query.type === 'weekly') {
+        matchQuery.$and = matchQuery.$and || []
+        matchQuery.$and.push({
+          $or: [{ type: 'Weekly' }, { type: null }, { type: { $exists: false } }]
+        })
+      } else {
+        matchQuery.type = 'Daily'
+      }
     }
 
     // Date Bounds filter

@@ -456,8 +456,35 @@ const avatarColors = [
           </Card>
         </div>
 
-        <!-- Work Orders Breakdown + Dealer Status -->
-        <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <!-- Work Orders Breakdown + Dealer Status + Sales per Dealer -->
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <!-- Sales per Dealer -->
+          <Card>
+            <CardHeader class="pb-2">
+              <CardTitle class="text-sm font-semibold">Sales per Dealer</CardTitle>
+              <CardDescription>Top dealers by revenue</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div class="space-y-4 pt-1">
+                <div v-for="(d, i) in topDealers.slice(0, 5)" :key="d.name" class="space-y-1.5">
+                  <div class="flex items-center justify-between text-sm">
+                    <span class="font-medium truncate pr-2">{{ d.name }}</span>
+                    <span class="font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{{ fmt(d.revenue) }}</span>
+                  </div>
+                  <div class="h-2 rounded-full bg-muted overflow-hidden">
+                    <div
+                      class="h-full rounded-full transition-all duration-1000"
+                      :style="{ width: `${(d.revenue / topDealerMax) * 100}%`, background: chartColors[Number(i) % chartColors.length] }"
+                    />
+                  </div>
+                </div>
+                <div v-if="topDealers.length === 0" class="h-[140px] flex items-center justify-center text-muted-foreground text-sm">
+                  No data available
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader class="pb-2">
               <CardTitle class="text-sm font-semibold">Work Orders Breakdown</CardTitle>

@@ -250,9 +250,9 @@ export function generatePDF(doc: any, docType: 'Work Order' | 'Invoice' | 'Order
                   <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:12%;letter-spacing:0.5px">DATE</th>
                   <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:13%;letter-spacing:0.5px">STOCK #</th>
                   <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:19%;letter-spacing:0.5px">VIN</th>
-                  <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:24%;letter-spacing:0.5px">CLEAN TYPE</th>
+                  <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:24%;letter-spacing:0.5px">SERVICE</th>
                   <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:11%;letter-spacing:0.5px">AMOUNT</th>
-                  <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:10%;letter-spacing:0.5px">TAX 6.35%</th>
+                  <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:10%;letter-spacing:0.5px">TAX</th>
                   <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:11%;letter-spacing:0.5px">TOTAL</th>
                 </tr>
               </thead>

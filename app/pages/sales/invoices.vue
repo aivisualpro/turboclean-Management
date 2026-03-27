@@ -263,6 +263,7 @@ function toSalesDoc(inv: any) {
     notes: inv.notes || '',
     lineItems: (inv.lineItems || []).map((li: any) => ({
       id: li.workOrderId || li.invoiceId || '',
+      number: li.number,
       description: li.description || `Invoice #${li.number}` || '',
       quantity: 1,
       unitPrice: li.amount || li.total || li.unitPrice || 0,
