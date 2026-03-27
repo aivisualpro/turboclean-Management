@@ -238,11 +238,6 @@ async function handleExport() {
     <ClientOnly>
       <Teleport to="#page-header-actions">
         <div class="flex items-center gap-2">
-          <!-- Last Updated By Filter -->
-          <div class="relative hidden lg:block">
-            <Icon name="lucide:user" class="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-            <Input v-model="lastUpdatedBy" placeholder="Filter by user..." class="pl-8 w-44 h-8 text-sm" />
-          </div>
 
           <!-- General Search -->
           <div class="relative hidden sm:block">
