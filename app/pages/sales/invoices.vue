@@ -2,7 +2,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { toast } from 'vue-sonner'
 import { generatePDF, downloadPDF, calcLineTotal } from '~/composables/useSalesDocument'
-import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, Loader2, Download, Search, FileText, FileSpreadsheet, Eye, Mail } from 'lucide-vue-next'
+import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, Loader2, Download, Search, FileText, FileSpreadsheet, Eye, Mail, ThumbsUp, CheckCircle, Send } from 'lucide-vue-next'
 
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Invoices', icon: 'i-lucide-receipt' })
@@ -49,6 +49,8 @@ const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-US', { mon
 
 const badgeClasses: Record<string, string> = {
   Draft: 'bg-gray-500/10 text-gray-600 border-gray-500/20',
+  Approved: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
+  Emailed: 'bg-blue-500/10 text-blue-600 border-blue-500/20',
   Sent: 'bg-blue-500/10 text-blue-600 border-blue-500/20',
   Paid: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
   Overdue: 'bg-red-500/10 text-red-600 border-red-500/20',
@@ -137,13 +139,65 @@ function handleDownload(inv: any) {
   downloadPDF(doc, 'Invoice')
 }
 
+async function updateInvoiceStatus(inv: any, newStatus: string) {
+  if (!confirm(`Are you sure you want to mark this invoice as ${newStatus}?`)) return
+  toast.promise(
+    $fetch(`/api/invoices/${inv.id}` as any, { method: 'PUT', body: { status: newStatus } }),
+    {
+      loading: 'Updating status...',
+      success: () => {
+        inv.status = newStatus
+        return `Invoice marked as ${newStatus}`
+      },
+      error: 'Failed to update status'
+    }
+  )
+}
+
+const showEmailDialog = ref(false)
+const selectedEmailInvoice = ref<any>(null)
+const emailForm = ref({ email: '' })
+const dealerContacts = ref<string[]>([])
+const isFetchingContacts = ref(false)
 const isEmailing = ref(false)
-async function handleEmail(inv: any) {
-  const dealerEmail = prompt('Enter dealer email to send this invoice to:', inv.dealerEmail || '')
-  if (!dealerEmail) return
+
+async function openEmailDialog(inv: any) {
+  selectedEmailInvoice.value = inv
+  emailForm.value.email = inv.dealerEmail || ''
+  dealerContacts.value = []
+  showEmailDialog.value = true
+  
+  if (inv.dealerId) {
+    isFetchingContacts.value = true
+    try {
+      const dealers = await $fetch<any[]>('/api/dealers')
+      const dlr = dealers.find((d: any) => d.id === inv.dealerId)
+      if (dlr) {
+        const emails = new Set<string>()
+        if (dlr.dealerEmail) emails.add(dlr.dealerEmail)
+        dlr.contacts?.forEach((c: any) => c.emails?.forEach((e: string) => emails.add(e)))
+        dealerContacts.value = Array.from(emails).filter(Boolean)
+        if (!emailForm.value.email && dealerContacts.value.length) {
+          emailForm.value.email = dealerContacts.value[0] || ''
+        }
+      }
+    } catch { }
+    finally { isFetchingContacts.value = false }
+  }
+}
+
+async function handleEmailDialogSubmit() {
+  if (!emailForm.value.email) return toast.error('Email is required')
+  let finalEmail = emailForm.value.email
+  if (finalEmail === 'custom') {
+    const customEmail = prompt('Enter the custom email address:')
+    if (!customEmail) return
+    finalEmail = customEmail
+  }
 
   isEmailing.value = true
   try {
+    const inv = selectedEmailInvoice.value
     const doc = toSalesDoc(inv)
     const htmlPayload = generatePDF(doc, 'Invoice')
     
@@ -151,17 +205,29 @@ async function handleEmail(inv: any) {
       method: 'POST' as any,
       body: {
         html: htmlPayload,
-        email: dealerEmail,
-        subject: `Invoice ${doc.number} from Turbo Clean`
+        email: finalEmail,
+        subject: `Invoice ${doc.number} from Turbo Clean`,
+        dealerId: inv.dealerId,
+        invoiceId: inv.id
       }
     })
-    toast.success('Invoice emailed successfully to ' + dealerEmail)
+    toast.success('Invoice emailed successfully to ' + finalEmail)
+    showEmailDialog.value = false
+    
+    // Auto status advance
+    if (inv.status === 'Approved' || inv.status === 'Draft' || inv.status === 'Sent') {
+      inv.status = 'Emailed'
+      await $fetch(`/api/invoices/${inv.id}` as any, { method: 'PUT', body: { status: 'Emailed' } })
+    }
   } catch (err: any) {
-    console.error(err)
     toast.error('Failed to email invoice: ' + err.message)
   } finally {
     isEmailing.value = false
   }
+}
+
+async function handleEmail(inv: any) {
+  openEmailDialog(inv)
 }
 
 function toSalesDoc(inv: any) {
@@ -486,11 +552,20 @@ function sortIcon(field: string) {
                 </TableCell>
                 <TableCell>
                   <div class="flex items-center justify-center gap-0.5">
-                    <Button variant="ghost" size="icon" class="h-7 w-7 hover:text-primary hover:bg-primary/10" @click="openPreviewFor(inv)">
+                    <Button v-if="inv.status === 'Draft'" variant="ghost" size="icon" class="h-7 w-7 text-amber-600 hover:bg-amber-50" @click.stop="updateInvoiceStatus(inv, 'Approved')" title="Approve">
+                      <ThumbsUp class="size-4" />
+                    </Button>
+                    <Button v-if="inv.status === 'Approved' || inv.status === 'Emailed'" variant="ghost" size="icon" class="h-7 w-7 text-emerald-600 hover:bg-emerald-50" @click.stop="updateInvoiceStatus(inv, 'Paid')" title="Mark Paid">
+                      <CheckCircle class="size-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" class="h-7 w-7 text-blue-600 hover:bg-blue-50" @click.stop="openEmailDialog(inv)" title="Email Dealer">
+                      <Send class="size-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" class="h-7 w-7 hover:text-primary hover:bg-primary/10" @click.stop="openPreviewFor(inv)" title="Preview">
                       <Eye class="size-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" class="h-7 w-7" @click="handleDownload(inv)">
-                      <Download class="size-4 text-muted-foreground" />
+                    <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:bg-muted" @click.stop="handleDownload(inv)" title="Download">
+                      <Download class="size-4" />
                     </Button>
                   </div>
                 </TableCell>
@@ -530,7 +605,7 @@ function sortIcon(field: string) {
           </DialogTitle>
           <div class="flex gap-2">
             <Button variant="outline" size="sm" @click="showPreview = false">Close</Button>
-            <Button variant="secondary" size="sm" :disabled="isEmailing" @click="handleEmail(selectedInvoice)">
+            <Button variant="secondary" size="sm" :disabled="isEmailing" @click="openEmailDialog(selectedInvoice)">
               <Loader2 v-if="isEmailing" class="mr-1 size-4 animate-spin" />
               <Mail v-else class="mr-1 size-4" /> 
               {{ isEmailing ? 'Sending...' : 'Email Dealer' }}
@@ -544,6 +619,48 @@ function sortIcon(field: string) {
           <div class="border rounded-lg overflow-hidden bg-white shadow-lg w-full max-w-[850px]">
             <iframe :srcdoc="previewHtml" class="w-full border-0 min-h-[750px]" />
           </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Email Dialog -->
+    <Dialog v-model:open="showEmailDialog">
+      <DialogContent class="sm:max-w-[425px]">
+        <div class="p-4 border-b bg-muted/20">
+          <DialogTitle class="flex items-center gap-2 text-lg">
+            <div class="p-1.5 bg-blue-500/10 text-blue-600 rounded-md"><Send class="size-4" /></div>
+            Email Invoice
+          </DialogTitle>
+          <DialogDescription class="mt-2 text-muted-foreground">
+            Send Invoice {{ selectedEmailInvoice?.number }} to {{ selectedEmailInvoice?.dealerName }}
+          </DialogDescription>
+        </div>
+        <div class="p-6">
+          <label class="block text-sm font-medium mb-2">Recipient Email Address</label>
+          <div v-if="isFetchingContacts" class="flex items-center text-sm text-muted-foreground mb-3 gap-2">
+            <Loader2 class="size-3 animate-spin" /> Fetching dealer contacts...
+          </div>
+          
+          <div class="space-y-3">
+            <select v-if="dealerContacts.length > 0" v-model="emailForm.email" class="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 focus:ring-2 focus:ring-ring">
+              <optgroup label="Dealer Contacts">
+                <option v-for="c in dealerContacts" :key="c" :value="c">{{ c }}</option>
+              </optgroup>
+              <optgroup label="Other">
+                <option value="custom">Enter new email address...</option>
+              </optgroup>
+            </select>
+            
+            <Input v-if="dealerContacts.length === 0 || emailForm.email === 'custom' || !dealerContacts.includes(emailForm.email)" v-model="emailForm.email" placeholder="billing@dealership.com" type="email" />
+          </div>
+        </div>
+        <div class="p-4 border-t bg-muted/20 flex justify-end gap-2">
+          <Button variant="outline" @click="showEmailDialog = false" :disabled="isEmailing">Cancel</Button>
+          <Button class="bg-blue-600 hover:bg-blue-700 text-white shadow" :disabled="!emailForm.email || isEmailing" @click="handleEmailDialogSubmit">
+            <Loader2 v-if="isEmailing" class="mr-2 size-4 animate-spin" />
+            <Send v-else class="mr-2 size-4" />
+            {{ isEmailing ? 'Sending...' : 'Send Invoice' }}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
