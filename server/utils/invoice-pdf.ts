@@ -6,16 +6,8 @@ import { join } from 'path'
 let _logoBase64: string | null = null
 
 function getLogoBase64(): string {
-  if (_logoBase64) return _logoBase64
-  try {
-    const logoPath = join(process.cwd(), 'public', 'invoice logo.png')
-    const logoBuffer = readFileSync(logoPath)
-    _logoBase64 = `data:image/png;base64,${logoBuffer.toString('base64')}`
-  } catch {
-    console.warn('[Invoice PDF] Could not read logo file, using empty string.')
-    _logoBase64 = ''
-  }
-  return _logoBase64
+  // Use a highly available absolute URL so email clients (like Gmail/Outlook) don't strip the Base64 image.
+  return 'https://raw.githubusercontent.com/aivisualpro/turboclean-Management/main/public/invoice%20logo.png'
 }
 
 /**
@@ -161,7 +153,8 @@ export async function htmlToPdfBuffer(html: string): Promise<Buffer> {
 
   try {
     const page = await browser.newPage()
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 15000 })
+    // Using networkidle2 and 35000ms to prevent timeout crashes when loading Google Fonts on large lists.
+    await page.setContent(html, { waitUntil: 'networkidle2', timeout: 35000 })
     const pdfBuffer = await page.pdf({
       format: 'Letter',
       printBackground: true,
