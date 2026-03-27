@@ -26,7 +26,7 @@ const formData = reactive({
   role: 'User',
   status: 'Active',
   password: '',
-  workspaceId: '',
+  workspaceId: 'none',
 })
 
 // populate on mount if editing
@@ -43,7 +43,7 @@ watchEffect(() => {
         role: user.role || 'User',
         status: user.status || 'Active',
         password: user.password || '', 
-        workspaceId: user.workspaceId || '',
+        workspaceId: user.workspaceId || 'none',
       })
       setHeader({ title: user.name, icon: 'i-lucide-user' })
     }
@@ -101,6 +101,9 @@ async function handleSave() {
 
   isSaving.value = true
   const snapshot = { ...formData }
+  if (snapshot.workspaceId === 'none') {
+    snapshot.workspaceId = ''
+  }
 
   if (isNew) {
     try {
@@ -219,7 +222,7 @@ async function handleDelete() {
                       <SelectValue placeholder="No workspace..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">No Workspace</SelectItem>
+                      <SelectItem value="none">No Workspace</SelectItem>
                       <SelectItem v-for="ws in (workspacesRes?.workspaces || [])" :key="ws.id" :value="ws.id">
                         {{ ws.name || ws.workspaceName || 'Unnamed' }}
                       </SelectItem>
