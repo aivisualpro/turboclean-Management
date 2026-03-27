@@ -140,18 +140,29 @@ function handleDownload(inv: any) {
 }
 
 async function updateInvoiceStatus(inv: any, newStatus: string) {
-  if (!confirm(`Are you sure you want to mark this invoice as ${newStatus}?`)) return
-  toast.promise(
-    ($fetch as any)(`/api/invoices/${inv.id}`, { method: 'PUT', body: { status: newStatus } }),
-    {
-      loading: 'Updating status...',
-      success: () => {
-        inv.status = newStatus
-        return `Invoice marked as ${newStatus}`
-      },
-      error: 'Failed to update status'
+  toast(`Mark invoice as ${newStatus}?`, {
+    description: `Are you sure you want to mark this invoice as ${newStatus}?`,
+    action: {
+      label: 'Confirm',
+      onClick: () => {
+        toast.promise(
+          ($fetch as any)(`/api/invoices/${inv.id}`, { method: 'PUT', body: { status: newStatus } }),
+          {
+            loading: 'Updating status...',
+            success: () => {
+              inv.status = newStatus
+              return `Invoice marked as ${newStatus}`
+            },
+            error: 'Failed to update status'
+          }
+        )
+      }
+    },
+    cancel: {
+      label: 'Cancel',
+      onClick: () => {}
     }
-  )
+  })
 }
 
 const showEmailDialog = ref(false)

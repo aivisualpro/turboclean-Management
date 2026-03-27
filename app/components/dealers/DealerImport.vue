@@ -104,7 +104,9 @@ async function doImport() {
       address,
       status,
       contacts,
-      services: []
+      services: [],
+      isTaxApplied: false,
+      taxPercentage: 0
     }
   }).filter(d => d.dealerName)
 
