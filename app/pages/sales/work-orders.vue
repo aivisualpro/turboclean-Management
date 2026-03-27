@@ -416,8 +416,9 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                 <div
                   class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors"
                   :class="activeFilter.dateStart?.startsWith(yr.year.toString()) && activeFilter.dateEnd?.endsWith('12-31T23:59:59.999Z') ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'"
+                  @click="toggleSet(expandedYears, `${dealer.dealerId}-${yr.year}`)"
                 >
-                  <div class="flex items-center gap-1.5" @click="toggleSet(expandedYears, `${dealer.dealerId}-${yr.year}`)">
+                  <div class="flex items-center gap-1.5">
                     <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20">
                       <ChevronDown v-if="expandedYears.has(`${dealer.dealerId}-${yr.year}`)" class="size-3.5" />
                       <ChevronRight v-else class="size-3.5" />
@@ -436,8 +437,9 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                     <div
                       class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors"
                       :class="activeFilter.dateStart?.startsWith(`${yr.year}-${mo.monthNumber.toString().padStart(2, '0')}`) && !activeFilter.dateEnd?.startsWith(activeFilter.dateStart?.slice(0, 10) || '') ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'"
+                      @click="toggleSet(expandedMonths, `${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)"
                     >
-                      <div class="flex items-center gap-1.5" @click="toggleSet(expandedMonths, `${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)">
+                      <div class="flex items-center gap-1.5">
                         <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20">
                           <ChevronDown v-if="expandedMonths.has(`${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)" class="size-3.5" />
                           <ChevronRight v-else class="size-3.5" />

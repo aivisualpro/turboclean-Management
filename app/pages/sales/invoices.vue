@@ -186,7 +186,7 @@ async function openEmailDialog(inv: any) {
   }
 }
 
-async function handleEmailDialogSubmit() {
+function handleEmailDialogSubmit() {
   if (!emailForm.value.email) return toast.error('Email is required')
   let finalEmail = emailForm.value.email
   if (finalEmail === 'custom') {
@@ -195,35 +195,39 @@ async function handleEmailDialogSubmit() {
     finalEmail = customEmail
   }
 
-  isEmailing.value = true
-  try {
-    const inv = selectedEmailInvoice.value
-    const doc = toSalesDoc(inv)
-    const htmlPayload = generatePDF(doc, 'Invoice')
-    
-    await $fetch('/api/invoices/send', {
-      method: 'POST' as any,
-      body: {
-        html: htmlPayload,
-        email: finalEmail,
-        subject: `Invoice ${doc.number} from Turbo Clean`,
-        dealerId: inv.dealerId,
-        invoiceId: inv.id
-      }
-    })
-    toast.success('Invoice emailed successfully to ' + finalEmail)
-    showEmailDialog.value = false
-    
-    // Auto status advance
-    if (inv.status === 'Approved' || inv.status === 'Draft' || inv.status === 'Sent') {
-      inv.status = 'Emailed'
-      await $fetch(`/api/invoices/${inv.id}` as any, { method: 'PUT', body: { status: 'Emailed' } })
-    }
-  } catch (err: any) {
-    toast.error('Failed to email invoice: ' + err.message)
-  } finally {
-    isEmailing.value = false
+  const inv = selectedEmailInvoice.value
+  const doc = toSalesDoc(inv)
+  const htmlPayload = generatePDF(doc, 'Invoice')
+
+  // Close dialog and show success immediately — backend handles the rest
+  showEmailDialog.value = false
+  toast.success('Invoice queued for delivery to ' + finalEmail)
+
+  // Optimistic status advance
+  if (inv.status === 'Approved' || inv.status === 'Draft' || inv.status === 'Sent') {
+    inv.status = 'Emailed'
   }
+
+  // Fire-and-forget: API call + status update run in background
+  $fetch('/api/invoices/send', {
+    method: 'POST' as any,
+    body: {
+      html: htmlPayload,
+      email: finalEmail,
+      subject: `Invoice ${doc.number} from Turbo Clean`,
+      dealerId: inv.dealerId,
+      invoiceId: inv.id,
+      invoiceType: inv.type || 'Weekly',
+      invoiceNumber: doc.number,
+      invoiceData: doc,
+    }
+  }).then(() => {
+    $fetch(`/api/invoices/${inv.id}` as any, { method: 'PUT', body: { status: 'Emailed' } }).catch(() => {})
+  }).catch((err: any) => {
+    toast.error('Email delivery failed: ' + (err.message || 'Unknown error'))
+    // Revert optimistic status
+    inv.status = 'Approved'
+  })
 }
 
 async function handleEmail(inv: any) {
@@ -428,8 +432,8 @@ function sortIcon(field: string) {
             <!-- Years -->
             <div v-if="expandedDealers.has(dealer.dealerId)" class="pl-5 relative before:absolute before:inset-y-0 before:left-3.5 before:w-px before:bg-border/60">
               <div v-for="yr in dealer.years" :key="yr.year">
-                <div class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors" :class="activeFilter.dateStart?.startsWith(yr.year.toString()) && activeFilter.dateEnd?.endsWith('12-31T23:59:59.999Z') ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'">
-                  <div class="flex items-center gap-1.5" @click="toggleSet(expandedYears, `${dealer.dealerId}-${yr.year}`)">
+                <div class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors" :class="activeFilter.dateStart?.startsWith(yr.year.toString()) && activeFilter.dateEnd?.endsWith('12-31T23:59:59.999Z') ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'" @click="toggleSet(expandedYears, `${dealer.dealerId}-${yr.year}`)">
+                  <div class="flex items-center gap-1.5">
                     <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20">
                       <ChevronDown v-if="expandedYears.has(`${dealer.dealerId}-${yr.year}`)" class="size-3.5" />
                       <ChevronRight v-else class="size-3.5" />
@@ -443,8 +447,8 @@ function sortIcon(field: string) {
                 <!-- Months -->
                 <div v-if="expandedYears.has(`${dealer.dealerId}-${yr.year}`)" class="pl-5 relative before:absolute before:inset-y-0 before:left-3.5 before:w-px before:bg-border/60">
                   <div v-for="mo in yr.months" :key="mo.month">
-                    <div class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors" :class="activeFilter.dateStart?.startsWith(`${yr.year}-${mo.monthNumber.toString().padStart(2, '0')}`) && !activeFilter.dateEnd?.startsWith(activeFilter.dateStart?.slice(0, 10) || '') ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'">
-                      <div class="flex items-center gap-1.5" @click="toggleSet(expandedMonths, `${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)">
+                    <div class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors" :class="activeFilter.dateStart?.startsWith(`${yr.year}-${mo.monthNumber.toString().padStart(2, '0')}`) && !activeFilter.dateEnd?.startsWith(activeFilter.dateStart?.slice(0, 10) || '') ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'" @click="toggleSet(expandedMonths, `${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)">
+                      <div class="flex items-center gap-1.5">
                         <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20">
                           <ChevronDown v-if="expandedMonths.has(`${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)" class="size-3.5" />
                           <ChevronRight v-else class="size-3.5" />
@@ -597,7 +601,7 @@ function sortIcon(field: string) {
 
     <!-- Preview Dialog -->
     <Dialog v-model:open="showPreview">
-      <DialogContent class="sm:max-w-[70vw] w-[95vw] lg:max-w-[1000px] max-h-[95vh] overflow-auto p-0 gap-0">
+      <DialogContent class="sm:max-w-[70vw] w-[95vw] lg:max-w-[1000px] max-h-[95vh] overflow-auto p-0 gap-0 [&>button:last-child]:hidden">
         <div class="p-4 border-b flex items-center justify-between bg-muted/20">
           <DialogTitle class="flex items-center gap-2">
             <div class="p-1.5 bg-primary/10 text-primary rounded-md"><FileSpreadsheet class="size-4" /></div>
