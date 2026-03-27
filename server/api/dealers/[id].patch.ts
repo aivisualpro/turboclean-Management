@@ -1,6 +1,6 @@
 import { connectToDatabase } from '../../utils/mongodb'
 import { ObjectId } from 'mongodb'
-import { appSheetEdit } from '../../utils/appsheet'
+import { appSheetEdit, appSheetAdd } from '../../utils/appsheet'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -28,12 +28,20 @@ export default defineEventHandler(async (event) => {
     if (body.notes !== undefined) updateDoc.notes = body.notes
     if (body.status !== undefined) updateDoc.status = body.status
     if (body.contacts !== undefined) updateDoc.contacts = body.contacts
+    if (body.services !== undefined) updateDoc.services = body.services
 
     let filter: any
     try {
       filter = { _id: new ObjectId(id) }
     } catch {
       filter = { _id: id }
+    }
+
+    // Snapshot existing service IDs BEFORE the update so we can diff new vs existing
+    let existingServiceIds = new Set<string>()
+    if (updateDoc.services !== undefined) {
+      const existing = await db.collection('turboCleanDealers').findOne(filter, { projection: { services: 1 } })
+      existingServiceIds = new Set((existing?.services || []).map((s: any) => s.id || s._id || '').filter(Boolean))
     }
 
     const result = await db.collection('turboCleanDealers').updateOne(
@@ -43,7 +51,7 @@ export default defineEventHandler(async (event) => {
     console.log(`[PATCH] updateOne result: matched=${result.matchedCount}, modified=${result.modifiedCount}`)
 
     // Verify the write
-    const verified = await db.collection('turboCleanDealers').findOne({ _id: new ObjectId(id) })
+    const verified = await db.collection('turboCleanDealers').findOne(filter)
 
     // ── Sync changed fields to AppSheet (fire-and-forget) ──
     // The webhook handler will detect this as an echo and skip the write-back.
@@ -59,7 +67,34 @@ export default defineEventHandler(async (event) => {
 
     if (Object.keys(appSheetRow).length > 1) {
       appSheetEdit('Dealers', [appSheetRow])
-        .catch(e => console.error('[PATCH] AppSheet sync failed:', e?.message))
+        .catch(e => console.error('[PATCH] AppSheet Dealers sync failed:', e?.message))
+    }
+
+    // ── Sync individual service rows to AppSheet DealerServices table ──
+    // Split into 'new' (Add) vs 'existing' (Edit) to avoid 404 warnings.
+    if (updateDoc.services !== undefined && Array.isArray(updateDoc.services)) {
+      const allRows = (updateDoc.services as any[]).map((srv: any) => ({
+        _id: srv.id || srv._id || '',
+        dealer: id,
+        service: srv.service || '',
+        Amount: Number(srv.amount) || 0,
+        Tax: Number(srv.tax) || 0,
+        Total: Number(srv.total) || 0,
+      })).filter(r => r._id)
+
+      const newRows      = allRows.filter(r => !existingServiceIds.has(r._id))
+      const existingRows = allRows.filter(r =>  existingServiceIds.has(r._id))
+
+      if (newRows.length > 0) {
+        console.log(`[PATCH] Adding ${newRows.length} new service rows to AppSheet DealerServices`)
+        appSheetAdd('DealerServices', newRows)
+          .catch(e => console.error('[PATCH] AppSheet DealerServices Add failed:', e?.message))
+      }
+      if (existingRows.length > 0) {
+        console.log(`[PATCH] Editing ${existingRows.length} existing service rows in AppSheet DealerServices`)
+        appSheetEdit('DealerServices', existingRows)
+          .catch(e => console.error('[PATCH] AppSheet DealerServices Edit failed:', e?.message))
+      }
     }
 
     return {
@@ -68,6 +103,7 @@ export default defineEventHandler(async (event) => {
       modifiedCount: result.modifiedCount,
       isTaxApplied: verified?.isTaxApplied,
       taxPercentage: verified?.taxPercentage,
+      services: verified?.services,
     }
   } catch (error: any) {
     console.error('[PATCH] ERROR:', error.message)

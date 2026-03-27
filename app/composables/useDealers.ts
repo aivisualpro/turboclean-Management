@@ -127,6 +127,7 @@ export function useDealers() {
             ...current,
             isTaxApplied: result.isTaxApplied !== undefined ? result.isTaxApplied : current.isTaxApplied,
             taxPercentage: result.taxPercentage !== undefined ? result.taxPercentage : current.taxPercentage,
+            services: result.services !== undefined ? result.services : current.services,
           }
           dealers.value.splice(confirmedIdx, 1, updatedCurrent)
           console.log('[patchDealer] confirmed from DB — isTaxApplied=', dealers.value[confirmedIdx]!.isTaxApplied, 'taxPercentage=', dealers.value[confirmedIdx]!.taxPercentage)

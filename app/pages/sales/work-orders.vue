@@ -94,6 +94,12 @@ function fmtDate(d: string) {
   return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+function getAppSheetImageUrl(fileName: string | undefined | null) {
+  if (!fileName) return null
+  const encodedName = encodeURIComponent(fileName)
+  return `https://www.appsheet.com/template/gettablefileurl?appName=ZRZOperationsAPP-109704988&tableName=WorkOrders&fileName=${encodedName}`
+}
+
 function toggleSort(field: string) {
   if (sortBy.value === field) {
     sortDir.value = sortDir.value === -1 ? 1 : -1
@@ -195,6 +201,7 @@ async function handleExport() {
               <TableHead class="cursor-pointer select-none" @click="toggleSort('stockNumber')">
                 <div class="flex items-center gap-1">Stock Number <Icon :name="sortIcon('stockNumber')" class="size-3 text-muted-foreground" /></div>
               </TableHead>
+              <TableHead class="w-16">Photo</TableHead>
               <TableHead class="cursor-pointer select-none" @click="toggleSort('vin')">
                 <div class="flex items-center gap-1">VIN <Icon :name="sortIcon('vin')" class="size-3 text-muted-foreground" /></div>
               </TableHead>
@@ -225,6 +232,14 @@ async function handleExport() {
             <TableRow v-for="wo in workOrders" :key="wo.id" class="cursor-pointer hover:bg-muted/50">
               <TableCell class="font-medium text-xs whitespace-nowrap">{{ fmtDate(wo.date) }}</TableCell>
               <TableCell class="text-xs">{{ wo.stockNumber }}</TableCell>
+              <TableCell @click.stop>
+                <a v-if="wo.upload" :href="getAppSheetImageUrl(wo.upload)!" target="_blank" class="block w-9 h-9 rounded bg-muted border overflow-hidden hover:opacity-80 transition-opacity">
+                  <img :src="getAppSheetImageUrl(wo.upload)!" class="w-full h-full object-cover" loading="lazy" />
+                </a>
+                <div v-else class="w-9 h-9 rounded bg-muted/50 border border-dashed flex items-center justify-center">
+                  <Icon name="lucide:image-off" class="size-3.5 text-muted-foreground/40" />
+                </div>
+              </TableCell>
               <TableCell class="text-xs font-mono uppercase">{{ wo.vin }}</TableCell>
               <TableCell class="text-xs truncate max-w-[120px]">{{ wo.dealerName }}</TableCell>
               <TableCell class="text-xs truncate max-w-[120px]">{{ wo.dealerServiceId }}</TableCell>
@@ -239,19 +254,19 @@ async function handleExport() {
               </TableCell>
             </TableRow>
             <TableRow v-if="loading && workOrders.length === 0">
-              <TableCell :colspan="10" class="text-center py-10">
+              <TableCell :colspan="11" class="text-center py-10">
                 <Icon name="lucide:loader-2" class="size-6 animate-spin text-muted-foreground mx-auto" />
               </TableCell>
             </TableRow>
             <TableRow v-if="!loading && workOrders.length === 0">
-              <TableCell :colspan="10" class="text-center py-10 text-muted-foreground">
+              <TableCell :colspan="11" class="text-center py-10 text-muted-foreground">
                 No work orders found.
               </TableCell>
             </TableRow>
 
             <!-- Load More Sentinel -->
             <tr v-if="hasMore && workOrders.length > 0" v-intersect="fetchWorkOrders" class="h-10">
-              <td :colspan="10" class="text-center">
+              <td :colspan="11" class="text-center">
                 <div v-if="loading" class="flex justify-center py-4">
                   <Icon name="lucide:loader-2" class="size-4 animate-spin text-muted-foreground" />
                 </div>

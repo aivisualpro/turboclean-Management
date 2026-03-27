@@ -72,6 +72,13 @@ onMounted(() => {
 const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0)
 const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
 
+function getAppSheetImageUrl(fileName: string | undefined | null) {
+  if (!fileName) return null
+  // The fileName coming from AppSheet usually starts with "/" e.g., "/699b1f1de586aba4c8f0daf7-Vernon Chevrolet/..."
+  const encodedName = encodeURIComponent(fileName)
+  return `https://www.appsheet.com/template/gettablefileurl?appName=ZRZOperationsAPP-109704988&tableName=WorkOrders&fileName=${encodedName}`
+}
+
 function toggleSort(field: string) {
   if (sortBy.value === field) {
     sortDir.value = sortDir.value === -1 ? 1 : -1
@@ -100,6 +107,7 @@ function sortIcon(field: string) {
             <TableHead class="cursor-pointer select-none" @click="toggleSort('stockNumber')">
               <div class="flex items-center gap-1">Stock # <Icon :name="sortIcon('stockNumber')" class="size-3 text-muted-foreground" /></div>
             </TableHead>
+            <TableHead class="w-16">Photo</TableHead>
             <TableHead class="cursor-pointer select-none" @click="toggleSort('vin')">
               <div class="flex items-center gap-1">VIN <Icon :name="sortIcon('vin')" class="size-3 text-muted-foreground" /></div>
             </TableHead>
@@ -127,6 +135,14 @@ function sortIcon(field: string) {
           <TableRow v-for="wo in workOrders" :key="wo.id" class="hover:bg-muted/50">
             <TableCell class="font-medium text-xs whitespace-nowrap">{{ fmtDate(wo.date) }}</TableCell>
             <TableCell class="text-xs">{{ wo.stockNumber }}</TableCell>
+            <TableCell>
+              <a v-if="wo.upload" :href="getAppSheetImageUrl(wo.upload)!" target="_blank" class="block w-9 h-9 rounded bg-muted border overflow-hidden hover:opacity-80 transition-opacity">
+                <img :src="getAppSheetImageUrl(wo.upload)!" class="w-full h-full object-cover" loading="lazy" />
+              </a>
+              <div v-else class="w-9 h-9 rounded bg-muted/50 border border-dashed flex items-center justify-center">
+                <Icon name="lucide:image-off" class="size-3.5 text-muted-foreground/40" />
+              </div>
+            </TableCell>
             <TableCell class="text-xs font-mono uppercase">{{ wo.vin || '—' }}</TableCell>
             <TableCell class="text-xs truncate max-w-[120px]">{{ wo.dealerServiceId }}</TableCell>
             <TableCell class="text-right text-xs tabular-nums">{{ fmt(wo.amount) }}</TableCell>
@@ -142,21 +158,21 @@ function sortIcon(field: string) {
 
           <!-- Loading initial -->
           <TableRow v-if="loading && workOrders.length === 0">
-            <TableCell :colspan="9" class="text-center py-10">
+            <TableCell :colspan="10" class="text-center py-10">
               <Icon name="lucide:loader-2" class="size-6 animate-spin text-muted-foreground mx-auto" />
             </TableCell>
           </TableRow>
 
           <!-- Empty -->
           <TableRow v-if="!loading && workOrders.length === 0">
-            <TableCell :colspan="9" class="text-center py-10 text-muted-foreground">
+            <TableCell :colspan="10" class="text-center py-10 text-muted-foreground">
               No work orders found for this dealer.
             </TableCell>
           </TableRow>
 
           <!-- Load More Sentinel -->
           <tr v-if="hasMore && workOrders.length > 0" v-intersect="fetchWorkOrders" class="h-10">
-            <td :colspan="9" class="text-center">
+            <td :colspan="10" class="text-center">
               <div v-if="loading" class="flex justify-center py-4">
                 <Icon name="lucide:loader-2" class="size-4 animate-spin text-muted-foreground" />
               </div>
