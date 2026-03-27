@@ -77,13 +77,12 @@ function removeEmail(idx: number) {
   }
 }
 
-function onPhoneInput(idx: number, event: Event) {
-  const input = event.target as HTMLInputElement
-  const formatted = formatPhoneNumber(input.value)
+function onPhoneInput(idx: number, val: string | number | Event) {
+  const strVal = typeof val === 'object' && val !== null && 'target' in val ? (val.target as HTMLInputElement).value : String(val)
+  const formatted = formatPhoneNumber(strVal)
   if (formContact.value.phones[idx]) {
     formContact.value.phones[idx]!.number = formatted
   }
-  nextTick(() => { input.value = formatted })
 }
 
 async function onSubmit() {
@@ -160,10 +159,10 @@ async function onSubmit() {
           </div>
           <div v-for="(phone, pi) in formContact.phones" :key="phone.id" class="flex items-center gap-2">
             <Input
-              :value="phone.number"
+              :model-value="phone.number"
               placeholder="(000) 000-0000"
               class="flex-1"
-              @input="onPhoneInput(pi, $event)"
+              @update:model-value="onPhoneInput(pi, $event)"
             />
             <Select v-model="phone.type" class="w-28">
               <SelectTrigger class="w-28">

@@ -11,7 +11,7 @@ export default defineEventHandler(async (event) => {
       id: doc._id.toString(),
       dealerName: doc.dealer || '',
       address: doc.address || '',
-      contacts: [{
+      contacts: Array.isArray(doc.contacts) && doc.contacts.length > 0 ? doc.contacts : [{
         id: nanoid(8),
         name: 'Primary Contact',
         designation: '',
