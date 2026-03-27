@@ -488,8 +488,8 @@ function sortIcon(field: string) {
             <!-- TYPE TABS (Daily vs Weekly) -->
             <div class="flex bg-muted/60 p-1 rounded-lg border border-border/50">
               <button @click="activeType = 'all'"     class="px-2.5 py-1 text-xs font-medium rounded-md transition-all shadow-sm" :class="activeType === 'all' ? 'bg-background text-foreground ring-1 ring-border/50' : 'text-muted-foreground hover:text-foreground'">All Types</button>
-              <button @click="activeType = 'daily'"   class="px-2.5 py-1 text-xs font-medium rounded-md transition-all" :class="activeType === 'daily' ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50 text-blue-600' : 'text-muted-foreground hover:text-foreground'">Daily</button>
-              <button @click="activeType = 'weekly'"  class="px-2.5 py-1 text-xs font-medium rounded-md transition-all" :class="activeType === 'weekly' ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50 text-purple-600' : 'text-muted-foreground hover:text-foreground'">Weekly</button>
+              <button @click="activeType = 'daily'"   class="px-2.5 py-1 text-xs font-medium rounded-md transition-all" :class="activeType === 'daily' ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50 text-emerald-600' : 'text-muted-foreground hover:text-foreground'">Daily</button>
+              <button @click="activeType = 'weekly'"  class="px-2.5 py-1 text-xs font-medium rounded-md transition-all" :class="activeType === 'weekly' ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50 text-amber-600' : 'text-muted-foreground hover:text-foreground'">Weekly</button>
             </div>
 
             <!-- PAYMENT STATUS TABS -->
@@ -529,7 +529,7 @@ function sortIcon(field: string) {
 
                 <TableCell class="text-xs whitespace-nowrap">{{ fmtDate(inv.date) }}</TableCell>
                 <TableCell>
-                  <Badge variant="outline" class="text-[9px] uppercase tracking-wide" :class="inv.type === 'Weekly' ? 'bg-purple-500/10 text-purple-600 border-purple-500/20' : 'bg-blue-500/10 text-blue-600 border-blue-500/20'">
+                  <Badge variant="outline" class="text-[9px] uppercase tracking-wide" :class="inv.type === 'Weekly' ? 'bg-amber-500/10 text-amber-600 border-amber-500/20' : 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'">
                     {{ inv.type || 'Weekly' }}
                   </Badge>
                 </TableCell>

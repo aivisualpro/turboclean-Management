@@ -87,6 +87,7 @@ function handleDelete() {
                 <th class="p-4 text-left font-medium text-muted-foreground">Phone</th>
                 <th class="p-4 text-left font-medium text-muted-foreground">Email</th>
                 <th class="p-4 text-left font-medium text-muted-foreground">Address</th>
+                <th class="p-4 text-left font-medium text-muted-foreground">Workspace</th>
                 <th class="p-4 text-left font-medium text-muted-foreground">App Role</th>
                 <th class="p-4 text-left font-medium text-muted-foreground">Status</th>
                 <th class="p-4 text-right font-medium text-muted-foreground">Actions</th>
@@ -113,6 +114,12 @@ function handleDelete() {
                   {{ u.address || '—' }}
                 </td>
                 <td class="p-4">
+                  <Badge v-if="u.workspaceName && u.workspaceName !== 'None'" variant="outline" class="text-[10px] px-1.5 py-0 bg-teal-500/10 text-teal-600 border-teal-500/20">
+                    {{ u.workspaceName }}
+                  </Badge>
+                  <span v-else class="text-muted-foreground">—</span>
+                </td>
+                <td class="p-4">
                   <Badge variant="outline" class="text-[10px] px-1.5 py-0" :class="u.role === 'Admin' ? 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20' : 'bg-gray-500/10 text-gray-600 border-gray-500/20'">
                     {{ u.role }}
                   </Badge>
@@ -134,12 +141,12 @@ function handleDelete() {
                 </td>
               </tr>
               <tr v-if="pending">
-                <td colspan="7" class="p-8 text-center text-muted-foreground">
+                <td colspan="8" class="p-8 text-center text-muted-foreground">
                   Loading users...
                 </td>
               </tr>
               <tr v-else-if="displayList.length === 0">
-                <td colspan="7" class="p-8 text-center text-muted-foreground">
+                <td colspan="8" class="p-8 text-center text-muted-foreground">
                   No users found
                 </td>
               </tr>

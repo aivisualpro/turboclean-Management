@@ -20,6 +20,7 @@ export default defineEventHandler(async (event) => {
       role: body.role,
       status: body.status,
       password: body.password,
+      workspaceId: body.workspaceId,
       updatedAt: new Date(),
       lastUpdatedBy: 'web-ui',
     }

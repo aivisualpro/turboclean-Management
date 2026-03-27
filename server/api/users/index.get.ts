@@ -3,7 +3,18 @@ import { connectToDatabase } from '../../utils/mongodb'
 export default defineEventHandler(async (event) => {
   try {
     const { db } = await connectToDatabase()
-    const users = await db.collection('turboCleanAppUsers').find({}).sort({ createdAt: -1 }).toArray()
+    
+    // Fetch users AND workspaces for resolution
+    const [users, workspaces] = await Promise.all([
+      db.collection('turboCleanAppUsers').find({}).sort({ createdAt: -1 }).toArray(),
+      db.collection('turboCleanWorkspaces').find({}).toArray()
+    ])
+    
+    const wsMap = new Map()
+    for (const w of workspaces) {
+      wsMap.set(w._id.toString(), w.name || '')
+    }
+
     return users.map(u => ({
       id: u._id.toString(),
       name: u.name || '',
@@ -13,7 +24,8 @@ export default defineEventHandler(async (event) => {
       registerDealers: Array.isArray(u.registerDealers) ? u.registerDealers : [],
       role: u.role || 'User',
       status: u.status || 'Active',
-      password: u.password || '', // Usually shouldn't send back to client, but doing it for simplicity based on the prompt
+      workspaceId: u.workspaceId || '',
+      workspaceName: wsMap.get(u.workspaceId?.toString()) || 'None',
       createdAt: u.createdAt,
     }))
   } catch (error: any) {

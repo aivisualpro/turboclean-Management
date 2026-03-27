@@ -15,6 +15,7 @@ const { dealers, fetchDealers } = useDealers()
 if (import.meta.client && dealers.value.length === 0) fetchDealers()
 
 const { data: users, pending } = await useFetch<any[]>('/api/users')
+const { data: workspacesRes } = await useFetch<any>('/api/workspaces')
 
 const formData = reactive({
   name: '',
@@ -25,6 +26,7 @@ const formData = reactive({
   role: 'User',
   status: 'Active',
   password: '',
+  workspaceId: '',
 })
 
 // populate on mount if editing
@@ -41,6 +43,7 @@ watchEffect(() => {
         role: user.role || 'User',
         status: user.status || 'Active',
         password: user.password || '', 
+        workspaceId: user.workspaceId || '',
       })
       setHeader({ title: user.name, icon: 'i-lucide-user' })
     }
@@ -208,7 +211,21 @@ async function handleDelete() {
               <CardDescription>Role, status, and associated dealerships.</CardDescription>
             </CardHeader>
             <CardContent class="space-y-6">
-              <div class="grid grid-cols-2 gap-4">
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="space-y-1.5">
+                  <Label>Workspace</Label>
+                  <Select v-model="formData.workspaceId">
+                    <SelectTrigger>
+                      <SelectValue placeholder="No workspace..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">No Workspace</SelectItem>
+                      <SelectItem v-for="ws in (workspacesRes?.workspaces || [])" :key="ws.id" :value="ws.id">
+                        {{ ws.name || ws.workspaceName || 'Unnamed' }}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div class="space-y-1.5">
                   <Label>App Role</Label>
                   <Select v-model="formData.role">

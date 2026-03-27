@@ -16,6 +16,7 @@ export default defineEventHandler(async (event) => {
       role: body.role || 'User',
       status: body.status || 'Active',
       password: body.password || '',
+      workspaceId: body.workspaceId || '',
       createdAt: new Date(),
       updatedAt: new Date()
     }
