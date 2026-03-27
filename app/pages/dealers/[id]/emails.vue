@@ -1,18 +1,36 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import type { Dealer } from '~/composables/useDealers'
-import { Mail, Clock, Inbox, Loader2 } from 'lucide-vue-next'
+import { Mail, Clock, Inbox as InboxIcon, Loader2, Send, Archive, FileText, CornerUpLeft, Search, Paperclip, MoreHorizontal, UserCircle2 } from 'lucide-vue-next'
 
-definePageMeta({ layout: 'default' })
 const props = defineProps<{ dealer: Dealer }>()
 
 const emails = ref<any[]>([])
 const loading = ref(true)
+const activeFolder = ref<'inbox' | 'sent'>('sent') // Start on sent until inbound is connected
+const selectedEmail = ref<any>(null)
+const searchQuery = ref('')
 
 onMounted(async () => {
   try {
+    // Eventually this will fetch both incoming and outgoing, identified by 'folder'
     const res = await $fetch<any[]>(`/api/emails?dealerId=${props.dealer.id}`)
-    emails.value = res || []
+    
+    // Normalize existing data to match a full mailbox schema
+    emails.value = (res || []).map(e => ({
+      ...e,
+      folder: e.folder || 'sent', // Legacy data defaults to 'sent'
+      from: e.from || 'system@zarzops.com',
+      to: e.email || (props.dealer as any).email || e.to,
+      bodyHtml: e.bodyHtml || e.body || `<p class="text-muted-foreground p-4 bg-muted/20 border border-dashed rounded-lg italic">System Dispatch: No HTML body persisted for this legacy outgoing email. Linked to ${e.type || 'Invoice'}.</p>`,
+      attachments: e.attachments || [],
+      receivedAt: e.sentAt || e.receivedAt || new Date().toISOString()
+    }))
+    
+    // Auto-select newest
+    if (emails.value.length > 0) {
+      selectedEmail.value = emails.value.sort((a,b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())[0]
+    }
   } catch (e) {
     console.error(e)
   } finally {
@@ -20,52 +38,163 @@ onMounted(async () => {
   }
 })
 
-const getStatusColor = (st: string) => {
-  if (st === 'Sent') return 'text-emerald-600 bg-emerald-50 border-emerald-200'
-  return 'text-blue-600 bg-blue-50 border-blue-200'
+const filteredEmails = computed(() => {
+  return emails.value
+    .filter(e => e.folder === activeFolder.value)
+    .filter(e => !searchQuery.value || e.subject?.toLowerCase().includes(searchQuery.value.toLowerCase()) || e.to?.toLowerCase().includes(searchQuery.value.toLowerCase()))
+    .sort((a,b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
+})
+
+const folderCounts = computed(() => {
+  return {
+    inbox: emails.value.filter(e => e.folder === 'inbox').length,
+    sent: emails.value.filter(e => e.folder === 'sent').length
+  }
+})
+
+function selectEmail(email: any) {
+  selectedEmail.value = email
+}
+
+const formatDate = (d: string) => {
+  const date = new Date(d)
+  const isToday = new Date().toDateString() === date.toDateString()
+  return isToday ? date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : date.toLocaleDateString([], { month: 'short', day: 'numeric'})
 }
 </script>
 
 <template>
-  <div class="h-full flex flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
-    <div class="p-4 border-b bg-muted/20 flex justify-between items-center">
-      <div>
-        <h3 class="font-semibold flex items-center gap-2"><Mail class="size-4 text-primary" /> Communication Log</h3>
-        <p class="text-xs text-muted-foreground mt-0.5">Email trails and invoice dispatches for {{ dealer.dealerName }}</p>
-      </div>
-    </div>
+  <div class="h-full flex overflow-hidden rounded-xl border bg-card shadow-sm text-sm">
     
-    <div class="flex-1 overflow-auto bg-gray-50/50">
-      <div v-if="loading" class="flex justify-center py-20">
-        <Loader2 class="size-6 animate-spin text-muted-foreground/50" />
+    <!-- 1. Mailbox Sidebar (Folders) -->
+    <div class="w-48 shrink-0 border-r bg-muted/10 flex flex-col items-stretch p-3 hidden sm:flex">
+      <div class="mb-4 px-2">
+        <h3 class="font-bold text-base flex items-center gap-2 tracking-tight text-foreground">
+          <Mail class="size-4 text-primary" /> Mailbox
+        </h3>
       </div>
       
-      <div v-else-if="emails.length === 0" class="flex-1 flex flex-col items-center justify-center py-20">
-        <Inbox class="size-12 text-muted-foreground/20 mb-3" />
-        <h4 class="text-sm font-semibold text-foreground">No Emails Found</h4>
-        <p class="text-xs text-muted-foreground w-64 text-center mt-1">We haven't recorded any emails dispatched to this dealer yet.</p>
+      <div class="space-y-1">
+        <button 
+          @click="activeFolder = 'inbox'; selectedEmail = null" 
+          class="w-full flex items-center justify-between px-3 py-2 rounded-md transition-colors text-left"
+          :class="activeFolder === 'inbox' ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'"
+        >
+          <div class="flex items-center gap-2"><InboxIcon class="size-4 opacity-80" /> Inbox</div>
+          <span class="text-[10px] font-mono opacity-60">{{ folderCounts.inbox }}</span>
+        </button>
+        <button 
+          @click="activeFolder = 'sent'; selectedEmail = null" 
+          class="w-full flex items-center justify-between px-3 py-2 rounded-md transition-colors text-left"
+          :class="activeFolder === 'sent' ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted'"
+        >
+          <div class="flex items-center gap-2"><Send class="size-4 opacity-80" /> Sent</div>
+          <span class="text-[10px] font-mono opacity-60">{{ folderCounts.sent }}</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 2. Email List Column -->
+    <div class="w-full sm:w-[320px] shrink-0 border-r flex flex-col bg-background relative z-10 shadow-[1px_0_10px_rgba(0,0,0,0.02)]">
+      <div class="p-3 border-b shrink-0 bg-muted/5">
+        <div class="relative">
+          <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+          <Input v-model="searchQuery" :placeholder="`Search ${activeFolder}...`" class="pl-8 h-8 text-xs bg-background shadow-none border-border/80" />
+        </div>
+      </div>
+      
+      <div class="flex-1 overflow-y-auto">
+        <div v-if="loading" class="flex justify-center py-10">
+          <Loader2 class="size-5 animate-spin text-muted-foreground/40" />
+        </div>
+        
+        <div v-else-if="filteredEmails.length === 0" class="flex flex-col items-center justify-center h-full p-6 text-center opacity-50">
+          <Archive class="size-8 mb-2 opacity-50" />
+          <p class="font-medium text-sm">Empty {{ activeFolder }}</p>
+          <p class="text-xs mt-1 leading-relaxed">No messages found here.</p>
+        </div>
+
+        <div v-else class="divide-y divide-border/50">
+          <button 
+            v-for="email in filteredEmails" :key="email.id || email.receivedAt"
+            class="w-full text-left p-3 hover:bg-muted/40 transition-colors flex flex-col gap-1 relative"
+            :class="selectedEmail && selectedEmail.id === email.id ? 'bg-primary/5 before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-primary' : ''"
+            @click="selectEmail(email)"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-semibold text-xs truncate" :class="selectedEmail?.id === email.id ? 'text-primary' : 'text-foreground'">
+                {{ activeFolder === 'inbox' ? email.from : email.to }}
+              </span>
+              <span class="text-[10px] text-muted-foreground shrink-0 whitespace-nowrap tabular-nums">{{ formatDate(email.receivedAt) }}</span>
+            </div>
+            
+            <div class="font-medium text-xs text-foreground/90 truncate pr-4">{{ email.subject || '(No Subject)' }}</div>
+            
+            <div class="flex items-center gap-2 mt-0.5">
+              <span class="text-xs text-muted-foreground truncate leading-relaxed line-clamp-1 opacity-80">{{ email.bodyHtml?.replace(/<[^>]*>?/gm, ' ') || 'Open to view message...' }}</span>
+              <Paperclip v-if="email.attachments?.length > 0" class="size-3 shrink-0 text-muted-foreground/60" />
+            </div>
+            
+            <Badge v-if="email.type === 'Invoice'" variant="outline" class="mt-1.5 self-start text-[9px] h-4 px-1.5 font-normal tracking-wide bg-blue-500/5 text-blue-600 border-blue-200">System Invoice</Badge>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Reading Pane -->
+    <div class="flex-1 flex flex-col min-w-0 bg-white relative">
+      <div v-if="!selectedEmail && !loading" class="absolute inset-0 flex flex-col items-center justify-center opacity-40 select-none">
+        <Mail class="size-16 mb-4 text-muted-foreground stroke-1" />
+        <h3 class="text-lg font-medium">No Email Selected</h3>
+        <p class="text-sm">Select an email to view its details.</p>
       </div>
 
-      <div v-else class="divide-y divide-border">
-        <div v-for="log in emails" :key="log.id" class="p-4 hover:bg-white transition flex items-start gap-4 flex-col sm:flex-row">
-          <div class="p-2 bg-blue-50 rounded-full shrink-0">
-            <Mail class="size-5 text-blue-600" />
-          </div>
-          <div class="flex-1 min-w-0">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <h4 class="text-sm font-medium truncate leading-tight">{{ log.subject }}</h4>
-              <span :class="['text-[10px] px-2 py-0.5 rounded-full border shadow-sm font-semibold tracking-wide uppercase', getStatusColor(log.status)]">
-                {{ log.status }}
-              </span>
+      <template v-else-if="selectedEmail">
+        <!-- Reading Pane Header -->
+        <div class="p-5 border-b shrink-0 flex flex-col gap-4">
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-lg font-bold text-foreground leading-tight">{{ selectedEmail.subject }}</h2>
+            <div class="flex items-center gap-1 shrink-0">
+              <Button size="icon" variant="ghost" class="h-8 w-8 text-muted-foreground"><CornerUpLeft class="size-4" /></Button>
+              <Button size="icon" variant="ghost" class="h-8 w-8 text-muted-foreground"><MoreHorizontal class="size-4" /></Button>
             </div>
-            <div class="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
-              <span class="font-medium text-foreground">To: {{ log.email }}</span>
-              <span class="flex items-center gap-1.5"><Clock class="size-3" /> {{ new Date(log.sentAt).toLocaleString() }}</span>
-              <span v-if="log.type === 'Invoice'" class="px-1.5 py-0.5 bg-muted rounded border border-border">Linked Invoice</span>
+          </div>
+          
+          <div class="flex items-center gap-3">
+            <div class="flex items-center justify-center size-10 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 border shadow-sm">
+              <UserCircle2 class="size-5 text-primary opacity-70" />
+            </div>
+            <div class="flex flex-col min-w-0 flex-1">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-semibold text-sm truncate">{{ selectedEmail.from }}</span>
+                <span class="text-xs text-muted-foreground whitespace-nowrap font-medium">{{ new Date(selectedEmail.receivedAt).toLocaleString() }}</span>
+              </div>
+              <span class="text-xs text-muted-foreground truncate">To: {{ selectedEmail.to }}</span>
             </div>
           </div>
         </div>
-      </div>
+
+        <!-- Render HTML Body -->
+        <div class="flex-1 overflow-y-auto p-6 md:p-8 relative">
+          <!-- Raw HTML injected via v-html. The outer div preserves basic styling block scopes -->
+          <div class="prose prose-sm prose-slate max-w-none w-full break-words [&_a]:text-blue-600 [&_img]:max-w-full" v-html="selectedEmail.bodyHtml"></div>
+        </div>
+        
+        <!-- Attachments Strip -->
+        <div v-if="selectedEmail.attachments?.length > 0" class="p-4 border-t bg-muted/5 shrink-0 flex flex-nowrap overflow-x-auto gap-3">
+          <div v-for="(att, i) in selectedEmail.attachments" :key="i" class="flex flex-col shrink-0 w-48 border rounded-lg bg-card p-3 shadow-sm group hover:border-primary/50 transition-colors cursor-pointer">
+            <div class="flex items-center gap-2 mb-2">
+              <div class="p-1.5 rounded-md bg-blue-50 text-blue-600"><FileText class="size-4" /></div>
+              <span class="text-xs font-semibold truncate flex-1">{{ att.filename || 'Attachment' }}</span>
+            </div>
+            <div class="flex items-center gap-2 text-[10px] text-muted-foreground w-full justify-between">
+              <span>PDF Document</span>
+              <a :href="att.content || '#'" download class="text-primary hover:underline font-medium opacity-0 group-hover:opacity-100 transition-opacity">Download</a>
+            </div>
+          </div>
+        </div>
+      </template>
+
     </div>
   </div>
 </template>

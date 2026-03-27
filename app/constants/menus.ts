@@ -43,4 +43,10 @@ export const navMenu: NavMenu[] = [
   },
 ]
 
-export const navMenuBottom: NavMenuItems = []
+export const navMenuBottom: NavMenuItems = [
+  {
+    title: 'Workspaces',
+    icon: 'i-lucide-boxes',
+    link: '/settings/workspaces',
+  }
+]

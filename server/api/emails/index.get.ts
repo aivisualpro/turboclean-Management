@@ -17,7 +17,15 @@ export default defineEventHandler(async (event) => {
       subject: doc.subject,
       type: doc.type,
       status: doc.status,
-      sentAt: doc.sentAt
+      sentAt: doc.sentAt,
+      // Mailbox Support Fields:
+      folder: doc.folder,
+      from: doc.from,
+      to: doc.to,
+      bodyHtml: doc.bodyHtml,
+      bodyText: doc.bodyText,
+      attachments: doc.attachments,
+      receivedAt: doc.receivedAt
     }))
   } catch (error: any) {
     throw createError({ statusCode: 500, statusMessage: error.message })
