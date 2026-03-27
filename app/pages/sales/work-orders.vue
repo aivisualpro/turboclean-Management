@@ -396,14 +396,15 @@ async function handleGenerate(type: 'daily' | 'weekly') {
             <div
               class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors group"
               :class="activeFilter.dealerId === dealer.dealerId && !activeFilter.dateStart ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'"
+              @click="selectDealer(dealer)"
             >
-              <div class="flex items-center gap-1.5 overflow-hidden" @click="toggleSet(expandedDealers, dealer.dealerId)">
-                <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20">
+              <div class="flex items-center gap-1.5 overflow-hidden">
+                <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20" @click.stop="toggleSet(expandedDealers, dealer.dealerId)">
                   <ChevronDown v-if="expandedDealers.has(dealer.dealerId)" class="size-3.5" />
                   <ChevronRight v-else class="size-3.5" />
                 </button>
                 <Folder class="size-3.5" :class="activeFilter.dealerId === dealer.dealerId && !activeFilter.dateStart ? 'text-primary' : 'text-muted-foreground'" />
-                <span class="truncate font-semibold" @click.stop="selectDealer(dealer)">{{ dealer.dealerName }}</span>
+                <span class="truncate font-semibold">{{ dealer.dealerName }}</span>
               </div>
               <span class="text-[10px] tabular-nums font-mono opacity-60 shrink-0 select-none">
                 <span class="opacity-70 mr-1.5">({{ dealer.count }})</span>{{ fmt(dealer.totalAmount) }}
@@ -416,15 +417,15 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                 <div
                   class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors"
                   :class="activeFilter.dateStart?.startsWith(yr.year.toString()) && activeFilter.dateEnd?.endsWith('12-31T23:59:59.999Z') ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'"
-                  @click="toggleSet(expandedYears, `${dealer.dealerId}-${yr.year}`)"
+                  @click="selectYear(dealer, yr)"
                 >
                   <div class="flex items-center gap-1.5">
-                    <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20">
+                    <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20" @click.stop="toggleSet(expandedYears, `${dealer.dealerId}-${yr.year}`)">
                       <ChevronDown v-if="expandedYears.has(`${dealer.dealerId}-${yr.year}`)" class="size-3.5" />
                       <ChevronRight v-else class="size-3.5" />
                     </button>
                     <CalendarIcon class="size-3.5 text-muted-foreground" />
-                    <span @click.stop="selectYear(dealer, yr)">{{ yr.year }}</span>
+                    <span>{{ yr.year }}</span>
                   </div>
                   <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none">
                     <span class="opacity-70 mr-1.5">({{ yr.count }})</span>{{ fmt(yr.totalAmount) }}
@@ -437,15 +438,15 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                     <div
                       class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors"
                       :class="activeFilter.dateStart?.startsWith(`${yr.year}-${mo.monthNumber.toString().padStart(2, '0')}`) && !activeFilter.dateEnd?.startsWith(activeFilter.dateStart?.slice(0, 10) || '') ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'"
-                      @click="toggleSet(expandedMonths, `${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)"
+                      @click="selectMonth(dealer, yr, mo)"
                     >
                       <div class="flex items-center gap-1.5">
-                        <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20">
+                        <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20" @click.stop="toggleSet(expandedMonths, `${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)">
                           <ChevronDown v-if="expandedMonths.has(`${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)" class="size-3.5" />
                           <ChevronRight v-else class="size-3.5" />
                         </button>
                         <CalendarDays class="size-3.5 text-muted-foreground" />
-                        <span @click.stop="selectMonth(dealer, yr, mo)">{{ mo.month }}</span>
+                        <span>{{ mo.month }}</span>
                       </div>
                       <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none">
                         <span class="opacity-70 mr-1.5">({{ mo.count }})</span>{{ fmt(mo.totalAmount) }}
