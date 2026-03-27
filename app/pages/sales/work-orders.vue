@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue'
 import { toast } from 'vue-sonner'
-import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, DollarSign, Loader2, Download, Upload, Plus, Search, FileText } from 'lucide-vue-next'
+import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, DollarSign, Loader2, Download, Upload, Plus, Search, FileText, Edit2 } from 'lucide-vue-next'
 
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Work Orders' })
@@ -159,6 +159,73 @@ const vIntersect = {
   },
   unmounted: (el: HTMLElement) => {
     if ((el as any)._observer) (el as any)._observer.disconnect()
+  }
+}
+
+// ─── Editing Work Orders ───────────────────────────────────────────────
+const showEditModal = ref(false)
+const editingWorkOrder = ref<any>(null)
+const editForm = ref({
+  id: '',
+  date: '',
+  stockNumber: '',
+  vin: '',
+  dealerServiceId: '',
+  amount: 0,
+  tax: 0,
+  total: 0,
+  notes: '',
+  upload: ''
+})
+const savingEdit = ref(false)
+
+function openEditModal(row: any) {
+  editingWorkOrder.value = row
+  editForm.value = {
+    id: row.id,
+    date: row.date ? new Date(row.date).toISOString().slice(0, 10) : '',
+    stockNumber: row.stockNumber || '',
+    vin: row.vin || '',
+    dealerServiceId: row.dealerServiceId || row.rawServiceId || '',
+    amount: row.amount || 0,
+    tax: row.tax || 0,
+    total: row.total || 0,
+    notes: row.notes || '',
+    upload: row.upload || ''
+  }
+  showEditModal.value = true
+}
+
+// Auto calculate total
+watch(() => [editForm.value.amount, editForm.value.tax], ([amt, tx]) => {
+  editForm.value.total = Number(amt) + Number(tx)
+})
+
+async function saveEdit() {
+  if (!editForm.value.id) return
+  savingEdit.value = true
+  try {
+    const payload = {
+      ...editForm.value,
+      amount: Number(editForm.value.amount),
+      tax: Number(editForm.value.tax),
+      total: Number(editForm.value.total),
+      date: new Date(editForm.value.date + 'T12:00:00.000Z') // Prevent timezone shift
+    }
+    
+    await $fetch(`/api/work-orders/${editForm.value.id}`, {
+      method: 'PUT',
+      body: payload
+    })
+    
+    toast.success('Work Order updated successfully')
+    showEditModal.value = false
+    fetchWorkOrders(true)
+  } catch (err: any) {
+    console.error(err)
+    toast.error(err.statusMessage || 'Failed to update work order')
+  } finally {
+    savingEdit.value = false
   }
 }
 
@@ -559,6 +626,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                 <TableHead class="cursor-pointer select-none" @click="toggleSort('isInvoiced')">
                   <div class="flex items-center gap-1">State <Icon :name="sortIcon('isInvoiced')" class="size-3 text-muted-foreground" /></div>
                 </TableHead>
+                <TableHead class="w-10"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -589,15 +657,20 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                     {{ wo.isInvoiced ? 'Invoiced' : 'Pending' }}
                   </Badge>
                 </TableCell>
+                <TableCell>
+                  <Button variant="ghost" size="icon" class="h-7 w-7 hover:bg-muted text-muted-foreground hover:text-foreground" @click.stop="openEditModal(wo)">
+                    <Edit2 class="size-3.5" />
+                  </Button>
+                </TableCell>
               </TableRow>
 
               <TableRow v-if="loading && workOrders.length === 0">
-                <TableCell :colspan="11" class="text-center py-10">
+                <TableCell :colspan="12" class="text-center py-10">
                   <Loader2 class="size-6 animate-spin text-muted-foreground/50 mx-auto" />
                 </TableCell>
               </TableRow>
               <TableRow v-if="!loading && workOrders.length === 0">
-                <TableCell :colspan="11" class="text-center py-10">
+                <TableCell :colspan="12" class="text-center py-10">
                   <FileText class="size-10 text-muted-foreground/20 mx-auto mb-3" />
                   <p class="text-sm font-medium text-foreground">No work orders found</p>
                   <p class="text-xs text-muted-foreground mt-1">Try adjusting your filters or selecting a different date range.</p>
@@ -606,7 +679,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
 
               <!-- Load More Sentinel -->
               <tr v-if="hasMore && workOrders.length > 0" v-intersect="fetchWorkOrders" class="h-10">
-                <td :colspan="11" class="text-center">
+                <td :colspan="12" class="text-center">
                   <div v-if="loading" class="flex justify-center py-4">
                     <Loader2 class="size-4 animate-spin text-muted-foreground/50" />
                   </div>
@@ -619,5 +692,78 @@ async function handleGenerate(type: 'daily' | 'weekly') {
     </div>
 
     <SalesWorkOrderImport v-if="showImportModal" v-model:open="showImportModal" @imported="fetchWorkOrders(true)" />
+
+    <!-- Edit Work Order Modal -->
+    <Dialog v-model:open="showEditModal">
+      <DialogContent class="sm:max-w-[700px] overflow-visible">
+        <DialogHeader>
+          <DialogTitle>Edit Work Order</DialogTitle>
+          <DialogDescription>
+            Modify the details of this work order and click save when finished.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div class="grid grid-cols-2 gap-4 py-4" v-if="editingWorkOrder">
+          
+          <div class="space-y-2">
+            <Label>Date</Label>
+            <Input type="date" v-model="editForm.date" />
+          </div>
+
+          <div class="space-y-2">
+            <Label>Stock Number</Label>
+            <Input v-model="editForm.stockNumber" />
+          </div>
+
+          <div class="space-y-2">
+            <Label>VIN</Label>
+            <Input v-model="editForm.vin" class="font-mono uppercase" />
+          </div>
+
+          <div class="space-y-2">
+            <Label>Service ID / Name</Label>
+            <Input v-model="editForm.dealerServiceId" />
+          </div>
+
+          <div class="space-y-2">
+            <Label>Amount</Label>
+            <Input type="number" step="0.01" v-model="editForm.amount" />
+          </div>
+
+          <div class="space-y-2">
+            <Label>Tax</Label>
+            <Input type="number" step="0.01" v-model="editForm.tax" />
+          </div>
+
+          <div class="space-y-2">
+            <Label>Total</Label>
+            <Input type="number" step="0.01" v-model="editForm.total" />
+          </div>
+
+          <div class="space-y-2 col-span-2">
+            <Label>Notes</Label>
+            <Textarea v-model="editForm.notes" rows="2" />
+          </div>
+          
+          <div class="space-y-2 col-span-2">
+            <Label>Photo / Image URL</Label>
+            <Input v-model="editForm.upload" placeholder="Upload Image Name or URL" />
+            <a v-if="editForm.upload" :href="getAppSheetImageUrl(editForm.upload)!" target="_blank" class="block max-w-sm h-32 mt-2 border rounded-md overflow-hidden bg-muted/20">
+              <img :src="getAppSheetImageUrl(editForm.upload)!" class="w-full h-full object-contain" />
+            </a>
+          </div>
+
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" @click="showEditModal = false" :disabled="savingEdit">Cancel</Button>
+          <Button type="button" @click="saveEdit" :disabled="savingEdit">
+            <Loader2 v-if="savingEdit" class="mr-2 size-4 animate-spin" />
+            Save Changes
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
   </div>
 </template>
