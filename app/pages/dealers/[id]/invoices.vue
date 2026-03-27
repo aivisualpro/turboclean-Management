@@ -3,9 +3,9 @@ import { ref, onMounted, watch, computed } from 'vue'
 import { toast } from 'vue-sonner'
 import { generatePDF, downloadPDF, calcLineTotal } from '~/composables/useSalesDocument'
 import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, Loader2, Download, Search, FileText, FileSpreadsheet, Eye, Mail, ThumbsUp, CheckCircle, Send } from 'lucide-vue-next'
+import type { Dealer } from '~/composables/useDealers'
 
-const { setHeader } = usePageHeader()
-setHeader({ title: 'Invoices', icon: 'i-lucide-receipt' })
+const props = defineProps<{ dealer: Dealer }>()
 
 // ─── Base State ──────────────────────────────────────────────────────────
 const search = ref('')
@@ -66,13 +66,14 @@ async function fetchTree() {
   try {
     const res = await $fetch<{ success: boolean; tree: any[] }>('/api/invoices/tree', {
       query: {
+        dealerId: props.dealer.id,
         paymentStatus: activeTab.value,
         type: activeType.value,
         dateStart: computedDates.value.start,
         dateEnd: computedDates.value.end,
       }
     })
-    treeData.value = res.tree || []
+    treeData.value = res.tree.length > 0 ? res.tree[0].years : []
   } catch (err) {
     console.error('Failed to load tree:', err)
   } finally {
@@ -109,7 +110,7 @@ async function fetchInvoices(reset = false) {
         sortDir: sortDir.value,
         paymentStatus: activeTab.value,
         type: activeType.value,
-        dealerId: activeFilter.value.dealerId,
+        dealerId: props.dealer.id,
         dateStart: activeFilter.value.dateStart || computedDates.value.start,
         dateEnd: activeFilter.value.dateEnd || computedDates.value.end,
       }
@@ -325,33 +326,29 @@ watch(activeFilter, () => fetchInvoices(true), { deep: true })
 // ─── Tree Interactions ───────────────────────────────────────────────────
 function toggleSet(set: Set<string>, val: string) { if (set.has(val)) set.delete(val); else set.add(val) }
 function selectAll() { activeFilter.value = { label: 'All Invoices' } }
-function selectDealer(dealer: any) { activeFilter.value = { label: dealer.dealerName, dealerId: dealer.dealerId } }
 
-function selectYear(dealer: any, year: any) {
+function selectYear(year: any) {
   activeFilter.value = {
-    label: `${dealer.dealerName} — ${year.year}`,
-    dealerId: dealer.dealerId,
+    label: `${year.year}`,
     dateStart: `${year.year}-01-01T00:00:00.000Z`,
     dateEnd: `${year.year}-12-31T23:59:59.999Z`
   }
 }
 
-function selectMonth(dealer: any, year: any, month: any) {
+function selectMonth(year: any, month: any) {
   const y = year.year
   const m = month.monthNumber.toString().padStart(2, '0')
   const lastDay = new Date(y, month.monthNumber, 0).getDate()
   activeFilter.value = {
-    label: `${dealer.dealerName} — ${month.month} ${year.year}`,
-    dealerId: dealer.dealerId,
+    label: `${month.month} ${year.year}`,
     dateStart: `${y}-${m}-01T00:00:00.000Z`,
     dateEnd: `${y}-${m}-${lastDay}T23:59:59.999Z`
   }
 }
 
-function selectDate(dealer: any, year: any, month: any, dateNode: any) {
+function selectDate(year: any, month: any, dateNode: any) {
   activeFilter.value = {
-    label: `${dealer.dealerName} — ${fmtDate(dateNode.date)}`,
-    dealerId: dealer.dealerId,
+    label: `${fmtDate(dateNode.date)}`,
     dateStart: `${dateNode.date}T00:00:00.000Z`,
     dateEnd: `${dateNode.date}T23:59:59.999Z`
   }
@@ -418,69 +415,50 @@ function sortIcon(field: string) {
         </div>
 
         <div class="flex-1 overflow-y-auto p-2" v-if="!treeLoading || treeData.length > 0">
-          <div @click="selectAll" class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm mb-1 transition-colors" :class="!activeFilter.dealerId ? 'bg-primary text-primary-foreground font-medium shadow-sm' : 'hover:bg-muted'">
+          <div @click="selectAll" class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm mb-1 transition-colors" :class="!activeFilter.dateStart ? 'bg-primary text-primary-foreground font-medium shadow-sm' : 'hover:bg-muted'">
             <div class="flex items-center gap-2">
-              <Folder class="size-4" :class="!activeFilter.dealerId ? 'text-primary-foreground/80' : 'text-muted-foreground'" />
+              <Folder class="size-4" :class="!activeFilter.dateStart ? 'text-primary-foreground/80' : 'text-muted-foreground'" />
               <span>All Invoices</span>
             </div>
           </div>
 
-          <!-- Tree Dealers -->
-          <div v-for="dealer in treeData" :key="dealer.dealerId">
-            <div class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors group" :class="activeFilter.dealerId === dealer.dealerId && !activeFilter.dateStart ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'" @click="selectDealer(dealer)">
-              <div class="flex items-center gap-1.5 overflow-hidden">
-                <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20" @click.stop="toggleSet(expandedDealers, dealer.dealerId)">
-                  <ChevronDown v-if="expandedDealers.has(dealer.dealerId)" class="size-3.5" />
+          <!-- Tree Years -->
+          <div v-for="yr in treeData" :key="yr.year">
+            <div class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors" :class="activeFilter.dateStart?.startsWith(yr.year.toString()) && activeFilter.dateEnd?.endsWith('12-31T23:59:59.999Z') ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'" @click="selectYear(yr)">
+              <div class="flex items-center gap-1.5">
+                <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20" @click.stop="toggleSet(expandedYears, yr.year.toString())">
+                  <ChevronDown v-if="expandedYears.has(yr.year.toString())" class="size-3.5" />
                   <ChevronRight v-else class="size-3.5" />
                 </button>
-                <Folder class="size-3.5" :class="activeFilter.dealerId === dealer.dealerId && !activeFilter.dateStart ? 'text-primary' : 'text-muted-foreground'" />
-                <span class="truncate font-semibold">{{ dealer.dealerName }}</span>
+                <CalendarIcon class="size-3.5 text-muted-foreground" />
+                <span>{{ yr.year }}</span>
               </div>
-              <span class="text-[10px] tabular-nums font-mono opacity-60 shrink-0 select-none">
-                <span class="opacity-70 mr-1.5">({{ dealer.count }})</span>{{ fmt(dealer.totalAmount) }}
-              </span>
+              <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none"><span class="opacity-70 mr-1.5">({{ yr.count }})</span>{{ fmt(yr.totalAmount) }}</span>
             </div>
 
-            <!-- Years -->
-            <div v-if="expandedDealers.has(dealer.dealerId)" class="pl-5 relative before:absolute before:inset-y-0 before:left-3.5 before:w-px before:bg-border/60">
-              <div v-for="yr in dealer.years" :key="yr.year">
-                <div class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors" :class="activeFilter.dateStart?.startsWith(yr.year.toString()) && activeFilter.dateEnd?.endsWith('12-31T23:59:59.999Z') ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'" @click="selectYear(dealer, yr)">
+            <!-- Months -->
+            <div v-if="expandedYears.has(yr.year.toString())" class="pl-5 relative before:absolute before:inset-y-0 before:left-3.5 before:w-px before:bg-border/60">
+              <div v-for="mo in yr.months" :key="mo.month">
+                <div class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors" :class="activeFilter.dateStart?.startsWith(`${yr.year}-${mo.monthNumber.toString().padStart(2, '0')}`) && !activeFilter.dateEnd?.startsWith(activeFilter.dateStart?.slice(0, 10) || '') ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'" @click="selectMonth(yr, mo)">
                   <div class="flex items-center gap-1.5">
-                    <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20" @click.stop="toggleSet(expandedYears, `${dealer.dealerId}-${yr.year}`)">
-                      <ChevronDown v-if="expandedYears.has(`${dealer.dealerId}-${yr.year}`)" class="size-3.5" />
+                    <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20" @click.stop="toggleSet(expandedMonths, `${yr.year}-${mo.monthNumber}`)">
+                      <ChevronDown v-if="expandedMonths.has(`${yr.year}-${mo.monthNumber}`)" class="size-3.5" />
                       <ChevronRight v-else class="size-3.5" />
                     </button>
-                    <CalendarIcon class="size-3.5 text-muted-foreground" />
-                    <span>{{ yr.year }}</span>
+                    <CalendarDays class="size-3.5 text-muted-foreground" />
+                    <span>{{ mo.month }}</span>
                   </div>
-                  <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none"><span class="opacity-70 mr-1.5">({{ yr.count }})</span>{{ fmt(yr.totalAmount) }}</span>
+                  <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none"><span class="opacity-70 mr-1.5">({{ mo.count }})</span>{{ fmt(mo.totalAmount) }}</span>
                 </div>
 
-                <!-- Months -->
-                <div v-if="expandedYears.has(`${dealer.dealerId}-${yr.year}`)" class="pl-5 relative before:absolute before:inset-y-0 before:left-3.5 before:w-px before:bg-border/60">
-                  <div v-for="mo in yr.months" :key="mo.month">
-                    <div class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors" :class="activeFilter.dateStart?.startsWith(`${yr.year}-${mo.monthNumber.toString().padStart(2, '0')}`) && !activeFilter.dateEnd?.startsWith(activeFilter.dateStart?.slice(0, 10) || '') ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'" @click="selectMonth(dealer, yr, mo)">
-                      <div class="flex items-center gap-1.5">
-                        <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20" @click.stop="toggleSet(expandedMonths, `${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)">
-                          <ChevronDown v-if="expandedMonths.has(`${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)" class="size-3.5" />
-                          <ChevronRight v-else class="size-3.5" />
-                        </button>
-                        <CalendarDays class="size-3.5 text-muted-foreground" />
-                        <span>{{ mo.month }}</span>
-                      </div>
-                      <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none"><span class="opacity-70 mr-1.5">({{ mo.count }})</span>{{ fmt(mo.totalAmount) }}</span>
+                <!-- Dates -->
+                <div v-if="expandedMonths.has(`${yr.year}-${mo.monthNumber}`)" class="pl-6 relative before:absolute before:inset-y-0 before:left-3.5 before:w-px before:bg-border/60">
+                  <div v-for="dt in mo.dates" :key="dt.date" @click="selectDate(yr, mo, dt)" class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors" :class="activeFilter.dateStart?.startsWith(dt.date) ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground/80'">
+                    <div class="flex items-center gap-2">
+                      <CalendarClock class="size-3 text-muted-foreground" />
+                      <span>{{ fmtDate(dt.date) }}</span>
                     </div>
-
-                    <!-- Dates -->
-                    <div v-if="expandedMonths.has(`${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)" class="pl-6 relative before:absolute before:inset-y-0 before:left-3.5 before:w-px before:bg-border/60">
-                      <div v-for="dt in mo.dates" :key="dt.date" @click="selectDate(dealer, yr, mo, dt)" class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors" :class="activeFilter.dateStart?.startsWith(dt.date) ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground/80'">
-                        <div class="flex items-center gap-2">
-                          <CalendarClock class="size-3 text-muted-foreground" />
-                          <span>{{ fmtDate(dt.date) }}</span>
-                        </div>
-                        <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none"><span class="opacity-70 mr-1.5">({{ dt.count }})</span>{{ fmt(dt.totalAmount) }}</span>
-                      </div>
-                    </div>
+                    <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none"><span class="opacity-70 mr-1.5">({{ dt.count }})</span>{{ fmt(dt.totalAmount) }}</span>
                   </div>
                 </div>
               </div>
@@ -529,7 +507,7 @@ function sortIcon(field: string) {
             <TableHeader class="sticky top-0 z-10 bg-card backdrop-blur shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
               <TableRow>
                 <TableHead class="w-[80px]">#</TableHead>
-                <TableHead v-if="!activeFilter.dealerId">Dealer</TableHead>
+
                 <TableHead class="cursor-pointer" @click="toggleSort('date')"><div class="flex items-center gap-1">Date <Icon :name="sortIcon('date')" class="size-3 opacity-50" /></div></TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead class="text-right">Subtotal</TableHead>
@@ -548,9 +526,7 @@ function sortIcon(field: string) {
                     {{ inv.number }}
                   </div>
                 </TableCell>
-                <TableCell v-if="!activeFilter.dealerId" class="text-xs">
-                  <p class="font-semibold max-w-[140px] truncate">{{ inv.dealerName }}</p>
-                </TableCell>
+
                 <TableCell class="text-xs whitespace-nowrap">{{ fmtDate(inv.date) }}</TableCell>
                 <TableCell>
                   <Badge variant="outline" class="text-[9px] uppercase tracking-wide" :class="inv.type === 'Weekly' ? 'bg-purple-500/10 text-purple-600 border-purple-500/20' : 'bg-blue-500/10 text-blue-600 border-blue-500/20'">
