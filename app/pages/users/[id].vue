@@ -143,7 +143,7 @@ async function handleDelete() {
       <ClientOnly>
         <Teleport to="#page-header-actions">
           <div class="flex items-center gap-2">
-            <Button variant="outline" size="sm" class="h-8" @click="navigateTo('/users')">
+            <Button variant="outline" size="sm" class="h-8" @click="$router.push('/users')">
               <ArrowLeft class="size-3.5 mr-1.5" /> Back to Users
             </Button>
             <Button v-if="!isNew" variant="outline" size="icon" class="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20" @click="showDeleteDialog = true">

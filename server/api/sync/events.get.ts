@@ -48,7 +48,7 @@ export default defineEventHandler(async (event) => {
   event.node.req.on('close', () => {
     syncEventBus.off('sync', onSync)
     clearInterval(heartbeat)
-    console.log('[SSE] Client disconnected')
+    // Silently clean up — no need to log every disconnect
   })
 
   // Keep the connection open by returning a promise that never resolves

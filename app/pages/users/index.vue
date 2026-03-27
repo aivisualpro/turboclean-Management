@@ -5,6 +5,11 @@ import { toast } from 'vue-sonner'
 const { setHeader } = usePageHeader()
 setHeader({ title: 'App Users', icon: 'i-lucide-users' })
 
+const router = useRouter()
+function goToUser(id: string) {
+  router.push(`/users/${id}`)
+}
+
 const { data: users, pending, refresh } = await useFetch<any[]>('/api/users')
 const userList = computed(() => users.value || [])
 
@@ -66,7 +71,7 @@ function handleDelete() {
               <Input v-model="searchValue" placeholder="Search users..." class="pl-9 h-9 bg-background cursor-text" />
             </form>
             <div class="flex items-center gap-2 shrink-0">
-              <Button size="sm" class="h-9 px-3 gap-2" @click="navigateTo('/users/new')">
+              <Button size="sm" class="h-9 px-3 gap-2" @click="goToUser('new')">
                 <Plus class="size-4" />
                 <span class="hidden lg:inline">Add User</span>
               </Button>
@@ -92,7 +97,7 @@ function handleDelete() {
                 v-for="u in displayList" 
                 :key="u.id" 
                 class="border-b hover:bg-muted/30 transition-colors cursor-pointer"
-                @click="navigateTo(`/users/${u.id}`)"
+                @click="goToUser(u.id)"
                 v-if="!pending"
               >
                 <td class="p-4 font-medium">
@@ -119,7 +124,7 @@ function handleDelete() {
                 </td>
                 <td class="p-4 text-right" @click.stop>
                   <div class="flex items-center justify-end gap-1">
-                    <Button variant="ghost" size="icon" class="size-7" title="Edit" @click="navigateTo(`/users/${u.id}`)">
+                    <Button variant="ghost" size="icon" class="size-7" title="Edit" @click="goToUser(u.id)">
                       <Pencil class="size-3.5" />
                     </Button>
                     <Button variant="ghost" size="icon" class="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Delete" @click="confirmDelete(u.id)">
