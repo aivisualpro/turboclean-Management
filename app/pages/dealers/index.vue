@@ -129,11 +129,11 @@ const totalServices = computed(() =>
 function getStatusConfig(status: string) {
   switch (status) {
     case 'Authorised': return {
-      bg: 'bg-emerald-500/10',
-      text: 'text-emerald-600 dark:text-emerald-400',
-      border: 'border-emerald-500/20',
-      dot: 'bg-emerald-500',
-      glow: 'shadow-emerald-500/20',
+      bg: 'bg-primary/10',
+      text: 'text-primary',
+      border: 'border-primary/20',
+      dot: 'bg-primary',
+      glow: 'shadow-primary/20',
     }
     case 'Pending': return {
       bg: 'bg-amber-500/10',
@@ -516,17 +516,8 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
                   <div class="p-5">
                     <!-- Row 1: Dealer (status) (Services) -->
                     <div class="flex flex-wrap items-center gap-2.5">
-                      <!-- Avatar -->
-                      <div class="relative shrink-0">
-                        <div class="size-10 rounded-xl border-2 flex items-center justify-center font-bold text-xs"
-                          :class="[getStatusConfig(d.status).bg, getStatusConfig(d.status).text, getStatusConfig(d.status).border]"
-                        >
-                          {{ getInitials(d.dealerName) }}
-                        </div>
-                        <div class="absolute -bottom-0.5 -right-0.5 size-3 rounded-full border-2 border-card"
-                          :class="getStatusConfig(d.status).dot"
-                        ></div>
-                      </div>
+                      <!-- Status dot -->
+                      <div class="size-2 rounded-full shrink-0 mt-0.5" :class="getStatusConfig(d.status).dot"></div>
 
                       <!-- Name -->
                       <h3 class="text-sm font-bold text-foreground truncate group-hover:text-primary transition-colors pr-1">

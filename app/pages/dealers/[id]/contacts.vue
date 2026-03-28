@@ -109,11 +109,7 @@ function getPreferredLabel(method: string) {
             <TableRow v-for="contact in dealer.contacts" :key="contact.id" class="hover:bg-muted/50 group/row">
               <TableCell class="font-medium text-xs">
                 <div class="flex items-center gap-2.5">
-                  <Avatar class="size-7 border bg-background">
-                    <AvatarFallback class="bg-primary/5 text-primary text-[10px] font-semibold">
-                      {{ contact.name.slice(0, 2).toUpperCase() }}
-                    </AvatarFallback>
-                  </Avatar>
+                  <div class="size-1.5 rounded-full bg-primary/60 shrink-0"></div>
                   {{ contact.name }}
                 </div>
               </TableCell>
