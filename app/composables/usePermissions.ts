@@ -93,6 +93,9 @@ export function usePermissions() {
     return perms[moduleId]!.tabs.includes(action)
   }
 
+  // Admin-only check (import/export)
+  const isAdmin = computed(() => user.value?.email === 'admin@aivisualpro.com')
+
   return {
     permissions,
     isModuleEnabled,
@@ -101,5 +104,6 @@ export function usePermissions() {
     isDealerTabVisible,
     getDefaultRoute,
     isActionAllowed,
+    isAdmin,
   }
 }

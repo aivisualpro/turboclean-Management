@@ -13,7 +13,7 @@ const { setHeader } = usePageHeader()
 setHeader({ title: 'Dealers', icon: 'i-lucide-building-2' })
 
 const { dealers, authorised, pending, rejected, inFollowup, updateDealer, patchDealer, deleteDealer, deleteAllDealerServices, fetchDealers, isLoading } = useDealers()
-const { isActionAllowed } = usePermissions()
+const { isActionAllowed, isAdmin } = usePermissions()
 const canAdd = computed(() => isActionAllowed('dealers', 'Add'))
 const canEdit = computed(() => isActionAllowed('dealers', 'Edit'))
 const canDelete = computed(() => isActionAllowed('dealers', 'Delete'))
@@ -339,7 +339,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
               <Input v-model="searchValue" placeholder="Search dealers..." class="pl-9 h-9 bg-background" />
             </form>
             <div class="flex items-center gap-2 shrink-0">
-              <Tooltip>
+              <Tooltip v-if="isAdmin">
                 <TooltipTrigger as-child>
                   <Button variant="outline" size="sm" class="h-9 px-3 gap-2" @click="showImportDealers = true">
                     <FileUp class="size-4" />
@@ -348,7 +348,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
                 </TooltipTrigger>
                 <TooltipContent>Import Dealers</TooltipContent>
               </Tooltip>
-              <Tooltip>
+              <Tooltip v-if="isAdmin">
                 <TooltipTrigger as-child>
                   <Button variant="outline" size="sm" class="h-9 px-3 gap-2" @click="showImportServices = true">
                     <Upload class="size-4" />
@@ -357,7 +357,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
                 </TooltipTrigger>
                 <TooltipContent>Import Services</TooltipContent>
               </Tooltip>
-              <Tooltip>
+              <Tooltip v-if="isAdmin">
                 <TooltipTrigger as-child>
                   <Button variant="outline" size="sm" class="h-9 px-3 gap-2" @click="exportServicesToCsv">
                     <FileDown class="size-4" />
@@ -366,7 +366,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
                 </TooltipTrigger>
                 <TooltipContent>Export Services</TooltipContent>
               </Tooltip>
-              <Tooltip>
+              <Tooltip v-if="isAdmin">
                 <TooltipTrigger as-child>
                   <Button variant="outline" size="sm" class="h-9 px-3 gap-2" @click="exportToCsv">
                     <Download class="size-4" />
@@ -375,7 +375,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
                 </TooltipTrigger>
                 <TooltipContent>Export to CSV</TooltipContent>
               </Tooltip>
-              <Tooltip>
+              <Tooltip v-if="isAdmin">
                 <TooltipTrigger as-child>
                   <Button variant="outline" size="sm" class="h-9 px-3 gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/20" @click="handleDeleteAllServices">
                     <Trash2 class="size-4" />
