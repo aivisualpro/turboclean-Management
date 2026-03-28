@@ -6,6 +6,10 @@ const { setHeader } = usePageHeader()
 setHeader({ title: 'App Users', icon: 'i-lucide-users' })
 
 const router = useRouter()
+const { isActionAllowed } = usePermissions()
+const canAdd = computed(() => isActionAllowed('users', 'Add'))
+const canEdit = computed(() => isActionAllowed('users', 'Edit'))
+const canDelete = computed(() => isActionAllowed('users', 'Delete'))
 function goToUser(id: string) {
   router.push(`/users/${id}`)
 }
@@ -71,7 +75,7 @@ function handleDelete() {
               <Input v-model="searchValue" placeholder="Search users..." class="pl-9 h-9 bg-background cursor-text" />
             </form>
             <div class="flex items-center gap-2 shrink-0">
-              <Button size="sm" class="h-9 px-3 gap-2" @click="goToUser('new')">
+              <Button v-if="canAdd" size="sm" class="h-9 px-3 gap-2" @click="goToUser('new')">
                 <Plus class="size-4" />
                 <span class="hidden lg:inline">Add User</span>
               </Button>
@@ -131,10 +135,10 @@ function handleDelete() {
                 </td>
                 <td class="p-4 text-right" @click.stop>
                   <div class="flex items-center justify-end gap-1">
-                    <Button variant="ghost" size="icon" class="size-7" title="Edit" @click="goToUser(u.id)">
+                    <Button v-if="canEdit" variant="ghost" size="icon" class="size-7" title="Edit" @click="goToUser(u.id)">
                       <Pencil class="size-3.5" />
                     </Button>
-                    <Button variant="ghost" size="icon" class="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Delete" @click="confirmDelete(u.id)">
+                    <Button v-if="canDelete" variant="ghost" size="icon" class="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Delete" @click="confirmDelete(u.id)">
                       <Trash2 class="size-3.5" />
                     </Button>
                   </div>

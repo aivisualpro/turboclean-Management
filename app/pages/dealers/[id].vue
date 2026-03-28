@@ -108,8 +108,10 @@ const activeTab = computed(() => {
 })
 
 // Filter tabs by workspace permissions
-const { isDealerTabVisible } = usePermissions()
+const { isDealerTabVisible, isActionAllowed } = usePermissions()
 const visibleTabs = computed(() => tabs.filter(t => isDealerTabVisible(t.id)))
+const canEdit = computed(() => isActionAllowed('dealers', 'Edit'))
+const canDelete = computed(() => isActionAllowed('dealers', 'Delete'))
 </script>
 
 <template>
@@ -164,10 +166,10 @@ const visibleTabs = computed(() => tabs.filter(t => isDealerTabVisible(t.id)))
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button variant="outline" size="icon" class="h-8 w-8" @click="handleEdit">
+            <Button v-if="canEdit" variant="outline" size="icon" class="h-8 w-8" @click="handleEdit">
               <Edit class="size-3.5" />
             </Button>
-            <Button variant="outline" size="icon" class="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20" @click="handleDelete">
+            <Button v-if="canDelete" variant="outline" size="icon" class="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20" @click="handleDelete">
               <Trash2 class="size-3.5" />
             </Button>
           </div>

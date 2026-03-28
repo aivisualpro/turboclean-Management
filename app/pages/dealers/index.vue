@@ -13,6 +13,10 @@ const { setHeader } = usePageHeader()
 setHeader({ title: 'Dealers', icon: 'i-lucide-building-2' })
 
 const { dealers, authorised, pending, rejected, inFollowup, updateDealer, patchDealer, deleteDealer, deleteAllDealerServices, fetchDealers, isLoading } = useDealers()
+const { isActionAllowed } = usePermissions()
+const canAdd = computed(() => isActionAllowed('dealers', 'Add'))
+const canEdit = computed(() => isActionAllowed('dealers', 'Edit'))
+const canDelete = computed(() => isActionAllowed('dealers', 'Delete'))
 
 // Real-time: auto-refresh when AppSheet changes dealers or their services
 useLiveSync(['Dealers', 'DealerServices'], () => fetchDealers())
@@ -380,7 +384,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
                 </TooltipTrigger>
                 <TooltipContent>Delete All Dealer Services</TooltipContent>
               </Tooltip>
-              <Button size="sm" class="h-9 px-3 gap-2" @click="openAddForm">
+              <Button v-if="canAdd" size="sm" class="h-9 px-3 gap-2" @click="openAddForm">
                 <Plus class="size-4" />
                 <span class="hidden lg:inline">Add</span>
               </Button>
@@ -483,7 +487,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
               <p class="mt-2 text-sm text-muted-foreground max-w-sm text-center">
                 {{ debouncedSearch ? `No dealers match "${debouncedSearch}". Try a different search.` : 'Get started by adding your first dealer.' }}
               </p>
-              <Button v-if="!debouncedSearch" size="sm" class="mt-5 gap-2" @click="openAddForm">
+              <Button v-if="canAdd && !debouncedSearch" size="sm" class="mt-5 gap-2" @click="openAddForm">
                 <Plus class="size-4" /> Add Dealer
               </Button>
             </div>

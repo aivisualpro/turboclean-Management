@@ -8,6 +8,10 @@ const { setHeader } = usePageHeader()
 setHeader({ title: 'Services', icon: 'i-lucide-briefcase' })
 
 const { services, isLoading, fetchServices } = useServices()
+const { isActionAllowed } = usePermissions()
+const canAdd = computed(() => isActionAllowed('services', 'Add'))
+const canEdit = computed(() => isActionAllowed('services', 'Edit'))
+const canDelete = computed(() => isActionAllowed('services', 'Delete'))
 
 // Real-time: toast when AppSheet changes services
 useLiveSync('Services', () => fetchServices())
@@ -224,7 +228,7 @@ function exportToCsv() {
             <Upload class="size-4" />
             <span class="hidden lg:inline">Import</span>
           </Button>
-          <Button size="sm" class="h-8 gap-2" @click="openAddForm">
+          <Button v-if="canAdd" size="sm" class="h-8 gap-2" @click="openAddForm">
             <Plus class="size-4" />
             <span class="hidden lg:inline">New Service</span>
           </Button>
@@ -318,10 +322,10 @@ function exportToCsv() {
 
               <!-- Actions (visible on hover for desktop, always visible on mobile) -->
               <div class="flex items-center gap-0.5 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-150">
-                <Button variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-foreground" title="Edit" @click="openEditForm(s)">
+                <Button v-if="canEdit" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-foreground" title="Edit" @click="openEditForm(s)">
                   <Pencil class="size-3" />
                 </Button>
-                <Button variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10" title="Delete" @click="confirmDelete(s.id)">
+                <Button v-if="canDelete" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10" title="Delete" @click="confirmDelete(s.id)">
                   <Trash2 class="size-3" />
                 </Button>
               </div>
@@ -342,6 +346,7 @@ function exportToCsv() {
 
         <!-- Add Card -->
         <button
+          v-if="canAdd"
           @click="openAddForm"
           class="group rounded-xl border-2 border-dashed hover:border-primary/30 bg-card/50 hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center min-h-[120px] gap-2 cursor-pointer"
         >
@@ -375,10 +380,10 @@ function exportToCsv() {
 
           <!-- Actions -->
           <div class="flex items-center gap-0.5 shrink-0 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-            <Button variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-foreground" title="Edit" @click="openEditForm(s)">
+            <Button v-if="canEdit" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-foreground" title="Edit" @click="openEditForm(s)">
               <Pencil class="size-3" />
             </Button>
-            <Button variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10" title="Delete" @click="confirmDelete(s.id)">
+            <Button v-if="canDelete" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10" title="Delete" @click="confirmDelete(s.id)">
               <Trash2 class="size-3" />
             </Button>
           </div>

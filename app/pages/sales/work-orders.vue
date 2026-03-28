@@ -5,6 +5,8 @@ import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIc
 
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Work Orders' })
+const { isActionAllowed } = usePermissions()
+const canEditWO = computed(() => isActionAllowed('work_orders', 'Edit'))
 
 // ─── Base State ──────────────────────────────────────────────────────────
 const showImportModal = ref(false)
@@ -672,7 +674,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                   </Badge>
                 </TableCell>
                 <TableCell>
-                  <Button variant="ghost" size="icon" class="h-7 w-7 hover:bg-muted text-muted-foreground hover:text-foreground" @click.stop="openEditModal(wo)">
+                  <Button v-if="canEditWO" variant="ghost" size="icon" class="h-7 w-7 hover:bg-muted text-muted-foreground hover:text-foreground" @click.stop="openEditModal(wo)">
                     <Edit2 class="size-3.5" />
                   </Button>
                 </TableCell>

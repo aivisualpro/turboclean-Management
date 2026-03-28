@@ -81,6 +81,18 @@ export function usePermissions() {
     return '/' // fallback
   }
 
+  // Check if a CRUD action (Add, Edit, Delete) is allowed for a module
+  function isActionAllowed(moduleId: string, action: 'Add' | 'Edit' | 'Delete'): boolean {
+    const perms = permissions.value
+    // No workspace → all actions allowed (admin default)
+    if (!perms || Object.keys(perms).length === 0) return true
+    // Module not enabled → no actions allowed
+    if (!perms[moduleId]?.enabled) return false
+    // If no tabs defined → all actions allowed
+    if (!perms[moduleId]?.tabs || perms[moduleId]?.tabs.length === 0) return true
+    return perms[moduleId]!.tabs.includes(action)
+  }
+
   return {
     permissions,
     isModuleEnabled,
@@ -88,5 +100,6 @@ export function usePermissions() {
     isMenuVisible,
     isDealerTabVisible,
     getDefaultRoute,
+    isActionAllowed,
   }
 }

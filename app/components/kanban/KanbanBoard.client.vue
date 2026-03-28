@@ -13,6 +13,10 @@ import { useKanban } from '~/composables/useKanban'
 import CardFooter from '../ui/card/CardFooter.vue'
 
 const { board, addTask, updateTask, removeTask, setColumns, removeColumn, updateColumn, addSubtask, toggleSubtask, removeSubtask, addComment, removeComment } = useKanban()
+const { isActionAllowed } = usePermissions()
+const canAddTask = computed(() => isActionAllowed('tasks', 'Add'))
+const canEditTask = computed(() => isActionAllowed('tasks', 'Edit'))
+const canDeleteTask = computed(() => isActionAllowed('tasks', 'Delete'))
 
 const newSubtaskTitle = ref('')
 const newCommentText = ref('')
@@ -240,7 +244,7 @@ function onScrollEnd(columnId: string) {
             </Badge>
           </CardTitle>
           <CardAction class="flex">
-            <Button size="icon-sm" variant="ghost" class="size-7 text-muted-foreground" @click="openNewTask(col.id)">
+            <Button v-if="canAddTask" size="icon-sm" variant="ghost" class="size-7 text-muted-foreground" @click="openNewTask(col.id)">
               <Icon name="lucide:plus" />
             </Button>
           </CardAction>
@@ -267,7 +271,7 @@ function onScrollEnd(columnId: string) {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent class="w-20" align="start">
-                        <DropdownMenuItem @click="showEditTask(col.id, t.id)">
+                        <DropdownMenuItem v-if="canEditTask" @click="showEditTask(col.id, t.id)">
                           <Icon name="lucide:edit-2" class="size-4" />
                           Edit
                         </DropdownMenuItem>
@@ -276,7 +280,7 @@ function onScrollEnd(columnId: string) {
                           Duplicate
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem variant="destructive" class="text-destructive" @click="removeTask(col.id, t.id)">
+                        <DropdownMenuItem v-if="canDeleteTask" variant="destructive" class="text-destructive" @click="removeTask(col.id, t.id)">
                           <Icon name="lucide:trash-2" class="size-4" />
                           Delete
                         </DropdownMenuItem>
