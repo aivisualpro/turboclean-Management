@@ -1,4 +1,6 @@
 import { connectToDatabase } from '../../utils/mongodb'
+import { getUserSession } from '../../utils/auth'
+import { ObjectId } from 'mongodb'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -6,30 +8,46 @@ export default defineEventHandler(async (event) => {
     const fromParam = query.from as string | undefined
     const toParam = query.to as string | undefined
 
+    const session = await getUserSession(event)
     const { db } = await connectToDatabase()
 
-    const [rawWorkOrders, allDealers, allServices] = await Promise.all([
-      db.collection('turboCleanWorkOrders').find({}).toArray(),
-      db.collection('turboCleanDealers').find({}).toArray(),
+    let matchQuery: any = {}
+
+    if (fromParam || toParam) {
+      matchQuery.date = {}
+      if (fromParam) matchQuery.date.$gte = new Date(fromParam)
+      if (toParam) {
+        const toDate = new Date(toParam)
+        toDate.setHours(23, 59, 59, 999)
+        matchQuery.date.$lte = toDate
+      }
+    }
+    
+    if (session && session.registerDealers && session.registerDealers.length > 0) {
+      const stringDealers = session.registerDealers || []
+      const objDealers = stringDealers.reduce((acc: any[], id: string) => {
+        try { acc.push(new ObjectId(id)); return acc } catch { return acc }
+      }, [])
+      const allowedIds = [...stringDealers, ...objDealers]
+      
+      if (allowedIds.length === 0) return { kpis: { totalRevenue: 0, totalOrders: 0, totalDealers: 0, totalServices: 0 }, monthlyTrend: [], revenueByDealer: [], revenueByService: [] }
+      matchQuery.dealer = { $in: allowedIds }
+    }
+
+    // Build dealer filter for lookups too
+    let dealerQuery: any = {}
+    if (session && session.registerDealers && session.registerDealers.length > 0) {
+      const dealerObjIds = session.registerDealers.reduce((acc: any[], id: string) => {
+        try { acc.push(new ObjectId(id)); return acc } catch { return acc }
+      }, [])
+      dealerQuery = { _id: { $in: dealerObjIds } }
+    }
+
+    const [allWorkOrders, allDealers, allServices] = await Promise.all([
+      db.collection('turboCleanWorkOrders').find(matchQuery).toArray(),
+      db.collection('turboCleanDealers').find(dealerQuery).toArray(),
       db.collection('turboCleanServices').find({}).toArray(),
     ])
-
-    // Filter work orders by date range if provided
-    let allWorkOrders = rawWorkOrders
-    if (fromParam || toParam) {
-      const fromDate = fromParam ? new Date(fromParam) : null
-      const toDate = toParam ? new Date(toParam) : null
-      // Set toDate to end of day
-      if (toDate) toDate.setHours(23, 59, 59, 999)
-
-      allWorkOrders = rawWorkOrders.filter(wo => {
-        const d = wo.date ? new Date(wo.date) : null
-        if (!d || isNaN(d.getTime())) return false
-        if (fromDate && d < fromDate) return false
-        if (toDate && d > toDate) return false
-        return true
-      })
-    }
 
     // Build lookup maps
     const dealerMap = new Map<string, any>()

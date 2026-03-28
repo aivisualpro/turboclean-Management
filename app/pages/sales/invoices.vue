@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { toast } from 'vue-sonner'
 import { generatePDF, downloadPDF, calcLineTotal } from '~/composables/useSalesDocument'
 import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, Loader2, Download, Search, FileText, FileSpreadsheet, Eye, Mail, ThumbsUp, CheckCircle, Send } from 'lucide-vue-next'
@@ -301,10 +301,11 @@ const vIntersect = {
   },
 }
 
-onMounted(() => {
+// Fire immediately during setup — no loading delay
+if (import.meta.client) {
   fetchTree()
   fetchInvoices()
-})
+}
 
 useLiveSync('Invoices', () => {
   fetchTree()
@@ -411,7 +412,7 @@ function sortIcon(field: string) {
     <div class="flex-1 min-h-0 flex flex-col md:flex-row gap-4 p-4 w-full">
       
       <!-- ─── Sidebar Tree ──────────────────────────────────────────────────────── -->
-      <aside class="w-full md:w-80 shrink-0 flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm">
+      <aside class="w-full md:w-96 shrink-0 flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm">
         <div class="p-3 border-b bg-muted/30 shrink-0 font-medium text-sm flex items-center justify-between">
           <span>Grouping & Filters</span>
           <button @click="selectAll" class="text-xs text-primary hover:underline">Clear</button>

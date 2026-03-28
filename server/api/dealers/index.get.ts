@@ -10,13 +10,15 @@ export default defineEventHandler(async (event) => {
     const collection = db.collection('turboCleanDealers')
 
     let query: any = {}
-    if (session && session.role !== 'Admin') {
-      const allowedIds = (session.registerDealers || []).reduce((acc: any[], id: string) => {
+    if (session && session.registerDealers && session.registerDealers.length > 0) {
+      const allowedIds = session.registerDealers.reduce((acc: any[], id: string) => {
         try { acc.push(new ObjectId(id)); return acc } catch { return acc }
       }, [])
       
       if (allowedIds.length === 0) return []
       query = { _id: { $in: allowedIds } }
+    } else if (session && (!session.registerDealers || session.registerDealers.length === 0)) {
+      return []
     }
 
     const docs = await collection.find(query).sort({ _id: -1 }).toArray()

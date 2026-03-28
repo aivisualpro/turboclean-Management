@@ -164,7 +164,8 @@ watch(() => dateRange.value.end, (newEnd) => {
   if (newEnd) fetchStats()
 })
 
-onMounted(fetchStats)
+// Fire immediately — no loading delay
+if (import.meta.client) fetchStats()
 
 // ── Derived KPI cards ─────────────────────────────
 const kpis = computed(() => {

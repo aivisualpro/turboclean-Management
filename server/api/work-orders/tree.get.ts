@@ -1,13 +1,26 @@
 import { connectToDatabase } from '../../utils/mongodb'
+import { getUserSession } from '../../utils/auth'
 import { ObjectId } from 'mongodb'
 
 export default defineEventHandler(async (event) => {
   try {
+    const session = await getUserSession(event)
     const { db } = await connectToDatabase()
     const queryInfo = getQuery(event)
 
     // Build Match query based on filters
     const matchQuery: any = {}
+
+    // Session-based dealer filtering
+    if (session && session.registerDealers && session.registerDealers.length > 0) {
+      const allowedIds = session.registerDealers.reduce((acc: any[], id: string) => {
+        try { acc.push(new ObjectId(id)); return acc } catch { return acc }
+      }, [])
+      if (allowedIds.length === 0) return []
+      matchQuery.dealer = { $in: allowedIds }
+    } else if (session) {
+      return []
+    }
 
     // 1. Filter: Invoiced vs Not Invoiced (if provided, e.g. 'true' or 'false')
     if (queryInfo.isInvoiced !== undefined && queryInfo.isInvoiced !== '') {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { toast } from 'vue-sonner'
 import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, DollarSign, Loader2, Download, Upload, Plus, Search, FileText, Edit2 } from 'lucide-vue-next'
 
@@ -12,7 +12,7 @@ const search = ref('')
 const lastUpdatedBy = ref('')
 const activeTab = ref<'all' | 'false' | 'true'>('all')
 
-const globalDatePreset = ref('today')
+const globalDatePreset = ref('all')
 const customStartDate = ref('')
 const customEndDate = ref('')
 
@@ -229,10 +229,11 @@ async function saveEdit() {
   }
 }
 
-onMounted(() => {
+// Fire immediately during setup — no loading delay
+if (import.meta.client) {
   fetchTree()
   fetchWorkOrders()
-})
+}
 
 useLiveSync('WorkOrders', () => {
   fetchTree()
@@ -438,7 +439,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
     <div class="flex-1 min-h-0 flex flex-col md:flex-row gap-4 p-4 w-full">
       
       <!-- ─── Sidebar Tree ──────────────────────────────────────────────────────── -->
-      <aside class="w-full md:w-80 shrink-0 flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm">
+      <aside class="w-full md:w-96 shrink-0 flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm">
         <div class="p-3 border-b bg-muted/30 shrink-0 font-medium text-sm flex items-center justify-between">
           <span>Grouping & Filters</span>
           <button @click="selectAll" class="text-xs text-primary hover:underline">Clear</button>
