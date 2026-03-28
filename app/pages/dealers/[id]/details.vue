@@ -117,47 +117,51 @@ const primaryContact = computed(() => props.dealer.contacts?.[0] || null)
           <h3 class="text-xs font-semibold tracking-wide uppercase text-foreground">Tax & Financial Settings</h3>
         </div>
         <div class="p-4 space-y-4">
-          <!-- Tax Toggle -->
-          <div class="flex items-center justify-between p-3 rounded-lg bg-muted/20 border">
+          <!-- Tax Toggle — matching the card style -->
+          <div class="flex items-center justify-between p-3 rounded-lg bg-muted/20 border" @click.stop>
             <div class="flex items-center gap-3">
-              <div class="size-9 rounded-lg flex items-center justify-center" :class="dealer.isTaxApplied ? 'bg-emerald-500/10' : 'bg-muted/50'">
-                <Icon name="i-lucide-percent" class="size-4" :class="dealer.isTaxApplied ? 'text-emerald-600' : 'text-muted-foreground'" />
+              <div class="size-9 rounded-lg flex items-center justify-center transition-colors duration-300 shrink-0" :class="dealer.isTaxApplied ? 'bg-emerald-500/10' : 'bg-muted/50'">
+                <Icon name="i-lucide-shield-check" class="size-4" :class="dealer.isTaxApplied ? 'text-emerald-600' : 'text-muted-foreground'" />
               </div>
-              <div>
-                <p class="text-xs font-semibold text-foreground">Tax Applied</p>
-                <p class="text-[10px] text-muted-foreground mt-0.5">{{ dealer.isTaxApplied ? 'Tax is enabled for this dealer' : 'No tax applied' }}</p>
+              <div class="flex flex-col">
+                <span class="text-xs font-semibold" :class="dealer.isTaxApplied ? 'text-foreground' : 'text-muted-foreground'">Tax Settings</span>
+                <span class="text-[10px] text-muted-foreground leading-none mt-0.5">{{ dealer.isTaxApplied ? 'Tax is enabled for this dealer' : 'Tax is disabled' }}</span>
               </div>
             </div>
-            <Switch
-              :checked="dealer.isTaxApplied"
-              @update:checked="handleToggleTax"
-              class="data-[state=checked]:bg-emerald-500"
-            />
-          </div>
 
-          <!-- Tax Percentage -->
-          <div v-if="dealer.isTaxApplied" class="flex items-center justify-between p-3 rounded-lg bg-muted/20 border">
             <div class="flex items-center gap-3">
-              <div class="size-9 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                <Icon name="i-lucide-calculator" class="size-4 text-blue-600" />
+              <!-- Inline Tax Rate Input -->
+              <div v-if="dealer.isTaxApplied" class="flex items-center gap-2 animate-in fade-in zoom-in-95 duration-200">
+                <label class="text-[11px] text-muted-foreground shrink-0">Rate:</label>
+                <div class="relative w-24">
+                  <Input
+                    type="number"
+                    :model-value="dealer.taxPercentage"
+                    @blur="handleTaxPercentageChange"
+                    class="w-full h-8 px-2 pr-6 text-xs tabular-nums text-right"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    placeholder="0"
+                  />
+                  <span class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground pointer-events-none">%</span>
+                </div>
               </div>
-              <div>
-                <p class="text-xs font-semibold text-foreground">Tax Percentage</p>
-                <p class="text-[10px] text-muted-foreground mt-0.5">Current rate applied on all services</p>
-              </div>
-            </div>
-            <div class="flex items-center gap-1.5">
-              <Input
-                type="number"
-                :model-value="dealer.taxPercentage"
-                @blur="handleTaxPercentageChange"
-                class="w-20 h-8 text-xs tabular-nums text-right"
-                step="0.01"
-                min="0"
-                max="100"
-                placeholder="0"
-              />
-              <span class="text-xs text-muted-foreground font-medium">%</span>
+
+              <!-- Toggle Switch -->
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="dealer.isTaxApplied"
+                @click.stop.prevent="handleToggleTax(!dealer.isTaxApplied)"
+                class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                :class="dealer.isTaxApplied ? 'bg-emerald-500' : 'bg-input'"
+              >
+                <span
+                  class="pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform duration-200 ease-in-out"
+                  :class="dealer.isTaxApplied ? 'translate-x-5' : 'translate-x-0'"
+                />
+              </button>
             </div>
           </div>
 

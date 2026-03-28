@@ -11,7 +11,7 @@ const availableMenus = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, subMenus: ['Overview', 'Dealers', 'Services'] },
   { id: 'users', label: 'App Users', icon: Users, subMenus: [] },
   { id: 'services', label: 'Services', icon: Briefcase, subMenus: [] },
-  { id: 'dealers', label: 'Dealers', icon: Building2, subMenus: [] },
+  { id: 'dealers', label: 'Dealers', icon: Building2, subMenus: ['Services', 'Contacts', 'Work Orders', 'Invoices', 'Emails'] },
   { id: 'work_orders', label: 'Work Orders', icon: FileText, subMenus: [] },
   { id: 'invoices', label: 'Invoices', icon: Receipt, subMenus: ['Daily', 'Weekly'] },
   { id: 'tasks', label: 'Tasks', icon: KanbanSquare, subMenus: [] }

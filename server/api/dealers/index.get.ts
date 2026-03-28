@@ -21,7 +21,7 @@ export default defineEventHandler(async (event) => {
       return []
     }
 
-    const docs = await collection.find(query).sort({ _id: -1 }).toArray()
+    const docs = await collection.find(query).sort({ dealer: 1 }).toArray()
     
     return docs.map(doc => ({
       id: doc._id.toString(),
