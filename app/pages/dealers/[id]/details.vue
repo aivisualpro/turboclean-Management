@@ -13,7 +13,7 @@ const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-US', { wee
 
 function getStatusColor(status: string) {
   switch (status) {
-    case 'Authorised': return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+    case 'Authorised': return 'bg-primary/10 text-primary border-primary/20'
     case 'Pending': return 'bg-amber-500/10 text-amber-600 border-amber-500/20'
     case 'Rejected': return 'bg-red-500/10 text-red-600 border-red-500/20'
     case 'In Followup': return 'bg-blue-500/10 text-blue-600 border-blue-500/20'
@@ -73,8 +73,8 @@ const primaryContact = computed(() => props.dealer.contacts?.[0] || null)
           <Separator class="opacity-20" />
 
           <div class="flex items-start gap-3">
-            <div class="size-8 rounded-lg bg-orange-500/5 border flex items-center justify-center shrink-0 mt-0.5">
-              <Icon name="i-lucide-map-pin" class="size-4 text-orange-500/70" />
+            <div class="size-8 rounded-lg bg-muted/50 border flex items-center justify-center shrink-0 mt-0.5">
+              <Icon name="i-lucide-map-pin" class="size-4 text-muted-foreground" />
             </div>
             <div class="min-w-0">
               <p class="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-0.5">Address</p>
@@ -85,8 +85,8 @@ const primaryContact = computed(() => props.dealer.contacts?.[0] || null)
           <Separator class="opacity-20" />
 
           <div class="flex items-start gap-3">
-            <div class="size-8 rounded-lg bg-emerald-500/5 border flex items-center justify-center shrink-0 mt-0.5">
-              <Icon name="i-lucide-circle-check" class="size-4 text-emerald-500/70" />
+            <div class="size-8 rounded-lg bg-muted/50 border flex items-center justify-center shrink-0 mt-0.5">
+              <Icon name="i-lucide-circle-check" class="size-4 text-muted-foreground" />
             </div>
             <div class="min-w-0">
               <p class="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-0.5">Status</p>
@@ -99,8 +99,8 @@ const primaryContact = computed(() => props.dealer.contacts?.[0] || null)
           <Separator class="opacity-20" />
 
           <div class="flex items-start gap-3">
-            <div class="size-8 rounded-lg bg-blue-500/5 border flex items-center justify-center shrink-0 mt-0.5">
-              <Icon name="i-lucide-sticky-note" class="size-4 text-blue-500/70" />
+            <div class="size-8 rounded-lg bg-muted/50 border flex items-center justify-center shrink-0 mt-0.5">
+              <Icon name="i-lucide-sticky-note" class="size-4 text-muted-foreground" />
             </div>
             <div class="min-w-0 flex-1">
               <p class="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-0.5">Notes</p>
@@ -174,7 +174,7 @@ const primaryContact = computed(() => props.dealer.contacts?.[0] || null)
               <p class="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mt-0.5">Services</p>
             </div>
             <div class="p-3 rounded-lg bg-muted/10 border text-center">
-              <p class="text-lg font-bold text-emerald-600 tabular-nums">{{ fmt(totalServiceValue) }}</p>
+              <p class="text-lg font-bold text-primary tabular-nums">{{ fmt(totalServiceValue) }}</p>
               <p class="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mt-0.5">Total Value</p>
             </div>
           </div>
@@ -190,11 +190,9 @@ const primaryContact = computed(() => props.dealer.contacts?.[0] || null)
         </div>
         <div v-if="primaryContact" class="p-4 space-y-3">
           <div class="flex items-center gap-3">
-            <Avatar class="size-10 border-2 border-primary/10">
-              <AvatarFallback class="bg-primary/5 text-primary text-sm font-semibold">
-                {{ primaryContact.name.slice(0, 2).toUpperCase() }}
-              </AvatarFallback>
-            </Avatar>
+            <div class="size-10 rounded-full bg-muted/50 border flex items-center justify-center shrink-0">
+              <Icon name="i-lucide-user" class="size-5 text-muted-foreground" />
+            </div>
             <div>
               <p class="text-sm font-semibold text-foreground">{{ primaryContact.name }}</p>
               <p class="text-[10px] text-muted-foreground">{{ primaryContact.designation || 'Representative' }}</p>
@@ -226,8 +224,8 @@ const primaryContact = computed(() => props.dealer.contacts?.[0] || null)
         </div>
         <div class="p-4 space-y-3.5">
           <div class="flex items-center gap-3">
-            <div class="size-8 rounded-lg bg-emerald-500/5 border flex items-center justify-center shrink-0">
-              <Icon name="i-lucide-calendar-plus" class="size-4 text-emerald-500/70" />
+            <div class="size-8 rounded-lg bg-muted/50 border flex items-center justify-center shrink-0">
+              <Icon name="i-lucide-calendar-plus" class="size-4 text-muted-foreground" />
             </div>
             <div class="min-w-0">
               <p class="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-0.5">Created</p>
@@ -236,8 +234,8 @@ const primaryContact = computed(() => props.dealer.contacts?.[0] || null)
           </div>
           <Separator class="opacity-20" />
           <div class="flex items-center gap-3">
-            <div class="size-8 rounded-lg bg-blue-500/5 border flex items-center justify-center shrink-0">
-              <Icon name="i-lucide-calendar-check" class="size-4 text-blue-500/70" />
+            <div class="size-8 rounded-lg bg-muted/50 border flex items-center justify-center shrink-0">
+              <Icon name="i-lucide-calendar-check" class="size-4 text-muted-foreground" />
             </div>
             <div class="min-w-0">
               <p class="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-0.5">Last Updated</p>
@@ -246,8 +244,8 @@ const primaryContact = computed(() => props.dealer.contacts?.[0] || null)
           </div>
           <Separator class="opacity-20" />
           <div class="flex items-center gap-3">
-            <div class="size-8 rounded-lg bg-violet-500/5 border flex items-center justify-center shrink-0">
-              <Icon name="i-lucide-hash" class="size-4 text-violet-500/70" />
+            <div class="size-8 rounded-lg bg-muted/50 border flex items-center justify-center shrink-0">
+              <Icon name="i-lucide-hash" class="size-4 text-muted-foreground" />
             </div>
             <div class="min-w-0">
               <p class="text-[10px] text-muted-foreground uppercase tracking-wider font-medium mb-0.5">Dealer ID</p>
