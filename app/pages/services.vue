@@ -8,7 +8,7 @@ const { setHeader } = usePageHeader()
 setHeader({ title: 'Services', icon: 'i-lucide-briefcase' })
 
 const { services, isLoading, fetchServices } = useServices()
-const { isActionAllowed } = usePermissions()
+const { isActionAllowed, isAdmin } = usePermissions()
 const canAdd = computed(() => isActionAllowed('services', 'Add'))
 const canEdit = computed(() => isActionAllowed('services', 'Edit'))
 const canDelete = computed(() => isActionAllowed('services', 'Delete'))
@@ -220,11 +220,11 @@ function exportToCsv() {
               <List class="size-3.5" />
             </button>
           </div>
-          <Button variant="outline" size="sm" class="h-8 gap-2" @click="exportToCsv">
+          <Button v-if="isAdmin" variant="outline" size="sm" class="h-8 gap-2" @click="exportToCsv">
             <Download class="size-4" />
             <span class="hidden lg:inline">Export</span>
           </Button>
-          <Button variant="outline" size="sm" class="h-8 gap-2" @click="showImport = true">
+          <Button v-if="isAdmin" variant="outline" size="sm" class="h-8 gap-2" @click="showImport = true">
             <Upload class="size-4" />
             <span class="hidden lg:inline">Import</span>
           </Button>

@@ -3,7 +3,9 @@ import type { Dealer, DealerContact, DealerPhone, DealerStatus, PreferredContact
 import { Plus, Trash2, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
-const { addDealer, updateDealer, formatPhoneNumber } = useDealers()
+const { dealers, addDealer, updateDealer, formatPhoneNumber } = useDealers()
+
+const generateObjectId = () => [...Array(24)].map(() => Math.floor(Math.random() * 16).toString(16)).join('')
 
 const isOpen = defineModel<boolean>('open', { default: false })
 const props = defineProps<{
@@ -30,6 +32,7 @@ const address = ref('')
 const status = ref<DealerStatus>('Pending')
 const isTaxApplied = ref(false)
 const taxPercentage = ref(0)
+const copyFromDealerId = ref('')
 const contacts = ref<DealerContact[]>([])
 
 watch(() => props.dealer, (d) => {
@@ -54,6 +57,7 @@ function resetForm() {
   dealerName.value = ''
   address.value = ''
   status.value = 'Pending'
+  copyFromDealerId.value = ''
   contacts.value = [{
     id: Math.random().toString(36).slice(2, 10),
     name: '',
@@ -145,6 +149,23 @@ function onSubmit() {
     toast.success('Dealer updated')
   }
   else {
+    let finalServices: any[] = []
+    if (copyFromDealerId.value) {
+      const sourceDealer = dealers.value.find(d => d.id === copyFromDealerId.value)
+      if (sourceDealer && sourceDealer.services) {
+        finalServices = sourceDealer.services.map(s => {
+          const calculatedTax = isTaxApplied.value ? (s.amount * taxPercentage.value) / 100 : 0
+          return {
+            id: generateObjectId(),
+            service: s.service,
+            amount: s.amount,
+            tax: calculatedTax,
+            total: s.amount + calculatedTax,
+          }
+        })
+      }
+    }
+
     addDealer({
       dealerName: dealerName.value.trim(),
       address: address.value.trim(),
@@ -152,6 +173,7 @@ function onSubmit() {
       isTaxApplied: isTaxApplied.value,
       taxPercentage: taxPercentage.value,
       contacts: cleanContacts,
+      services: finalServices,
     })
     toast.success('Dealer added')
   }
@@ -204,6 +226,20 @@ function onSubmit() {
           <div v-if="isTaxApplied" class="grid gap-2 animate-in fade-in slide-in-from-top-1">
             <Label>Tax Percentage (%)</Label>
             <Input type="number" step="0.01" v-model.number="taxPercentage" placeholder="0.00" />
+          </div>
+          <div v-if="!dealer" class="grid gap-2">
+            <Label>Copy Services From</Label>
+            <p class="text-[11px] text-muted-foreground -mt-1">Optional. Copy all services and base prices from an existing dealer.</p>
+            <Select v-model="copyFromDealerId">
+              <SelectTrigger>
+                <SelectValue placeholder="Select a dealer to copy from..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="d in dealers" :key="d.id" :value="d.id">
+                  {{ d.dealerName }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 

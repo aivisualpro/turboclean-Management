@@ -5,7 +5,7 @@ import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIc
 
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Work Orders' })
-const { isActionAllowed } = usePermissions()
+const { isActionAllowed, isAdmin } = usePermissions()
 const canEditWO = computed(() => isActionAllowed('work_orders', 'Edit'))
 
 // ─── Base State ──────────────────────────────────────────────────────────
@@ -421,10 +421,10 @@ async function handleGenerate(type: 'daily' | 'weekly') {
             <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
             <Input v-model="search" placeholder="Search orders..." class="pl-8 w-44 h-8 text-sm" />
           </div>
-          <Button variant="outline" size="sm" class="h-8" @click="handleExport">
+          <Button v-if="isAdmin" variant="outline" size="sm" class="h-8" @click="handleExport">
             <Download class="mr-1 size-4" /> Export
           </Button>
-          <Button variant="outline" size="sm" class="h-8" @click="showImportModal = true">
+          <Button v-if="isAdmin" variant="outline" size="sm" class="h-8" @click="showImportModal = true">
             <Upload class="mr-1 size-4" /> Import
           </Button>
           

@@ -10,8 +10,40 @@ const generateObjectId = () => [...Array(24)].map(() => Math.floor(Math.random()
 definePageMeta({ layout: 'default' })
 
 const props = defineProps<{ dealer: Dealer }>()
-const { patchDealer } = useDealers()
+const { patchDealer, dealers } = useDealers()
 const { services, fetchServices } = useServices()
+
+const copyFromDealerId = ref('')
+const isCopying = ref(false)
+
+async function copyServices() {
+  if (!copyFromDealerId.value) return
+  const sourceDealer = dealers.value.find(d => d.id === copyFromDealerId.value)
+  if (!sourceDealer || !sourceDealer.services) {
+    toast.error('Selected dealer has no services or could not be found')
+    return
+  }
+  isCopying.value = true
+  try {
+    const finalServices = sourceDealer.services.map(s => {
+      const tax = props.dealer.isTaxApplied ? (s.amount * props.dealer.taxPercentage / 100) : 0
+      return {
+        id: generateObjectId(),
+        service: s.service,
+        amount: s.amount,
+        tax,
+        total: s.amount + tax
+      }
+    })
+    await patchDealer(props.dealer.id, { services: finalServices })
+    toast.success(`Copied ${finalServices.length} services successfully`)
+    copyFromDealerId.value = ''
+  } catch (err: any) {
+    toast.error(`Copy failed: ${err.message || err}`)
+  } finally {
+    isCopying.value = false
+  }
+}
 
 // Ensure services are loaded
 onMounted(() => { if (!services.value.length) fetchServices() })
@@ -257,17 +289,44 @@ const taxTotal = computed(() =>
 
     <!-- Empty state -->
     <div v-if="!dealer.services?.length" class="flex-1 flex items-center justify-center">
-      <div class="text-center py-12 px-4">
+      <div class="text-center py-12 px-4 max-w-2xl mx-auto">
         <Icon name="i-lucide-briefcase" class="size-10 text-muted-foreground/30 mx-auto mb-3" />
         <h4 class="text-sm font-semibold text-foreground">No Services Yet</h4>
-        <p class="text-xs text-muted-foreground mt-1 mb-4">Add a service to configure pricing for this dealer.</p>
-        <button
-          type="button"
-          @click="openAdd"
-          class="flex items-center gap-1.5 mx-auto h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors"
-        >
-          <Plus class="size-3.5" /> Add Service
-        </button>
+        <p class="text-xs text-muted-foreground mt-1 mb-6">Add a service manually or copy from an existing dealer.</p>
+        
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+          <button
+            type="button"
+            @click="openAdd"
+            class="flex items-center gap-1.5 h-9 px-4 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors shadow-sm"
+          >
+            <Plus class="size-4 shrink-0" /> <span class="whitespace-nowrap">Add Service Manually</span>
+          </button>
+          
+          <div class="flex items-center text-[10px] text-muted-foreground uppercase font-bold tracking-wider mx-2">OR</div>
+          
+          <div class="flex items-center gap-2 bg-muted/40 p-1.5 rounded-lg border shadow-sm w-full sm:w-auto">
+            <Select v-model="copyFromDealerId">
+              <SelectTrigger class="h-8 w-full sm:w-56 text-xs bg-background">
+                <SelectValue placeholder="Copy Services From..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem 
+                  v-for="d in dealers.filter(d => d.id !== props.dealer.id && d.services?.length && d.services.length > 0)" 
+                  :key="d.id" 
+                  :value="d.id"
+                >
+                  {{ d.dealerName }} ({{ d.services?.length || 0 }})
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <Button size="sm" class="h-8 shadow-none gap-1.5" :disabled="!copyFromDealerId || isCopying" @click="copyServices">
+              <Icon v-if="isCopying" name="lucide:loader-2" class="size-3.5 animate-spin" />
+              <Icon v-else name="lucide:copy" class="size-3.5" />
+              Copy
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
 
