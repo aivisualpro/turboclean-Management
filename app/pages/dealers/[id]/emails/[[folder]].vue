@@ -77,6 +77,42 @@ const formatDate = (d: string) => {
   const isToday = new Date().toDateString() === date.toDateString()
   return isToday ? date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : date.toLocaleDateString([], { month: 'short', day: 'numeric'})
 }
+
+// ── Attachment helpers ────────────────────────────────────────────────────
+const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']
+
+function isImageAttachment(att: any): boolean {
+  // Check filename extension
+  const ext = (att.filename || '').split('.').pop()?.toLowerCase() || ''
+  if (imageExts.includes(ext)) return true
+  // Check data URI content type
+  if (att.content?.startsWith('data:image/')) return true
+  return false
+}
+
+function getAttachmentType(att: any): string {
+  if (isImageAttachment(att)) return 'Image'
+  const ext = (att.filename || '').split('.').pop()?.toLowerCase() || ''
+  if (ext === 'pdf' || att.content?.startsWith('data:application/pdf')) return 'PDF Document'
+  if (ext === 'html' || att.content?.startsWith('data:text/html')) return 'HTML Document'
+  return 'File'
+}
+
+// ── Lightbox state ───────────────────────────────────────────────────────
+const lightboxOpen = ref(false)
+const lightboxSrc = ref('')
+const lightboxFilename = ref('')
+
+function openLightbox(att: any) {
+  lightboxSrc.value = att.content || ''
+  lightboxFilename.value = att.filename || 'Image'
+  lightboxOpen.value = true
+}
+
+function closeLightbox() {
+  lightboxOpen.value = false
+  lightboxSrc.value = ''
+}
 </script>
 
 <template>
@@ -192,25 +228,74 @@ const formatDate = (d: string) => {
 
         <!-- Render HTML Body -->
         <div class="flex-1 overflow-y-auto p-6 md:p-8 relative">
-          <!-- Raw HTML injected via v-html. The outer div preserves basic styling block scopes -->
           <div class="prose prose-sm prose-slate max-w-none w-full break-words [&_a]:text-blue-600 [&_img]:max-w-full" v-html="selectedEmail.bodyHtml"></div>
         </div>
         
         <!-- Attachments Strip -->
         <div v-if="selectedEmail.attachments?.length > 0" class="p-4 border-t bg-muted/5 shrink-0 flex flex-nowrap overflow-x-auto gap-3">
-          <div v-for="(att, i) in selectedEmail.attachments" :key="i" class="flex flex-col shrink-0 w-48 border rounded-lg bg-card p-3 shadow-sm group hover:border-primary/50 transition-colors cursor-pointer">
-            <div class="flex items-center gap-2 mb-2">
-              <div class="p-1.5 rounded-md bg-blue-50 text-blue-600"><FileText class="size-4" /></div>
-              <span class="text-xs font-semibold truncate flex-1">{{ att.filename || 'Attachment' }}</span>
+          <template v-for="(att, i) in selectedEmail.attachments" :key="i">
+            
+            <!-- Image Attachment — clickable thumbnail -->
+            <div v-if="isImageAttachment(att)" 
+              class="flex flex-col shrink-0 w-32 border rounded-lg bg-card shadow-sm group hover:border-primary/50 transition-all cursor-pointer overflow-hidden hover:shadow-md"
+              @click="openLightbox(att)"
+            >
+              <div class="h-24 w-full bg-muted/20 overflow-hidden">
+                <img :src="att.content" :alt="att.filename" class="w-full h-full object-cover transition-transform group-hover:scale-105" />
+              </div>
+              <div class="p-2 border-t">
+                <span class="text-[10px] font-semibold truncate block">{{ att.filename || 'Photo' }}</span>
+                <span class="text-[9px] text-emerald-600 font-medium">Image</span>
+              </div>
             </div>
-            <div class="flex items-center gap-2 text-[10px] text-muted-foreground w-full justify-between">
-              <span>PDF Document</span>
-              <a :href="att.content || '#'" download class="text-primary hover:underline font-medium opacity-0 group-hover:opacity-100 transition-opacity">Download</a>
+
+            <!-- PDF / Other Attachment — file card -->
+            <div v-else class="flex flex-col shrink-0 w-48 border rounded-lg bg-card p-3 shadow-sm group hover:border-primary/50 transition-colors">
+              <div class="flex items-center gap-2 mb-2">
+                <div class="p-1.5 rounded-md bg-blue-50 text-blue-600"><FileText class="size-4" /></div>
+                <span class="text-xs font-semibold truncate flex-1">{{ att.filename || 'Attachment' }}</span>
+              </div>
+              <div class="flex items-center gap-2 text-[10px] text-muted-foreground w-full justify-between">
+                <span>{{ getAttachmentType(att) }}</span>
+                <a :href="att.content || '#'" :download="att.filename" class="text-primary hover:underline font-medium opacity-0 group-hover:opacity-100 transition-opacity">Download</a>
+              </div>
             </div>
-          </div>
+
+          </template>
         </div>
       </template>
 
     </div>
+
+    <!-- Image Lightbox Overlay -->
+    <Teleport to="body">
+      <Transition name="lightbox">
+        <div v-if="lightboxOpen" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm" @click.self="closeLightbox">
+          <div class="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center">
+            <!-- Close button -->
+            <button @click="closeLightbox" class="absolute -top-10 right-0 text-white/80 hover:text-white text-sm font-medium flex items-center gap-1 transition-colors">
+              <span>Close</span>
+              <span class="text-lg leading-none">×</span>
+            </button>
+            <!-- Image -->
+            <img :src="lightboxSrc" :alt="lightboxFilename" class="max-w-full max-h-[85vh] rounded-lg shadow-2xl object-contain" />
+            <!-- Filename -->
+            <p class="mt-3 text-white/70 text-xs font-medium">{{ lightboxFilename }}</p>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
   </div>
 </template>
+
+<style scoped>
+.lightbox-enter-active,
+.lightbox-leave-active {
+  transition: opacity 0.2s ease;
+}
+.lightbox-enter-from,
+.lightbox-leave-to {
+  opacity: 0;
+}
+</style>
