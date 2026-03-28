@@ -5,6 +5,7 @@ import PasswordInput from '~/components/PasswordInput.vue'
 const email = ref('')
 const password = ref('')
 const { login, loading, error } = useAuth()
+const { getDefaultRoute } = usePermissions()
 
 async function onSubmit(event: Event) {
   event.preventDefault()
@@ -12,7 +13,9 @@ async function onSubmit(event: Event) {
 
   const ok = await login(email.value, password.value)
   if (ok) {
-    await navigateTo('/')
+    // Redirect to the first enabled module (or dashboard if enabled)
+    await nextTick()
+    await navigateTo(getDefaultRoute())
   }
 }
 </script>
