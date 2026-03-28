@@ -281,7 +281,6 @@ const taxTotal = computed(() =>
               <TableHead>Service</TableHead>
               <TableHead class="text-right">Amount</TableHead>
               <TableHead v-if="dealer.isTaxApplied" class="text-center w-36">Tax ({{ dealer.taxPercentage }}%)</TableHead>
-              <TableHead v-else class="text-right">Tax</TableHead>
               <TableHead class="text-right">Total</TableHead>
               <TableHead class="w-20 text-right">Actions</TableHead>
             </TableRow>
@@ -320,7 +319,6 @@ const taxTotal = computed(() =>
                   </button>
                 </div>
               </TableCell>
-              <TableCell v-else class="text-right text-xs tabular-nums text-muted-foreground">{{ fmt(srv.tax) }}</TableCell>
 
               <TableCell class="text-right text-xs tabular-nums font-semibold">{{ fmt(srv.total ?? srv.amount) }}</TableCell>
 
