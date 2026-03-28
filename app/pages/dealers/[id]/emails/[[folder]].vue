@@ -2,7 +2,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import type { Dealer } from '~/composables/useDealers'
-import { Mail, Clock, Inbox as InboxIcon, Loader2, Send, Archive, FileText, CornerUpLeft, Search, Paperclip, MoreHorizontal, UserCircle2 } from 'lucide-vue-next'
+import { Mail, Clock, Inbox as InboxIcon, Loader2, Send, Archive, FileText, CornerUpLeft, Search, Paperclip, MoreHorizontal, UserCircle2, Zap } from 'lucide-vue-next'
 
 const props = defineProps<{ dealer: Dealer }>()
 const route = useRoute()
@@ -196,7 +196,12 @@ function closeLightbox() {
               <Paperclip v-if="email.attachments?.length > 0" class="size-3 shrink-0 text-muted-foreground/60" />
             </div>
             
-            <Badge v-if="email.type === 'Invoice'" variant="outline" class="mt-1.5 self-start text-[9px] h-4 px-1.5 font-normal tracking-wide bg-blue-500/5 text-blue-600 border-blue-200">System Invoice</Badge>
+            <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
+              <Badge v-if="email.type === 'Invoice'" variant="outline" class="text-[9px] h-4 px-1.5 font-normal tracking-wide bg-blue-500/5 text-blue-600 border-blue-200">Invoice</Badge>
+              <Badge v-if="email.sentByAutomation" variant="outline" class="text-[9px] h-4 px-1.5 font-medium tracking-wide bg-violet-500/10 text-violet-600 border-violet-300 flex items-center gap-0.5">
+                <Zap class="size-2.5" />Auto
+              </Badge>
+            </div>
           </button>
         </div>
       </div>
@@ -214,7 +219,12 @@ function closeLightbox() {
         <!-- Reading Pane Header -->
         <div class="p-5 border-b shrink-0 flex flex-col gap-4">
           <div class="flex items-start justify-between gap-4">
-            <h2 class="text-lg font-bold text-foreground leading-tight">{{ selectedEmail.subject }}</h2>
+            <div class="flex items-center gap-2.5 min-w-0">
+              <h2 class="text-lg font-bold text-foreground leading-tight truncate">{{ selectedEmail.subject }}</h2>
+              <Badge v-if="selectedEmail.sentByAutomation" variant="outline" class="shrink-0 text-[9px] h-5 px-1.5 font-medium tracking-wide bg-violet-500/10 text-violet-600 border-violet-300 flex items-center gap-1">
+                <Zap class="size-3" />Automated
+              </Badge>
+            </div>
             <div class="flex items-center gap-1 shrink-0">
               <Button size="icon" variant="ghost" class="h-8 w-8 text-muted-foreground"><CornerUpLeft class="size-4" /></Button>
               <Button size="icon" variant="ghost" class="h-8 w-8 text-muted-foreground"><MoreHorizontal class="size-4" /></Button>

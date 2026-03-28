@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { toast } from 'vue-sonner'
-import { Boxes, Plus, Edit2, Trash2, Check, X, Shield, PlusCircle, LayoutDashboard, Users, Briefcase, Building2, FileText, Receipt, KanbanSquare } from 'lucide-vue-next'
+import { Boxes, Plus, Edit2, Trash2, Check, X, Shield, PlusCircle, LayoutDashboard, Users, Briefcase, Building2, FileText, Receipt, KanbanSquare, Settings2 } from 'lucide-vue-next'
 
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Workspaces & Permissions' })
@@ -14,7 +14,8 @@ const availableMenus = [
   { id: 'dealers', label: 'Dealers', icon: Building2, subMenus: ['Services', 'Contacts', 'Work Orders', 'Invoices', 'Emails', 'Add', 'Edit', 'Delete'] },
   { id: 'work_orders', label: 'Work Orders', icon: FileText, subMenus: ['Edit', 'Delete'] },
   { id: 'invoices', label: 'Invoices', icon: Receipt, subMenus: ['Daily', 'Weekly'] },
-  { id: 'tasks', label: 'Tasks', icon: KanbanSquare, subMenus: ['Add', 'Edit', 'Delete'] }
+  { id: 'tasks', label: 'Tasks', icon: KanbanSquare, subMenus: ['Add', 'Edit', 'Delete'] },
+  { id: 'general_settings', label: 'General Settings', icon: Settings2, subMenus: [] }
 ]
 
 // ─── State ──────────────────────────────

@@ -17,6 +17,7 @@ export interface DealerContact {
   phones: DealerPhone[]
   emails: string[]
   preferredContactMethod: PreferredContactMethod
+  receiveInvoices?: boolean
 }
 
 export interface DealerService {

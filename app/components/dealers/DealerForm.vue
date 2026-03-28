@@ -65,6 +65,7 @@ function resetForm() {
     phones: [{ id: Math.random().toString(36).slice(2, 8), number: '', type: 'mobile' }],
     emails: [''],
     preferredContactMethod: 'any',
+    receiveInvoices: false,
   }]
 }
 
@@ -76,6 +77,7 @@ function addContact() {
     phones: [{ id: Math.random().toString(36).slice(2, 8), number: '', type: 'mobile' }],
     emails: [''],
     preferredContactMethod: 'any',
+    receiveInvoices: false,
   })
 }
 
@@ -135,6 +137,7 @@ function onSubmit() {
       ...c,
       phones: c.phones.filter(p => p.number.trim()),
       emails: c.emails.filter(e => e.trim()),
+      receiveInvoices: c.receiveInvoices ?? false,
     }))
 
   if (props.dealer) {
@@ -221,7 +224,7 @@ function onSubmit() {
               <Label class="text-sm">Apply Tax</Label>
               <p class="text-[11px] text-muted-foreground">Apply dealer-specific tax to all work orders.</p>
             </div>
-            <Switch v-model:checked="isTaxApplied" />
+            <Switch :checked="isTaxApplied" @update:checked="isTaxApplied = $event" />
           </div>
           <div v-if="isTaxApplied" class="grid gap-2 animate-in fade-in slide-in-from-top-1">
             <Label>Tax Percentage (%)</Label>
@@ -368,6 +371,15 @@ function onSubmit() {
                   </SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <!-- Receive Invoices Toggle -->
+            <div class="flex items-center justify-between border rounded-lg p-3 bg-muted/5 mt-2">
+              <div class="space-y-0.5">
+                <Label class="text-sm">Receive Invoices</Label>
+                <p class="text-[11px] text-muted-foreground">Automatically send invoices to this contact's email.</p>
+              </div>
+              <Switch :checked="contact.receiveInvoices" @update:checked="contact.receiveInvoices = $event" />
             </div>
           </div>
         </div>

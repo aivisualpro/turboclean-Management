@@ -36,6 +36,7 @@ export function usePermissions() {
     'Invoices': 'invoices',
     'Tasks': 'tasks',
     'Workspaces': '_settings', // always visible
+    'General Settings': 'general_settings',
   }
   // Module ID → route path (ordered by sidebar position)
   const moduleRouteOrder: { id: string; route: string }[] = [
@@ -46,6 +47,7 @@ export function usePermissions() {
     { id: 'work_orders', route: '/sales/work-orders' },
     { id: 'invoices', route: '/sales/invoices' },
     { id: 'tasks', route: '/tasks' },
+    { id: 'general_settings', route: '/settings/general' },
   ]
 
   // Map dealer sub-tab IDs → workspace dealer tab names

@@ -47,6 +47,10 @@ const filteredNavMenu = computed(() => {
     items: group.items.filter((item: any) => isMenuVisible(item.title)),
   })).filter(group => group.items.length > 0)
 })
+
+const filteredNavMenuBottom = computed(() => {
+  return navMenuBottom.filter((item: any) => isMenuVisible(item.title))
+})
 </script>
 
 <template>
@@ -62,7 +66,7 @@ const filteredNavMenu = computed(() => {
         <component :is="resolveNavItemComponent(item)" v-for="(item, index) in nav.items" :key="index" :item="item" />
       </SidebarGroup>
       <SidebarGroup class="mt-auto">
-        <component :is="resolveNavItemComponent(item)" v-for="(item, index) in navMenuBottom" :key="index" :item="item" size="sm" />
+        <component :is="resolveNavItemComponent(item)" v-for="(item, index) in filteredNavMenuBottom" :key="index" :item="item" size="sm" />
       </SidebarGroup>
     </SidebarContent>
     <SidebarFooter>
