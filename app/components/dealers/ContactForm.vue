@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Dealer, DealerContact, PreferredContactMethod } from '~/composables/useDealers'
-import { Plus, Trash2 } from 'lucide-vue-next'
+import { Plus, Trash2, Zap } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 const { patchDealer, formatPhoneNumber } = useDealers()
@@ -34,6 +34,7 @@ const formContact = ref<DealerContact>({
   phones: [{ id: '', number: '', type: 'mobile' }],
   emails: [''],
   preferredContactMethod: 'any',
+  receiveInvoices: false,
 })
 
 watch([() => props.contact, isOpen], ([c, open]) => {
@@ -52,6 +53,7 @@ watch([() => props.contact, isOpen], ([c, open]) => {
         phones: [{ id: Math.random().toString(36).slice(2, 8), number: '', type: 'mobile' }],
         emails: [''],
         preferredContactMethod: 'any',
+        receiveInvoices: false,
       }
     }
   }
@@ -98,6 +100,7 @@ async function onSubmit() {
     designation: formContact.value.designation.trim(),
     phones: formContact.value.phones.filter(p => p.number.trim()),
     emails: formContact.value.emails.filter(e => e.trim()),
+    receiveInvoices: formContact.value.receiveInvoices ?? false,
   }
 
   const existingContacts = [...(props.dealer.contacts || [])]
@@ -210,6 +213,40 @@ async function onSubmit() {
               </SelectItem>
             </SelectContent>
           </Select>
+        </div>
+
+        <Separator />
+
+        <!-- Receive Auto Emails Toggle -->
+        <div
+          class="flex items-center justify-between rounded-xl border p-3.5 transition-all duration-200"
+          :class="formContact.receiveInvoices ? 'bg-primary/5 border-primary/30' : 'bg-muted/5'"
+        >
+          <div class="flex items-center gap-3">
+            <div
+              class="size-8 rounded-lg flex items-center justify-center transition-colors duration-200 shrink-0"
+              :class="formContact.receiveInvoices ? 'bg-primary/10' : 'bg-muted/50'"
+            >
+              <Zap class="size-4 transition-colors" :class="formContact.receiveInvoices ? 'text-primary' : 'text-muted-foreground'" />
+            </div>
+            <div>
+              <Label class="text-sm font-semibold cursor-pointer" :class="formContact.receiveInvoices ? 'text-primary' : ''" @click="formContact.receiveInvoices = !formContact.receiveInvoices">Receive Auto Emails</Label>
+              <p class="text-[11px] text-muted-foreground leading-snug mt-0.5">This contact will receive automated daily &amp; weekly invoice emails.</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="formContact.receiveInvoices"
+            @click.stop.prevent="formContact.receiveInvoices = !formContact.receiveInvoices"
+            class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            :class="formContact.receiveInvoices ? 'bg-primary' : 'bg-input'"
+          >
+            <span
+              class="pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform duration-200 ease-in-out"
+              :class="formContact.receiveInvoices ? 'translate-x-5' : 'translate-x-0'"
+            />
+          </button>
         </div>
       </div>
 

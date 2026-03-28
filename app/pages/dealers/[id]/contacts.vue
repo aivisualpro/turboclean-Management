@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Dealer, DealerContact } from '~/composables/useDealers'
 import { useDealers } from '~/composables/useDealers'
-import { Plus, Edit3, Trash2 } from 'lucide-vue-next'
+import { Plus, Edit3, Trash2, Zap } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 definePageMeta({ layout: 'default' })
@@ -30,6 +30,18 @@ async function removeContact(contactId: string) {
     toast.success('Contact deleted')
   } catch (err: any) {
     toast.error('Failed to delete contact: ' + err.message)
+  }
+}
+
+async function toggleReceiveInvoices(contact: DealerContact) {
+  const newContacts = props.dealer.contacts.map(c =>
+    c.id === contact.id ? { ...c, receiveInvoices: !c.receiveInvoices } : c
+  )
+  try {
+    await patchDealer(props.dealer.id, { contacts: newContacts })
+    toast.success(`Auto emails ${!contact.receiveInvoices ? 'enabled' : 'disabled'} for ${contact.name}`)
+  } catch (err: any) {
+    toast.error('Failed to update: ' + err.message)
   }
 }
 
@@ -89,6 +101,7 @@ function getPreferredLabel(method: string) {
               <TableHead>Phone</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Preferred</TableHead>
+              <TableHead class="text-center w-[120px]">Auto Emails</TableHead>
               <TableHead class="text-right w-[100px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -123,6 +136,22 @@ function getPreferredLabel(method: string) {
               </TableCell>
               <TableCell>
                 <Badge variant="outline" class="text-[10px] capitalize">{{ getPreferredLabel(contact.preferredContactMethod) }}</Badge>
+              </TableCell>
+              <!-- Auto Emails Toggle Cell -->
+              <TableCell class="text-center">
+                <button
+                  type="button"
+                  role="switch"
+                  :aria-checked="contact.receiveInvoices"
+                  @click.stop.prevent="toggleReceiveInvoices(contact)"
+                  class="group inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-1 rounded-full border transition-all duration-200"
+                  :class="contact.receiveInvoices
+                    ? 'bg-primary/10 text-primary border-primary/30 hover:bg-primary/20'
+                    : 'bg-muted/40 text-muted-foreground border-border/60 hover:bg-muted'"
+                >
+                  <Zap class="size-3 transition-colors" :class="contact.receiveInvoices ? 'text-primary' : 'text-muted-foreground/50'" />
+                  {{ contact.receiveInvoices ? 'On' : 'Off' }}
+                </button>
               </TableCell>
               <TableCell class="text-right">
                 <div class="flex items-center justify-end gap-1 opacity-0 group-hover/row:opacity-100 transition-opacity">

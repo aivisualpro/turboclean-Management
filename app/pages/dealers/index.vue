@@ -587,8 +587,8 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
                     <!-- Row 3: Tax on/off and % inline -->
                     <div class="mt-4 flex items-center justify-between border-t border-border/40 pt-4" @click.stop>
                       <div class="flex items-center gap-3">
-                        <div class="size-7 rounded-lg flex items-center justify-center transition-colors duration-300 shrink-0" :class="d.isTaxApplied ? 'bg-emerald-500/10' : 'bg-muted/50'">
-                          <ShieldCheck class="size-3.5" :class="d.isTaxApplied ? 'text-emerald-600' : 'text-muted-foreground/50'" />
+                        <div class="size-7 rounded-lg flex items-center justify-center transition-colors duration-300 shrink-0" :class="d.isTaxApplied ? 'bg-primary/10' : 'bg-muted/50'">
+                          <ShieldCheck class="size-3.5" :class="d.isTaxApplied ? 'text-primary' : 'text-muted-foreground/50'" />
                         </div>
                         <div class="flex flex-col">
                           <span class="text-xs font-medium" :class="d.isTaxApplied ? 'text-foreground' : 'text-muted-foreground'">Tax Settings</span>
@@ -622,7 +622,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
                           :aria-checked="d.isTaxApplied"
                           @click.stop.prevent="handleToggleTax(d, !d.isTaxApplied)"
                           class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                          :class="d.isTaxApplied ? 'bg-emerald-500' : 'bg-input'"
+                          :class="d.isTaxApplied ? 'bg-primary' : 'bg-input'"
                         >
                           <span
                             class="pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform duration-200 ease-in-out"

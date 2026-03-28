@@ -224,7 +224,19 @@ function onSubmit() {
               <Label class="text-sm">Apply Tax</Label>
               <p class="text-[11px] text-muted-foreground">Apply dealer-specific tax to all work orders.</p>
             </div>
-            <Switch :checked="isTaxApplied" @update:checked="isTaxApplied = $event" />
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="isTaxApplied"
+              @click.stop.prevent="isTaxApplied = !isTaxApplied"
+              class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              :class="isTaxApplied ? 'bg-primary' : 'bg-input'"
+            >
+              <span
+                class="pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform duration-200 ease-in-out"
+                :class="isTaxApplied ? 'translate-x-5' : 'translate-x-0'"
+              />
+            </button>
           </div>
           <div v-if="isTaxApplied" class="grid gap-2 animate-in fade-in slide-in-from-top-1">
             <Label>Tax Percentage (%)</Label>
