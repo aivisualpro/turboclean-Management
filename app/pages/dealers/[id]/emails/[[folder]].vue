@@ -98,14 +98,23 @@ function getAttachmentType(att: any): string {
   return 'File'
 }
 
+function isPdfAttachment(att: any): boolean {
+  const ext = (att.filename || '').split('.').pop()?.toLowerCase() || ''
+  if (ext === 'pdf') return true
+  if (att.content?.startsWith('data:application/pdf')) return true
+  return false
+}
+
 // ── Lightbox state ───────────────────────────────────────────────────────
 const lightboxOpen = ref(false)
 const lightboxSrc = ref('')
 const lightboxFilename = ref('')
+const lightboxType = ref<'image' | 'pdf'>('image')
 
 function openLightbox(att: any) {
   lightboxSrc.value = att.content || ''
-  lightboxFilename.value = att.filename || 'Image'
+  lightboxFilename.value = att.filename || 'Attachment'
+  lightboxType.value = isPdfAttachment(att) ? 'pdf' : 'image'
   lightboxOpen.value = true
 }
 
@@ -249,7 +258,22 @@ function closeLightbox() {
               </div>
             </div>
 
-            <!-- PDF / Other Attachment — file card -->
+            <!-- PDF Attachment — clickable file card -->
+            <div v-else-if="isPdfAttachment(att)" 
+              class="flex flex-col shrink-0 w-48 border rounded-lg bg-card p-3 shadow-sm group hover:border-primary/50 transition-colors cursor-pointer"
+              @click="openLightbox(att)"
+            >
+              <div class="flex items-center gap-2 mb-2">
+                <div class="p-1.5 rounded-md bg-red-50 text-red-600"><FileText class="size-4" /></div>
+                <span class="text-xs font-semibold truncate flex-1">{{ att.filename || 'Document' }}</span>
+              </div>
+              <div class="flex items-center gap-2 text-[10px] text-muted-foreground w-full justify-between">
+                <span class="text-red-500 font-medium">PDF Document</span>
+                <span class="text-primary font-medium opacity-0 group-hover:opacity-100 transition-opacity">Preview</span>
+              </div>
+            </div>
+
+            <!-- Other Attachment — file card -->
             <div v-else class="flex flex-col shrink-0 w-48 border rounded-lg bg-card p-3 shadow-sm group hover:border-primary/50 transition-colors">
               <div class="flex items-center gap-2 mb-2">
                 <div class="p-1.5 rounded-md bg-blue-50 text-blue-600"><FileText class="size-4" /></div>
@@ -267,18 +291,20 @@ function closeLightbox() {
 
     </div>
 
-    <!-- Image Lightbox Overlay -->
+    <!-- Lightbox Overlay (Image + PDF) -->
     <Teleport to="body">
       <Transition name="lightbox">
         <div v-if="lightboxOpen" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm" @click.self="closeLightbox">
-          <div class="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center">
+          <div class="relative flex flex-col items-center" :class="lightboxType === 'pdf' ? 'w-[85vw] h-[90vh]' : 'max-w-[90vw] max-h-[90vh]'">
             <!-- Close button -->
-            <button @click="closeLightbox" class="absolute -top-10 right-0 text-white/80 hover:text-white text-sm font-medium flex items-center gap-1 transition-colors">
+            <button @click="closeLightbox" class="absolute -top-10 right-0 text-white/80 hover:text-white text-sm font-medium flex items-center gap-1 transition-colors z-10">
               <span>Close</span>
               <span class="text-lg leading-none">×</span>
             </button>
-            <!-- Image -->
-            <img :src="lightboxSrc" :alt="lightboxFilename" class="max-w-full max-h-[85vh] rounded-lg shadow-2xl object-contain" />
+            <!-- Image preview -->
+            <img v-if="lightboxType === 'image'" :src="lightboxSrc" :alt="lightboxFilename" class="max-w-full max-h-[85vh] rounded-lg shadow-2xl object-contain" />
+            <!-- PDF preview -->
+            <iframe v-else-if="lightboxType === 'pdf'" :src="lightboxSrc" class="w-full h-full rounded-lg shadow-2xl bg-white" />
             <!-- Filename -->
             <p class="mt-3 text-white/70 text-xs font-medium">{{ lightboxFilename }}</p>
           </div>

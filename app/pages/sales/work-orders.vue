@@ -78,6 +78,19 @@ function getAppSheetImageUrl(fileName: string | undefined | null) {
   return `https://www.appsheet.com/template/gettablefileurl?appName=ZRZOperationsAPP-109704988&tableName=WorkOrders&fileName=${encodedName}`
 }
 
+// ── Image Lightbox ───────────────────────────────────────────────────────
+const woLightboxOpen = ref(false)
+const woLightboxSrc = ref('')
+
+function openWoLightbox(url: string) {
+  woLightboxSrc.value = url
+  woLightboxOpen.value = true
+}
+function closeWoLightbox() {
+  woLightboxOpen.value = false
+  woLightboxSrc.value = ''
+}
+
 // ─── Tree Data Fetching ──────────────────────────────────────────────────
 const treeData = ref<any[]>([])
 const treeLoading = ref(false)
@@ -635,9 +648,9 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                 <TableCell class="font-medium text-xs whitespace-nowrap">{{ fmtDate(wo.date) }}</TableCell>
                 <TableCell class="text-xs">{{ wo.stockNumber }}</TableCell>
                 <TableCell @click.stop>
-                  <a v-if="wo.upload" :href="getAppSheetImageUrl(wo.upload)!" target="_blank" class="block w-9 h-9 rounded bg-muted border overflow-hidden hover:opacity-80 transition-opacity">
+                  <div v-if="wo.upload" class="w-9 h-9 rounded bg-muted border overflow-hidden hover:opacity-80 transition-opacity cursor-pointer" @click="openWoLightbox(getAppSheetImageUrl(wo.upload)!)">
                     <img :src="getAppSheetImageUrl(wo.upload)!" class="w-full h-full object-cover" loading="lazy" />
-                  </a>
+                  </div>
                   <div v-else class="w-9 h-9 rounded bg-muted/50 border border-dashed flex items-center justify-center">
                     <Icon name="lucide:image-off" class="size-3.5 text-muted-foreground/40" />
                   </div>
@@ -767,4 +780,30 @@ async function handleGenerate(type: 'daily' | 'weekly') {
     </Dialog>
 
   </div>
+
+  <!-- Image Lightbox Overlay -->
+  <Teleport to="body">
+    <Transition name="wo-lightbox">
+      <div v-if="woLightboxOpen" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm" @click.self="closeWoLightbox">
+        <div class="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center">
+          <button @click="closeWoLightbox" class="absolute -top-10 right-0 text-white/80 hover:text-white text-sm font-medium flex items-center gap-1 transition-colors">
+            <span>Close</span>
+            <span class="text-lg leading-none">×</span>
+          </button>
+          <img :src="woLightboxSrc" alt="Work Order Photo" class="max-w-full max-h-[85vh] rounded-lg shadow-2xl object-contain" />
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
+
+<style scoped>
+.wo-lightbox-enter-active,
+.wo-lightbox-leave-active {
+  transition: opacity 0.2s ease;
+}
+.wo-lightbox-enter-from,
+.wo-lightbox-leave-to {
+  opacity: 0;
+}
+</style>
