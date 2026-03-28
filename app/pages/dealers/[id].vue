@@ -106,6 +106,10 @@ const activeTab = computed(() => {
   const pathEnd = route.path.split('/').pop()
   return tabs.find(t => t.path === pathEnd)?.id || 'details'
 })
+
+// Filter tabs by workspace permissions
+const { isDealerTabVisible } = usePermissions()
+const visibleTabs = computed(() => tabs.filter(t => isDealerTabVisible(t.id)))
 </script>
 
 <template>
@@ -174,7 +178,7 @@ const activeTab = computed(() => {
       <div class="px-4 pt-3 pb-0 shrink-0">
         <div class="flex items-center gap-1 border rounded-lg p-1 bg-muted/30 w-fit overflow-x-auto">
           <NuxtLink
-            v-for="tab in tabs"
+            v-for="tab in visibleTabs"
             :key="tab.id"
             :to="`/dealers/${dealerId}/${tab.path}`"
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap no-underline"

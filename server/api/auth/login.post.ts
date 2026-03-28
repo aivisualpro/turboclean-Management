@@ -51,6 +51,18 @@ export default defineEventHandler(async (event) => {
     path: '/',
   })
 
+  // Resolve workspace permissions
+  const { ObjectId } = await import('mongodb')
+  let workspaceMenus: Record<string, { enabled: boolean; tabs: string[] }> = {}
+  if (user.workspaceId) {
+    try {
+      const ws = await db.collection('turboCleanWorkspaces').findOne({ _id: new ObjectId(user.workspaceId) })
+      if (ws && ws.menus) {
+        workspaceMenus = ws.menus
+      }
+    } catch { /* invalid ObjectId, skip */ }
+  }
+
   return {
     success: true,
     user: {
@@ -59,6 +71,8 @@ export default defineEventHandler(async (event) => {
       email: user.email,
       role: user.role || 'User',
       registerDealers: user.registerDealers || [],
+      workspaceId: user.workspaceId?.toString() || '',
+      permissions: workspaceMenus,
     },
   }
 })

@@ -4,6 +4,8 @@ interface AuthUser {
   email: string
   role: string
   registerDealers?: string[]
+  workspaceId?: string
+  permissions?: Record<string, { enabled: boolean; tabs: string[] }>
 }
 
 const useAuthState = () => {

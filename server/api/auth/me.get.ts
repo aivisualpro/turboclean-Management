@@ -27,13 +27,26 @@ export default defineEventHandler(async (event) => {
       return { user: null }
     }
 
+    // Resolve workspace permissions
+    let workspaceMenus: Record<string, { enabled: boolean; tabs: string[] }> = {}
+    if (dbUser.workspaceId) {
+      try {
+        const ws = await db.collection('turboCleanWorkspaces').findOne({ _id: new ObjectId(dbUser.workspaceId) })
+        if (ws && ws.menus) {
+          workspaceMenus = ws.menus
+        }
+      } catch { /* invalid ObjectId, skip */ }
+    }
+
     return {
       user: {
         id: dbUser._id.toString(),
         name: dbUser.name || payload.name,
         email: dbUser.email || payload.email,
         role: dbUser.role || payload.role,
-        registerDealers: dbUser.registerDealers || []
+        registerDealers: dbUser.registerDealers || [],
+        workspaceId: dbUser.workspaceId?.toString() || '',
+        permissions: workspaceMenus,
       },
     }
   }

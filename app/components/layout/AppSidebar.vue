@@ -37,7 +37,16 @@ const user = computed(() => ({
   role: authUser.value?.role || 'User',
 }))
 
+const { isMenuVisible } = usePermissions()
 const { sidebar } = useAppSettings()
+
+// Filter nav items by workspace permissions
+const filteredNavMenu = computed(() => {
+  return navMenu.map(group => ({
+    ...group,
+    items: group.items.filter((item: any) => isMenuVisible(item.title)),
+  })).filter(group => group.items.length > 0)
+})
 </script>
 
 <template>
@@ -46,7 +55,7 @@ const { sidebar } = useAppSettings()
       <LayoutSidebarNavHeader :teams="teams" />
     </SidebarHeader>
     <SidebarContent>
-      <SidebarGroup v-for="(nav, indexGroup) in navMenu" :key="indexGroup">
+      <SidebarGroup v-for="(nav, indexGroup) in filteredNavMenu" :key="indexGroup">
         <SidebarGroupLabel v-if="nav.heading">
           {{ nav.heading }}
         </SidebarGroupLabel>
