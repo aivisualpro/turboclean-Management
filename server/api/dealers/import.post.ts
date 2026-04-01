@@ -4,7 +4,14 @@ import { DealersMapper } from '../../utils/sync-mapper'
 
 export default defineEventHandler(async (event) => {
   try {
-    const { dealers } = await readBody(event)
+    // Read body manually to bypass h3's default 1MB payload limit
+    const rawBody = await new Promise<string>((resolve, reject) => {
+      let data = ''
+      event.node.req.on('data', chunk => { data += chunk })
+      event.node.req.on('end', () => resolve(data))
+      event.node.req.on('error', reject)
+    })
+    const { dealers } = JSON.parse(rawBody)
     
     if (!dealers || !Array.isArray(dealers)) {
       throw createError({ statusCode: 400, statusMessage: 'Invalid or missing dealers array' })
