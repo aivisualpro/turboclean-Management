@@ -66,6 +66,7 @@
     "@vueuse/math": "^12.8.2",
     "@vueuse/nuxt": "^12.8.2",
     "baseline-browser-mapping": "^2.9.19",
+    "caniuse-lite": "^1.0.30001784",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",

@@ -46,6 +46,7 @@ async function callAppSheet(tableName: string, payload: AppSheetRequest): Promis
         'ApplicationAccessKey': APPSHEET_ACCESS_KEY,
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30_000),
     })
 
     if (!response.ok) {

@@ -39,13 +39,15 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 404, statusMessage: 'Work Order not found' })
     }
 
+    const finalDoc = result.value || result;
+
     // Fire-and-forget background tasks (AppSheet sync + Invoice Propagation)
     ;(async () => {
       try {
         // 1. AppSheet Sync
         const { appSheetEdit } = await import('../../utils/appsheet')
         const { WorkOrdersMapper } = await import('../../utils/sync-mapper')
-        appSheetEdit('WorkOrders', [WorkOrdersMapper.toAppSheet(result)]).catch(err => {
+        appSheetEdit('WorkOrders', [WorkOrdersMapper.toAppSheet(finalDoc)]).catch(err => {
           console.error('[AppSheet Sync Error] Failed to sync WorkOrder update:', err)
         })
 
@@ -59,17 +61,17 @@ export default defineEventHandler(async (event) => {
           const nextLineItems = inv.lineItems.map((li: any) => {
             if (li.workOrderId === id) {
               updatedLineItems = true
-              const svcName = result.dealerServiceId || li.serviceName
+              const svcName = finalDoc.dealerServiceId || li.serviceName
               return {
                 ...li,
-                amount: Number(result.amount) || 0,
-                tax: Number(result.tax) || 0,
-                total: Number(result.total) || 0,
-                stockNumber: result.stockNumber || '',
-                poNumber: result.poNumber || '',
-                vin: result.vin || '',
+                amount: Number(finalDoc.amount) || 0,
+                tax: Number(finalDoc.tax) || 0,
+                total: Number(finalDoc.total) || 0,
+                stockNumber: finalDoc.stockNumber || '',
+                poNumber: finalDoc.poNumber || '',
+                vin: finalDoc.vin || '',
                 serviceName: svcName,
-                description: `${svcName} – Stock# ${result.stockNumber || 'N/A'} (PO#: ${result.poNumber || 'N/A'}) (VIN: ${result.vin || 'N/A'})`
+                description: `${svcName} – Stock# ${finalDoc.stockNumber || 'N/A'} (PO#: ${finalDoc.poNumber || 'N/A'}) (VIN: ${finalDoc.vin || 'N/A'})`
               }
             }
             return li

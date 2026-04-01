@@ -201,7 +201,7 @@ function openEditModal(row: any) {
     id: row.id,
     date: row.date ? new Date(row.date).toISOString().slice(0, 10) : '',
     stockNumber: row.stockNumber || '',
-    poNumber: row.poNumber || '',
+    poNumber: String(row.poNumber || ''),
     vin: row.vin || '',
     dealerServiceId: row.dealerServiceId || row.rawServiceId || '',
     amount: row.amount || 0,
@@ -462,97 +462,99 @@ async function handleGenerate(type: 'daily' | 'weekly') {
           <button @click="selectAll" class="text-xs text-primary hover:underline">Clear</button>
         </div>
 
-        <div class="flex-1 overflow-y-auto p-2" v-if="!treeLoading || treeData.length > 0">
+        <ClientOnly>
+          <div class="flex-1 overflow-y-auto p-2" v-if="!treeLoading || treeData.length > 0">
           
-          <!-- All Node -->
-          <div
-            @click="selectAll"
-            class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm mb-1 transition-colors"
-            :class="!activeFilter.dealerId ? 'bg-primary text-primary-foreground font-medium shadow-sm' : 'hover:bg-muted'"
-          >
-            <div class="flex items-center gap-2">
-              <Folder class="size-4" :class="!activeFilter.dealerId ? 'text-primary-foreground/80' : 'text-muted-foreground'" />
-              <span>All Dealers</span>
-            </div>
-          </div>
-
-          <!-- Tree Dealers -->
-          <div v-for="dealer in treeData" :key="dealer.dealerId">
+            <!-- All Node -->
             <div
-              class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors group"
-              :class="activeFilter.dealerId === dealer.dealerId && !activeFilter.dateStart ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'"
-              @click="selectDealer(dealer)"
+              @click="selectAll"
+              class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm mb-1 transition-colors"
+              :class="!activeFilter.dealerId ? 'bg-primary text-primary-foreground font-medium shadow-sm' : 'hover:bg-muted'"
             >
-              <div class="flex items-center gap-1.5 overflow-hidden">
-                <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20" @click.stop="toggleSet(expandedDealers, dealer.dealerId)">
-                  <ChevronDown v-if="expandedDealers.has(dealer.dealerId)" class="size-3.5" />
-                  <ChevronRight v-else class="size-3.5" />
-                </button>
-                <Folder class="size-3.5" :class="activeFilter.dealerId === dealer.dealerId && !activeFilter.dateStart ? 'text-primary' : 'text-muted-foreground'" />
-                <span class="truncate font-semibold">{{ dealer.dealerName }}</span>
+              <div class="flex items-center gap-2">
+                <Folder class="size-4" :class="!activeFilter.dealerId ? 'text-primary-foreground/80' : 'text-muted-foreground'" />
+                <span>All Dealers</span>
               </div>
-              <span class="text-[10px] tabular-nums font-mono opacity-60 shrink-0 select-none">
-                <span class="opacity-70 mr-1.5">({{ dealer.count }})</span>{{ fmt(dealer.totalAmount) }}
-              </span>
             </div>
 
-            <!-- Years -->
-            <div v-if="expandedDealers.has(dealer.dealerId)" class="pl-5 relative before:absolute before:inset-y-0 before:left-3.5 before:w-px before:bg-border/60">
-              <div v-for="yr in dealer.years" :key="yr.year">
-                <div
-                  class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors"
-                  :class="activeFilter.dateStart?.startsWith(yr.year.toString()) && activeFilter.dateEnd?.endsWith('12-31T23:59:59.999Z') ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'"
-                  @click="selectYear(dealer, yr)"
-                >
-                  <div class="flex items-center gap-1.5">
-                    <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20" @click.stop="toggleSet(expandedYears, `${dealer.dealerId}-${yr.year}`)">
-                      <ChevronDown v-if="expandedYears.has(`${dealer.dealerId}-${yr.year}`)" class="size-3.5" />
-                      <ChevronRight v-else class="size-3.5" />
-                    </button>
-                    <CalendarIcon class="size-3.5 text-muted-foreground" />
-                    <span>{{ yr.year }}</span>
-                  </div>
-                  <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none">
-                    <span class="opacity-70 mr-1.5">({{ yr.count }})</span>{{ fmt(yr.totalAmount) }}
-                  </span>
+            <!-- Tree Dealers -->
+            <div v-for="dealer in treeData" :key="dealer.dealerId">
+              <div
+                class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors group"
+                :class="activeFilter.dealerId === dealer.dealerId && !activeFilter.dateStart ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'"
+                @click="selectDealer(dealer)"
+              >
+                <div class="flex items-center gap-1.5 overflow-hidden">
+                  <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20" @click.stop="toggleSet(expandedDealers, dealer.dealerId)">
+                    <ChevronDown v-if="expandedDealers.has(dealer.dealerId)" class="size-3.5" />
+                    <ChevronRight v-else class="size-3.5" />
+                  </button>
+                  <Folder class="size-3.5" :class="activeFilter.dealerId === dealer.dealerId && !activeFilter.dateStart ? 'text-primary' : 'text-muted-foreground'" />
+                  <span class="truncate font-semibold">{{ dealer.dealerName }}</span>
                 </div>
+                <span class="text-[10px] tabular-nums font-mono opacity-60 shrink-0 select-none">
+                  <span class="opacity-70 mr-1.5">({{ dealer.count }})</span>{{ fmt(dealer.totalAmount) }}
+                </span>
+              </div>
 
-                <!-- Months -->
-                <div v-if="expandedYears.has(`${dealer.dealerId}-${yr.year}`)" class="pl-5 relative before:absolute before:inset-y-0 before:left-3.5 before:w-px before:bg-border/60">
-                  <div v-for="mo in yr.months" :key="mo.month">
-                    <div
-                      class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors"
-                      :class="activeFilter.dateStart?.startsWith(`${yr.year}-${mo.monthNumber.toString().padStart(2, '0')}`) && !activeFilter.dateEnd?.startsWith(activeFilter.dateStart?.slice(0, 10) || '') ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'"
-                      @click="selectMonth(dealer, yr, mo)"
-                    >
-                      <div class="flex items-center gap-1.5">
-                        <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20" @click.stop="toggleSet(expandedMonths, `${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)">
-                          <ChevronDown v-if="expandedMonths.has(`${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)" class="size-3.5" />
-                          <ChevronRight v-else class="size-3.5" />
-                        </button>
-                        <CalendarDays class="size-3.5 text-muted-foreground" />
-                        <span>{{ mo.month }}</span>
-                      </div>
-                      <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none">
-                        <span class="opacity-70 mr-1.5">({{ mo.count }})</span>{{ fmt(mo.totalAmount) }}
-                      </span>
+              <!-- Years -->
+              <div v-if="expandedDealers.has(dealer.dealerId)" class="pl-5 relative before:absolute before:inset-y-0 before:left-3.5 before:w-px before:bg-border/60">
+                <div v-for="yr in dealer.years" :key="yr.year">
+                  <div
+                    class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors"
+                    :class="activeFilter.dateStart?.startsWith(yr.year.toString()) && activeFilter.dateEnd?.endsWith('12-31T23:59:59.999Z') ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'"
+                    @click="selectYear(dealer, yr)"
+                  >
+                    <div class="flex items-center gap-1.5">
+                      <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20" @click.stop="toggleSet(expandedYears, `${dealer.dealerId}-${yr.year}`)">
+                        <ChevronDown v-if="expandedYears.has(`${dealer.dealerId}-${yr.year}`)" class="size-3.5" />
+                        <ChevronRight v-else class="size-3.5" />
+                      </button>
+                      <CalendarIcon class="size-3.5 text-muted-foreground" />
+                      <span>{{ yr.year }}</span>
                     </div>
+                    <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none">
+                      <span class="opacity-70 mr-1.5">({{ yr.count }})</span>{{ fmt(yr.totalAmount) }}
+                    </span>
+                  </div>
 
-                    <!-- Dates -->
-                    <div v-if="expandedMonths.has(`${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)" class="pl-6 relative before:absolute before:inset-y-0 before:left-3.5 before:w-px before:bg-border/60">
+                  <!-- Months -->
+                  <div v-if="expandedYears.has(`${dealer.dealerId}-${yr.year}`)" class="pl-5 relative before:absolute before:inset-y-0 before:left-3.5 before:w-px before:bg-border/60">
+                    <div v-for="mo in yr.months" :key="mo.month">
                       <div
-                        v-for="dt in mo.dates" :key="dt.date"
-                        @click="selectDate(dealer, yr, mo, dt)"
                         class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors"
-                        :class="activeFilter.dateStart?.startsWith(dt.date) ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground/80'"
+                        :class="activeFilter.dateStart?.startsWith(`${yr.year}-${mo.monthNumber.toString().padStart(2, '0')}`) && !activeFilter.dateEnd?.startsWith(activeFilter.dateStart?.slice(0, 10) || '') ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'"
+                        @click="selectMonth(dealer, yr, mo)"
                       >
-                        <div class="flex items-center gap-2">
-                          <CalendarClock class="size-3 text-muted-foreground" />
-                          <span>{{ fmtDate(dt.date) }}</span>
+                        <div class="flex items-center gap-1.5">
+                          <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20" @click.stop="toggleSet(expandedMonths, `${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)">
+                            <ChevronDown v-if="expandedMonths.has(`${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)" class="size-3.5" />
+                            <ChevronRight v-else class="size-3.5" />
+                          </button>
+                          <CalendarDays class="size-3.5 text-muted-foreground" />
+                          <span>{{ mo.month }}</span>
                         </div>
                         <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none">
-                          <span class="opacity-70 mr-1.5">({{ dt.count }})</span>{{ fmt(dt.totalAmount) }}
+                          <span class="opacity-70 mr-1.5">({{ mo.count }})</span>{{ fmt(mo.totalAmount) }}
                         </span>
+                      </div>
+
+                      <!-- Dates -->
+                      <div v-if="expandedMonths.has(`${dealer.dealerId}-${yr.year}-${mo.monthNumber}`)" class="pl-6 relative before:absolute before:inset-y-0 before:left-3.5 before:w-px before:bg-border/60">
+                        <div
+                          v-for="dt in mo.dates" :key="dt.date"
+                          @click="selectDate(dealer, yr, mo, dt)"
+                          class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors"
+                          :class="activeFilter.dateStart?.startsWith(dt.date) ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted text-foreground/80'"
+                        >
+                          <div class="flex items-center gap-2">
+                            <CalendarClock class="size-3 text-muted-foreground" />
+                            <span>{{ fmtDate(dt.date) }}</span>
+                          </div>
+                          <span class="text-[10px] tabular-nums font-mono opacity-50 shrink-0 select-none">
+                            <span class="opacity-70 mr-1.5">({{ dt.count }})</span>{{ fmt(dt.totalAmount) }}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -560,11 +562,17 @@ async function handleGenerate(type: 'daily' | 'weekly') {
               </div>
             </div>
           </div>
-        </div>
 
-        <div v-else class="flex-1 flex items-center justify-center p-4">
-          <Loader2 class="size-5 animate-spin text-muted-foreground/50" />
-        </div>
+          <div v-else class="flex-1 flex items-center justify-center p-4">
+            <Loader2 class="size-5 animate-spin text-muted-foreground/50" />
+          </div>
+
+          <template #fallback>
+            <div class="flex-1 flex items-center justify-center p-4">
+              <Loader2 class="size-5 animate-spin text-muted-foreground/50" />
+            </div>
+          </template>
+        </ClientOnly>
       </aside>
 
       <!-- ─── Main Details Array ──────────────────────────────────────────────── -->
@@ -574,10 +582,17 @@ async function handleGenerate(type: 'daily' | 'weekly') {
         <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b bg-muted/10 shrink-0">
           <div class="flex items-center px-4 py-3 gap-3 w-full sm:w-auto overflow-hidden">
             <span class="truncate font-semibold text-sm">{{ activeFilter.label }}</span>
-            <Badge variant="secondary" class="font-mono text-[10px] shrink-0">
-              <span v-if="loading" class="animate-pulse">...</span>
-              <span v-else>{{ hasMore ? workOrders.length + '+' : workOrders.length }} orders</span>
-            </Badge>
+            <ClientOnly>
+              <Badge variant="secondary" class="font-mono text-[10px] shrink-0">
+                <span v-if="loading" class="animate-pulse">...</span>
+                <span v-else>{{ hasMore ? workOrders.length + '+' : workOrders.length }} orders</span>
+              </Badge>
+              <template #fallback>
+                <Badge variant="secondary" class="font-mono text-[10px] shrink-0">
+                  <span class="animate-pulse">...</span>
+                </Badge>
+              </template>
+            </ClientOnly>
           </div>
 
           <div class="flex items-center px-2">
@@ -650,64 +665,76 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                 <TableHead class="w-10"></TableHead>
               </TableRow>
             </TableHeader>
-            <TableBody>
-              <TableRow v-for="wo in workOrders" :key="wo.id" class="cursor-pointer hover:bg-muted/50 transition-colors">
-                <TableCell class="font-medium text-xs whitespace-nowrap">{{ fmtDate(wo.date) }}</TableCell>
-                <TableCell class="text-xs">{{ wo.stockNumber }}</TableCell>
-                <TableCell class="text-xs">{{ wo.poNumber || '—' }}</TableCell>
-                <TableCell @click.stop>
-                  <div v-if="wo.upload" class="w-9 h-9 rounded bg-muted border overflow-hidden hover:opacity-80 transition-opacity cursor-pointer" @click="openWoLightbox(getAppSheetImageUrl(wo.upload)!)">
-                    <img :src="getAppSheetImageUrl(wo.upload)!" class="w-full h-full object-cover" loading="lazy" />
-                  </div>
-                  <div v-else class="w-9 h-9 rounded bg-muted/50 border border-dashed flex items-center justify-center">
-                    <Icon name="lucide:image-off" class="size-3.5 text-muted-foreground/40" />
-                  </div>
-                </TableCell>
-                <TableCell class="text-xs font-mono uppercase text-muted-foreground">{{ wo.vin }}</TableCell>
-                <TableCell v-if="!activeFilter.dealerId" class="text-xs truncate max-w-[120px] font-semibold">{{ wo.dealerName }}</TableCell>
-                <TableCell class="text-xs truncate max-w-[120px]">
-                  <span>{{ wo.dealerServiceId }}</span>
-                </TableCell>
-                <TableCell class="text-xs text-muted-foreground truncate max-w-[150px]" :title="wo.notes">
-                  {{ wo.notes || '—' }}
-                </TableCell>
-                <TableCell class="text-right text-xs tabular-nums">{{ fmt(wo.amount) }}</TableCell>
-                <TableCell class="text-right text-xs tabular-nums text-muted-foreground">{{ fmt(wo.tax) }}</TableCell>
-                <TableCell class="text-right text-xs tabular-nums font-bold">{{ fmt(wo.total) }}</TableCell>
-                <TableCell>
-                  <Badge :variant="wo.isInvoiced ? 'default' : 'outline'" :class="wo.isInvoiced ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' : 'text-muted-foreground'" class="text-[10px]">
-                    {{ wo.isInvoiced ? 'Invoiced' : 'Pending' }}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <Button v-if="canEditWO" variant="ghost" size="icon" class="h-7 w-7 hover:bg-muted text-muted-foreground hover:text-foreground" @click.stop="openEditModal(wo)">
-                    <Edit2 class="size-3.5" />
-                  </Button>
-                </TableCell>
-              </TableRow>
+            <ClientOnly>
+              <TableBody>
+                <TableRow v-for="wo in workOrders" :key="wo.id" class="cursor-pointer hover:bg-muted/50 transition-colors">
+                  <TableCell class="font-medium text-xs whitespace-nowrap">{{ fmtDate(wo.date) }}</TableCell>
+                  <TableCell class="text-xs">{{ wo.stockNumber }}</TableCell>
+                  <TableCell class="text-xs">{{ wo.poNumber || '—' }}</TableCell>
+                  <TableCell @click.stop>
+                    <div v-if="wo.upload" class="w-9 h-9 rounded bg-muted border overflow-hidden hover:opacity-80 transition-opacity cursor-pointer" @click="openWoLightbox(getAppSheetImageUrl(wo.upload)!)">
+                      <img :src="getAppSheetImageUrl(wo.upload)!" class="w-full h-full object-cover" loading="lazy" />
+                    </div>
+                    <div v-else class="w-9 h-9 rounded bg-muted/50 border border-dashed flex items-center justify-center">
+                      <Icon name="lucide:image-off" class="size-3.5 text-muted-foreground/40" />
+                    </div>
+                  </TableCell>
+                  <TableCell class="text-xs font-mono uppercase text-muted-foreground">{{ wo.vin }}</TableCell>
+                  <TableCell v-if="!activeFilter.dealerId" class="text-xs truncate max-w-[120px] font-semibold">{{ wo.dealerName }}</TableCell>
+                  <TableCell class="text-xs truncate max-w-[120px]">
+                    <span>{{ wo.dealerServiceId }}</span>
+                  </TableCell>
+                  <TableCell class="text-xs text-muted-foreground truncate max-w-[150px]" :title="wo.notes">
+                    {{ wo.notes || '—' }}
+                  </TableCell>
+                  <TableCell class="text-right text-xs tabular-nums">{{ fmt(wo.amount) }}</TableCell>
+                  <TableCell class="text-right text-xs tabular-nums text-muted-foreground">{{ fmt(wo.tax) }}</TableCell>
+                  <TableCell class="text-right text-xs tabular-nums font-bold">{{ fmt(wo.total) }}</TableCell>
+                  <TableCell>
+                    <Badge :variant="wo.isInvoiced ? 'default' : 'outline'" :class="wo.isInvoiced ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' : 'text-muted-foreground'" class="text-[10px]">
+                      {{ wo.isInvoiced ? 'Invoiced' : 'Pending' }}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Button v-if="canEditWO" variant="ghost" size="icon" class="h-7 w-7 hover:bg-muted text-muted-foreground hover:text-foreground" @click.stop="openEditModal(wo)">
+                      <Edit2 class="size-3.5" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
 
-              <TableRow v-if="loading && workOrders.length === 0">
-                <TableCell :colspan="12" class="text-center py-10">
-                  <Loader2 class="size-6 animate-spin text-muted-foreground/50 mx-auto" />
-                </TableCell>
-              </TableRow>
-              <TableRow v-if="!loading && workOrders.length === 0">
-                <TableCell :colspan="12" class="text-center py-10">
-                  <FileText class="size-10 text-muted-foreground/20 mx-auto mb-3" />
-                  <p class="text-sm font-medium text-foreground">No work orders found</p>
-                  <p class="text-xs text-muted-foreground mt-1">Try adjusting your filters or selecting a different date range.</p>
-                </TableCell>
-              </TableRow>
+                <TableRow v-if="loading && workOrders.length === 0">
+                  <TableCell :colspan="12" class="text-center py-10">
+                    <Loader2 class="size-6 animate-spin text-muted-foreground/50 mx-auto" />
+                  </TableCell>
+                </TableRow>
+                <TableRow v-if="!loading && workOrders.length === 0">
+                  <TableCell :colspan="12" class="text-center py-10">
+                    <FileText class="size-10 text-muted-foreground/20 mx-auto mb-3" />
+                    <p class="text-sm font-medium text-foreground">No work orders found</p>
+                    <p class="text-xs text-muted-foreground mt-1">Try adjusting your filters or selecting a different date range.</p>
+                  </TableCell>
+                </TableRow>
 
-              <!-- Load More Sentinel -->
-              <tr v-if="hasMore && workOrders.length > 0" v-intersect="fetchWorkOrders" class="h-10">
-                <td :colspan="12" class="text-center">
-                  <div v-if="loading" class="flex justify-center py-4">
-                    <Loader2 class="size-4 animate-spin text-muted-foreground/50" />
-                  </div>
-                </td>
-              </tr>
-            </TableBody>
+                <!-- Load More Sentinel -->
+                <tr v-if="hasMore && workOrders.length > 0" v-intersect="fetchWorkOrders" class="h-10">
+                  <td :colspan="12" class="text-center">
+                    <div v-if="loading" class="flex justify-center py-4">
+                      <Loader2 class="size-4 animate-spin text-muted-foreground/50" />
+                    </div>
+                  </td>
+                </tr>
+              </TableBody>
+
+              <template #fallback>
+                <TableBody>
+                  <TableRow>
+                    <TableCell :colspan="12" class="text-center py-10">
+                      <Loader2 class="size-6 animate-spin text-muted-foreground/50 mx-auto" />
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </template>
+            </ClientOnly>
           </table>
         </div>
       </main>
@@ -739,7 +766,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
 
           <div class="space-y-2">
             <Label>PO Number</Label>
-            <Input v-model="editForm.poNumber" />
+            <Input type="text" v-model="editForm.poNumber" />
           </div>
 
           <div class="space-y-2">
