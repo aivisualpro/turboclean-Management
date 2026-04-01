@@ -5,16 +5,20 @@ import { WorkOrdersMapper } from '../../utils/sync-mapper'
 
 export default defineEventHandler(async (event) => {
   try {
-    // Read body manually to bypass h3's default 1MB payload limit
-    const rawBody = await new Promise<string>((resolve, reject) => {
-      let data = ''
-      event.node.req.on('data', chunk => {
-        data += chunk
+    let body;
+    if ((event.node.req as any).body) {
+      body = typeof (event.node.req as any).body === 'string' 
+        ? JSON.parse((event.node.req as any).body) 
+        : (event.node.req as any).body;
+    } else {
+      const rawBody = await new Promise<string>((resolve, reject) => {
+        let data = ''
+        event.node.req.on('data', chunk => { data += chunk })
+        event.node.req.on('end', () => resolve(data))
+        event.node.req.on('error', reject)
       })
-      event.node.req.on('end', () => resolve(data))
-      event.node.req.on('error', reject)
-    })
-    const body = JSON.parse(rawBody)
+      body = JSON.parse(rawBody)
+    }
     const workOrders = body.workOrders
     
     if (!workOrders || !Array.isArray(workOrders)) {

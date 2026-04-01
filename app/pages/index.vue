@@ -104,7 +104,7 @@ function applyPreset(preset: string) {
       break
     }
     case 'last-3-months': {
-      const threeMonthsAgo = todayDate.subtract({ months: 3 })
+      const threeMonthsAgo = todayDate.subtract({ months: 2 })
       dateRange.value = {
         start: new CalendarDate(threeMonthsAgo.year, threeMonthsAgo.month, 1),
         end: new CalendarDate(y, m, getLastDayOfMonth(y, m)),

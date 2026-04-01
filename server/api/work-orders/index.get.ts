@@ -119,6 +119,10 @@ export default defineEventHandler(async (event) => {
         { vin: { $regex: search, $options: 'i' } },
         { notes: { $regex: search, $options: 'i' } }
       ]
+
+      if (search.length === 24 && /^[0-9a-fA-F]{24}$/.test(search)) {
+        matchQuery.$or.push({ _id: new ObjectId(search) })
+      }
       
       if (!isNaN(Number(search))) {
         matchQuery.$or.push(

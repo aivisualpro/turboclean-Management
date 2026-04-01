@@ -341,7 +341,7 @@ async function handleExport() {
     const headers = ['Object ID', 'Date', 'Stock Number', 'PO Number', 'VIN', 'Dealer', 'Service', 'Amount', 'Tax', 'Total', 'Notes', 'Is Invoiced', 'Image', 'Last Updated By']
     const rows = dataToExport.map((wo: any) => [
       wo.id, wo.date ? new Date(wo.date).toLocaleDateString() : '', wo.stockNumber, wo.poNumber || '', wo.vin,
-      wo.dealerName, wo.dealerServiceId, wo.amount, wo.tax, wo.total,
+      wo.dealerId, wo.rawServiceId, wo.amount, wo.tax, wo.total,
       `"${(wo.notes || '').replace(/"/g, '""')}"`, wo.isInvoiced ? 'Yes' : 'No', wo.upload || '', wo.lastUpdatedBy || ''
     ])
 
