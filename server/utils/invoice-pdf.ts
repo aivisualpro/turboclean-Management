@@ -25,6 +25,7 @@ export function generateInvoiceHtml(doc: any): string {
     <tr style="background:${bg};border-bottom:1px solid #e2e8f0">
       <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif">${formattedDate(li.date || doc.date)}</td>
       <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif">${li.stockNumber || ''}</td>
+      <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif">${li.poNumber || ''}</td>
       <td style="padding:8px 8px;color:#475569;font-size:11px;font-family:'Inter',monospace">${li.vin || ''}</td>
       <td style="padding:8px 8px;color:#0f172a;font-size:11px;font-family:'Inter',Arial,sans-serif;font-weight:600;text-transform:uppercase">${li.serviceName || li.description || ''}</td>
       <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif;text-align:right">${fmtMoney(li.unitPrice || 0)}</td>
@@ -119,9 +120,10 @@ export function generateInvoiceHtml(doc: any): string {
             <thead>
               <tr style="background:#0f172a;color:#fbbf24">
                 <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:12%;letter-spacing:0.5px">DATE</th>
-                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:13%;letter-spacing:0.5px">STOCK #</th>
-                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:19%;letter-spacing:0.5px">VIN</th>
-                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:24%;letter-spacing:0.5px">CLEAN TYPE</th>
+                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:10%;letter-spacing:0.5px">STOCK #</th>
+                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:10%;letter-spacing:0.5px">PO #</th>
+                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:16%;letter-spacing:0.5px">VIN</th>
+                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:20%;letter-spacing:0.5px">CLEAN TYPE</th>
                 <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:11%;letter-spacing:0.5px">AMOUNT</th>
                 <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:10%;letter-spacing:0.5px">TAX 6.35%</th>
                 <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:11%;letter-spacing:0.5px">TOTAL</th>

@@ -109,14 +109,20 @@ const availableServices = computed(() => {
 const filteredServices = computed(() => {
   const q = serviceSearch.value.trim().toLowerCase()
   if (!q) return availableServices.value
-  return availableServices.value.filter(s => s.service.toLowerCase().includes(q))
+  return availableServices.value.filter(s => 
+    (s.id || '').toLowerCase().includes(q) ||
+    (s.service || '').toLowerCase().includes(q)
+  )
 })
 
 // Show "Add new" option if search text doesn't exactly match any existing service name
 const showAddNew = computed(() => {
   const q = serviceSearch.value.trim()
   if (!q) return false
-  return !services.value.some(s => s.service.toLowerCase() === q.toLowerCase())
+  return !services.value.some(s => 
+    (s.service || '').toLowerCase() === q.toLowerCase() ||
+    (s.id || '').toLowerCase() === q.toLowerCase()
+  )
 })
 
 function openDropdown() {

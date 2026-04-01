@@ -19,6 +19,7 @@ export default defineEventHandler(async (event) => {
       dealer: wo.dealer?.length === 24 ? new ObjectId(wo.dealer) : wo.dealer,
       date: typeof wo.date === 'string' ? new Date(wo.date) : wo.date,
       stockNumber: wo.stockNumber || '',
+      poNumber: wo.poNumber || '',
       vin: wo.vin || '',
       dealerServiceId: wo.dealerServiceId?.length === 24 ? new ObjectId(wo.dealerServiceId) : wo.dealerServiceId,
       amount: Number(wo.amount) || 0,

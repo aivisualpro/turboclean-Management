@@ -115,6 +115,7 @@ export default defineEventHandler(async (event) => {
 
       matchQuery.$or = [
         { stockNumber: { $regex: search, $options: 'i' } },
+        { poNumber: { $regex: search, $options: 'i' } },
         { vin: { $regex: search, $options: 'i' } },
         { notes: { $regex: search, $options: 'i' } }
       ]
@@ -158,6 +159,7 @@ export default defineEventHandler(async (event) => {
       const sortFieldMap: Record<string, string> = {
         date: 'date',
         stockNumber: 'stockNumber',
+        poNumber: 'poNumber',
         vin: 'vin',
         amount: 'amount',
         tax: 'tax',
@@ -201,6 +203,7 @@ export default defineEventHandler(async (event) => {
         rawServiceId,
         date: wo.date ? new Date(wo.date).toISOString() : new Date().toISOString(),
         stockNumber: wo.stockNumber || '',
+        poNumber: wo.poNumber || '',
         vin: wo.vin || '',
         dealerName,
         dealerServiceId: serviceName,

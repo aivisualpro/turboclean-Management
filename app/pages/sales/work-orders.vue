@@ -184,6 +184,7 @@ const editForm = ref({
   id: '',
   date: '',
   stockNumber: '',
+  poNumber: '',
   vin: '',
   dealerServiceId: '',
   amount: 0,
@@ -200,6 +201,7 @@ function openEditModal(row: any) {
     id: row.id,
     date: row.date ? new Date(row.date).toISOString().slice(0, 10) : '',
     stockNumber: row.stockNumber || '',
+    poNumber: row.poNumber || '',
     vin: row.vin || '',
     dealerServiceId: row.dealerServiceId || row.rawServiceId || '',
     amount: row.amount || 0,
@@ -336,9 +338,9 @@ async function handleExport() {
     const dataToExport = res.workOrders || []
     if (dataToExport.length === 0) return toast.error('No work orders found to export')
 
-    const headers = ['Object ID', 'Date', 'Stock Number', 'VIN', 'Dealer', 'Service', 'Amount', 'Tax', 'Total', 'Notes', 'Is Invoiced', 'Image', 'Last Updated By']
+    const headers = ['Object ID', 'Date', 'Stock Number', 'PO Number', 'VIN', 'Dealer', 'Service', 'Amount', 'Tax', 'Total', 'Notes', 'Is Invoiced', 'Image', 'Last Updated By']
     const rows = dataToExport.map((wo: any) => [
-      wo.id, wo.date ? new Date(wo.date).toLocaleDateString() : '', wo.stockNumber, wo.vin,
+      wo.id, wo.date ? new Date(wo.date).toLocaleDateString() : '', wo.stockNumber, wo.poNumber || '', wo.vin,
       wo.dealerName, wo.dealerServiceId, wo.amount, wo.tax, wo.total,
       `"${(wo.notes || '').replace(/"/g, '""')}"`, wo.isInvoiced ? 'Yes' : 'No', wo.upload || '', wo.lastUpdatedBy || ''
     ])
@@ -616,6 +618,9 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                 <TableHead class="cursor-pointer select-none" @click="toggleSort('stockNumber')">
                   <div class="flex items-center gap-1">Stock # <Icon :name="sortIcon('stockNumber')" class="size-3 text-muted-foreground" /></div>
                 </TableHead>
+                <TableHead class="cursor-pointer select-none" @click="toggleSort('poNumber')">
+                  <div class="flex items-center gap-1">PO # <Icon :name="sortIcon('poNumber')" class="size-3 text-muted-foreground" /></div>
+                </TableHead>
                 <TableHead class="w-16">Photo</TableHead>
                 <TableHead class="cursor-pointer select-none" @click="toggleSort('vin')">
                   <div class="flex items-center gap-1">VIN <Icon :name="sortIcon('vin')" class="size-3 text-muted-foreground" /></div>
@@ -649,6 +654,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
               <TableRow v-for="wo in workOrders" :key="wo.id" class="cursor-pointer hover:bg-muted/50 transition-colors">
                 <TableCell class="font-medium text-xs whitespace-nowrap">{{ fmtDate(wo.date) }}</TableCell>
                 <TableCell class="text-xs">{{ wo.stockNumber }}</TableCell>
+                <TableCell class="text-xs">{{ wo.poNumber || '—' }}</TableCell>
                 <TableCell @click.stop>
                   <div v-if="wo.upload" class="w-9 h-9 rounded bg-muted border overflow-hidden hover:opacity-80 transition-opacity cursor-pointer" @click="openWoLightbox(getAppSheetImageUrl(wo.upload)!)">
                     <img :src="getAppSheetImageUrl(wo.upload)!" class="w-full h-full object-cover" loading="lazy" />
@@ -729,6 +735,11 @@ async function handleGenerate(type: 'daily' | 'weekly') {
           <div class="space-y-2">
             <Label>Stock Number</Label>
             <Input v-model="editForm.stockNumber" />
+          </div>
+
+          <div class="space-y-2">
+            <Label>PO Number</Label>
+            <Input v-model="editForm.poNumber" />
           </div>
 
           <div class="space-y-2">

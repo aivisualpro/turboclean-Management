@@ -271,6 +271,7 @@ function toSalesDoc(inv: any) {
       tax: li.tax || li.taxTotal || 0,
       date: li.date,
       stockNumber: li.stockNumber,
+      poNumber: li.poNumber || '',
       vin: li.vin,
       serviceName: li.serviceName || li.serviceId,
     })),

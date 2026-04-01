@@ -26,7 +26,8 @@ function filterBySearch(list: any[]) {
   const q = debouncedSearch.value?.trim()?.toLowerCase()
   if (!q) return list
   return list.filter(s =>
-    (s.service || '').toLowerCase().includes(q)
+    (s.id || '').toLowerCase().includes(q)
+    || (s.service || '').toLowerCase().includes(q)
     || (s.description || '').toLowerCase().includes(q)
   )
 }

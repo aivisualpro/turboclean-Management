@@ -46,8 +46,9 @@ function filterBySearch(list: Dealer[]) {
   const q = debouncedSearch.value?.trim()?.toLowerCase()
   if (!q) return list
   return list.filter(d =>
-    d.dealerName.toLowerCase().includes(q)
-    || d.address.toLowerCase().includes(q)
+    (d.id || '').toLowerCase().includes(q)
+    || (d.dealerName || '').toLowerCase().includes(q)
+    || (d.address || '').toLowerCase().includes(q)
     || d.contacts.some(c =>
       c.name.toLowerCase().includes(q)
       || c.emails.some(e => e.toLowerCase().includes(q))

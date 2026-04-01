@@ -23,6 +23,7 @@ export default defineEventHandler(async (event) => {
     if (body.upload !== undefined) updateData.upload = body.upload
     if (body.vin !== undefined) updateData.vin = body.vin
     if (body.stockNumber !== undefined) updateData.stockNumber = body.stockNumber
+    if (body.poNumber !== undefined) updateData.poNumber = body.poNumber
     if (body.date !== undefined) updateData.date = new Date(body.date)
     
     updateData.lastUpdatedBy = 'Admin' // or extract from session if available
@@ -65,9 +66,10 @@ export default defineEventHandler(async (event) => {
                 tax: Number(result.tax) || 0,
                 total: Number(result.total) || 0,
                 stockNumber: result.stockNumber || '',
+                poNumber: result.poNumber || '',
                 vin: result.vin || '',
                 serviceName: svcName,
-                description: `${svcName} – Stock# ${result.stockNumber || 'N/A'} (VIN: ${result.vin || 'N/A'})`
+                description: `${svcName} – Stock# ${result.stockNumber || 'N/A'} (PO#: ${result.poNumber || 'N/A'}) (VIN: ${result.vin || 'N/A'})`
               }
             }
             return li
