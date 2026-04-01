@@ -33,7 +33,7 @@ export default defineEventHandler(async (event) => {
     if (body.date !== undefined) updateData.date = new Date(body.date)
     
     const session = await import('../../utils/auth').then(m => m.getUserSession(event))
-    updateData.lastUpdatedBy = session?.email || 'Admin'
+    updateData.lastUpdatedBy = session?.id || 'Admin'
     updateData.updatedAt = new Date()
 
     const result = await collection.findOneAndUpdate(
