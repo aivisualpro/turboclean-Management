@@ -19,14 +19,21 @@ export default defineEventHandler(async (event) => {
     if (body.tax !== undefined) updateData.tax = Number(body.tax)
     if (body.total !== undefined) updateData.total = Number(body.total)
     if (body.notes !== undefined) updateData.notes = body.notes
-    if (body.dealerServiceId !== undefined) updateData.dealerServiceId = body.dealerServiceId
+    if (body.dealerServiceId !== undefined) {
+      try {
+        updateData.dealerServiceId = new ObjectId(body.dealerServiceId)
+      } catch {
+        updateData.dealerServiceId = body.dealerServiceId
+      }
+    }
     if (body.upload !== undefined) updateData.upload = body.upload
     if (body.vin !== undefined) updateData.vin = body.vin
     if (body.stockNumber !== undefined) updateData.stockNumber = body.stockNumber
     if (body.poNumber !== undefined) updateData.poNumber = body.poNumber
     if (body.date !== undefined) updateData.date = new Date(body.date)
     
-    updateData.lastUpdatedBy = 'Admin' // or extract from session if available
+    const session = await import('../../utils/auth').then(m => m.getUserSession(event))
+    updateData.lastUpdatedBy = session?.email || 'Admin'
     updateData.updatedAt = new Date()
 
     const result = await collection.findOneAndUpdate(

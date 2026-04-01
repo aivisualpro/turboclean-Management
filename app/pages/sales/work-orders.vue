@@ -194,8 +194,10 @@ const editForm = ref({
   upload: ''
 })
 const savingEdit = ref(false)
+const dealerServices = ref<any[]>([])
+const loadingServices = ref(false)
 
-function openEditModal(row: any) {
+async function openEditModal(row: any) {
   editingWorkOrder.value = row
   editForm.value = {
     id: row.id,
@@ -203,7 +205,7 @@ function openEditModal(row: any) {
     stockNumber: row.stockNumber || '',
     poNumber: String(row.poNumber || ''),
     vin: row.vin || '',
-    dealerServiceId: row.dealerServiceId || row.rawServiceId || '',
+    dealerServiceId: row.rawServiceId || '',
     amount: row.amount || 0,
     tax: row.tax || 0,
     total: row.total || 0,
@@ -211,6 +213,34 @@ function openEditModal(row: any) {
     upload: row.upload || ''
   }
   showEditModal.value = true
+
+  // Fetch this dealer's linked services for the dropdown
+  if (row.dealerId) {
+    loadingServices.value = true
+    try {
+      const dealers = await $fetch<any[]>('/api/dealers')
+      const dealer = dealers.find((d: any) => d.id === row.dealerId)
+      if (dealer?.services) {
+        // Resolve service names
+        const services = await $fetch<any[]>('/api/services')
+        const svcMap = new Map(services.map((s: any) => [s.id, s.service]))
+        dealerServices.value = dealer.services.map((s: any) => ({
+          id: (s.id || s._id || '').toString(),
+          name: svcMap.get(s.service?.toString()) || s.service?.toString() || 'Unknown',
+          amount: s.amount || 0,
+          tax: s.tax || 0,
+          total: s.total || 0,
+        }))
+      } else {
+        dealerServices.value = []
+      }
+    } catch (err) {
+      console.error('Failed to load dealer services:', err)
+      dealerServices.value = []
+    } finally {
+      loadingServices.value = false
+    }
+  }
 }
 
 // Auto calculate total
@@ -775,8 +805,19 @@ async function handleGenerate(type: 'daily' | 'weekly') {
           </div>
 
           <div class="space-y-2">
-            <Label>Service ID / Name</Label>
-            <Input v-model="editForm.dealerServiceId" />
+            <Label>Service</Label>
+            <Select v-model="editForm.dealerServiceId">
+              <SelectTrigger>
+                <SelectValue placeholder="Select a service..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-if="loadingServices" value="_loading" disabled>Loading...</SelectItem>
+                <SelectItem v-for="svc in dealerServices" :key="svc.id" :value="svc.id">
+                  {{ svc.name }}
+                </SelectItem>
+                <SelectItem v-if="!loadingServices && dealerServices.length === 0" value="_none" disabled>No services linked</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div class="space-y-2">
