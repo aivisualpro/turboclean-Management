@@ -8,17 +8,18 @@ export default defineEventHandler(async (event) => {
     const { db } = await connectToDatabase()
     const queryInfo = getQuery(event)
 
+    const isAdmin = session?.role === 'Admin'
     const matchQuery: any = {}
 
     // Session-based dealer filtering
-    if (session && session.registerDealers && session.registerDealers.length > 0) {
+    if (!isAdmin && session && session.registerDealers && session.registerDealers.length > 0) {
       const stringDealers = session.registerDealers
       const objDealers = stringDealers.reduce((acc: any[], id: string) => {
         try { acc.push(new ObjectId(id)); return acc } catch { return acc }
       }, [])
       matchQuery.dealerId = { $in: [...stringDealers, ...objDealers] }
-    } else if (session) {
-      return []
+    } else if (!isAdmin && session) {
+      return { success: true, tree: [] }
     }
 
     // Filter: Status (Paid vs Unpaid)

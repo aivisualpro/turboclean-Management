@@ -44,9 +44,10 @@ export default defineEventHandler(async (event) => {
 
     // Auth Session filtering
     const session = await import('../../utils/auth').then(m => m.getUserSession(event))
+    const isAdmin = session?.role === 'Admin'
     let allowedDealers: any[] = []
 
-    if (session && session.registerDealers && session.registerDealers.length > 0) {
+    if (!isAdmin && session && session.registerDealers && session.registerDealers.length > 0) {
       const stringDealers = session.registerDealers || []
       const objDealers = stringDealers.reduce((acc: any[], id: string) => {
         try { acc.push(new ObjectId(id)); return acc } catch { return acc }
@@ -60,7 +61,7 @@ export default defineEventHandler(async (event) => {
     }
 
     if (dealerFilter) {
-      if (session && session.registerDealers && !session.registerDealers.includes(dealerFilter)) {
+      if (!isAdmin && session && session.registerDealers && !session.registerDealers.includes(dealerFilter)) {
         return { invoices: [], meta: { total: 0, limit, skip, search } }
       }
       const dbDealerQuery: any[] = [dealerFilter]

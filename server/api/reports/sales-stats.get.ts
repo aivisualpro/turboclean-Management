@@ -9,6 +9,7 @@ export default defineEventHandler(async (event) => {
     const toParam = query.to as string | undefined
 
     const session = await getUserSession(event)
+    const isAdmin = session?.role === 'Admin'
     const { db } = await connectToDatabase()
 
     let matchQuery: any = {}
@@ -23,7 +24,7 @@ export default defineEventHandler(async (event) => {
       }
     }
     
-    if (session && session.registerDealers && session.registerDealers.length > 0) {
+    if (!isAdmin && session && session.registerDealers && session.registerDealers.length > 0) {
       const stringDealers = session.registerDealers || []
       const objDealers = stringDealers.reduce((acc: any[], id: string) => {
         try { acc.push(new ObjectId(id)); return acc } catch { return acc }
@@ -36,7 +37,7 @@ export default defineEventHandler(async (event) => {
 
     // Build dealer filter for lookups too
     let dealerQuery: any = {}
-    if (session && session.registerDealers && session.registerDealers.length > 0) {
+    if (!isAdmin && session && session.registerDealers && session.registerDealers.length > 0) {
       const dealerObjIds = session.registerDealers.reduce((acc: any[], id: string) => {
         try { acc.push(new ObjectId(id)); return acc } catch { return acc }
       }, [])

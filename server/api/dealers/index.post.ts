@@ -38,16 +38,17 @@ export default defineEventHandler(async (event) => {
     const result = await collection.insertOne(newDealer)
     const newId = result.insertedId.toString()
 
-    // Immediately grant the creating user access to this dealer if they have a constrained session
+    // 1. Automatically add this dealer to the creating user's permitted list
     if (session && session.id) {
       try {
         const usersCol = db.collection('turboCleanAppUsers')
-        await usersCol.updateOne(
+        const updateResult = await usersCol.updateOne(
           { _id: new ObjectId(session.id) },
           { $addToSet: { registerDealers: newId } }
         )
+        console.log(`[DEALERS POST] Added dealer ${newId} to registerDealers for user ${session.email}. Updated: ${updateResult.modifiedCount}`)
       } catch (err) {
-        console.error('[POST] Failed to append new dealer ID to user permissions:', err)
+        console.error('[DEALERS POST] Failed to append new dealer ID to user permissions:', err)
       }
     }
 
