@@ -68,7 +68,7 @@ export default defineEventHandler(async (event) => {
     const attachments: { filename: string; content: Buffer; contentType?: string }[] = []
 
     if (invoiceType === 'Daily') {
-      // 1. Generate PDF from invoice HTML and attach it
+      // 1. Generate PDF from invoice HTML — MUST be attachment[0]
       try {
         const pdfBuffer = await htmlToPdfBuffer(pdfHtml)
         attachments.push({
@@ -77,7 +77,7 @@ export default defineEventHandler(async (event) => {
           contentType: 'application/pdf',
         })
       } catch (err: any) {
-        console.error('[Invoice Email] PDF generation failed:', err.message)
+        console.error('[Invoice Email] Daily PDF generation failed:', err.message, err.stack)
         // Fallback: attach as HTML if PDF fails
         attachments.push({
           filename: `${invoiceNumber || 'Invoice'}.html`,
@@ -86,11 +86,10 @@ export default defineEventHandler(async (event) => {
         })
       }
 
-      // 2. Fetch all work order upload images for this invoice
+      // 2. Fetch all work order upload images (collected separately to guarantee ordering)
       if (invoiceId) {
         const { db } = await connectToDatabase()
 
-        // Get the invoice to find its line items (which reference work order IDs)
         let invoice: any = null
         try {
           invoice = await db.collection('turboCleanInvoices').findOne({ _id: new ObjectId(invoiceId) })
@@ -113,6 +112,8 @@ export default defineEventHandler(async (event) => {
               .project({ upload: 1, stockNumber: 1 })
               .toArray()
 
+            // Build ordered image results (index-keyed to preserve sequence)
+            const imageResults: { idx: number; filename: string; buffer: Buffer; contentType: string }[] = []
             let imageCounter = 0
             const fetchPromises: Promise<void>[] = []
 
@@ -127,9 +128,10 @@ export default defineEventHandler(async (event) => {
                   fetchImageAsBuffer(url).then(result => {
                     if (result) {
                       const ext = extFromContentType(result.contentType)
-                      attachments.push({
+                      imageResults.push({
+                        idx,
                         filename: `${stockLabel}_photo_${idx}.${ext}`,
-                        content: result.buffer,
+                        buffer: result.buffer,
                         contentType: result.contentType,
                       })
                     }
@@ -139,6 +141,16 @@ export default defineEventHandler(async (event) => {
             }
 
             await Promise.all(fetchPromises)
+
+            // Sort by index and append after the PDF
+            imageResults.sort((a, b) => a.idx - b.idx)
+            for (const img of imageResults) {
+              attachments.push({
+                filename: img.filename,
+                content: img.buffer,
+                contentType: img.contentType,
+              })
+            }
           }
         }
       }
@@ -162,9 +174,12 @@ export default defineEventHandler(async (event) => {
       }
     }
 
+    const fromName = invoiceType === 'Daily' ? 'ZRZ Daily' : 'ZRZ Weekly'
+    const fromAddress = `${fromName} <billing@zrzops.com>`
+
     // ── Send Email ──────────────────────────────────────────────────
     const data = await resend.emails.send({
-      from: 'billing@zrzops.com',
+      from: fromAddress,
       to: email,
       subject: subject,
       html: emailHtml,
@@ -187,7 +202,7 @@ export default defineEventHandler(async (event) => {
         
         // Mailbox UI Support Fields:
         folder: 'sent',
-        from: 'billing@zrzops.com',
+        from: fromAddress,
         to: email,
         bodyHtml: emailHtml,
         receivedAt: new Date().toISOString(), // Fallback for unified sorting
