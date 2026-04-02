@@ -45,7 +45,7 @@ const activeFilter = ref<{
 
 // ─── Formatter Helpers ───────────────────────────────────────────────────
 const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0)
-const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
+const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }) : '—'
 
 const badgeClasses: Record<string, string> = {
   Draft: 'bg-gray-500/10 text-gray-600 border-gray-500/20',
