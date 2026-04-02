@@ -226,7 +226,7 @@ function handleEmailDialogSubmit() {
     body: {
       html: htmlPayload,
       email: finalEmail,
-      subject: `Invoice ${doc.number} from Turbo Clean`,
+      subject: `Invoice ${doc.number} from ZRZ OPS`,
       dealerId: inv.dealerId,
       invoiceId: inv.id,
       invoiceType: inv.type || 'Weekly',

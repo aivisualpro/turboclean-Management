@@ -16,7 +16,7 @@ function getLogoBase64(): string {
  */
 export function generateInvoiceHtml(doc: any): string {
   const fmtMoney = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  const formattedDate = (d?: string) => d ? new Date(d).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : ''
+  const formattedDate = (d?: string) => d ? new Date(d).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'numeric', day: 'numeric', year: 'numeric' }) : ''
   const logoSrc = getLogoBase64()
 
   const lineRows = (doc.lineItems || []).map((li: any, i: number) => {
@@ -156,9 +156,9 @@ export async function htmlToPdfBuffer(html: string): Promise<Buffer> {
 
   try {
     const page = await browser.newPage()
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 60000 })
-    // Small delay to ensure fonts settle
-    await new Promise(r => setTimeout(r, 500))
+    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 30000 })
+    // Ensure fonts and images have time to render over the network
+    await new Promise(r => setTimeout(r, 1500))
     const pdfBuffer = await page.pdf({
       format: 'Letter',
       printBackground: true,

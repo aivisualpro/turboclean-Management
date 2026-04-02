@@ -297,7 +297,7 @@ export default defineEventHandler(async (event) => {
       const taxTotal = lineItems.reduce((s, li) => s + li.tax, 0)
       const total = lineItems.reduce((s, li) => s + li.total, 0)
 
-      const { year, week } = getISOWeek(new Date(startStr + 'T00:00:00Z'))
+      // Generate unique invoice number
 
       invoiceCounter++
       const invNumber = `W-INV-${startStr.replace(/-/g, '')}-${String(invoiceCounter).padStart(4, '0')}`
@@ -305,7 +305,6 @@ export default defineEventHandler(async (event) => {
       const invoice = {
         number: invNumber,
         type: 'Weekly',
-        weekKey: `${dealerId}__${year}_W${week}`,
         customStartDate: startStr,
         customEndDate: endStr,
         dealerId,
@@ -320,8 +319,6 @@ export default defineEventHandler(async (event) => {
           d.setUTCDate(d.getUTCDate() + 30)
           return d.toISOString().split('T')[0]
         })(),
-        weekNumber: week,
-        weekYear: year,
         weekStart: startStr + 'T00:00:00.000Z',
         weekEnd: endStr + 'T23:59:59.999Z',
         lineItems,

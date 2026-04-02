@@ -148,7 +148,7 @@ export function generatePDF(doc: any, docType: 'Work Order' | 'Invoice' | 'Order
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
 
   if (docType === 'Invoice') {
-    const formattedDate = (d?: string) => d ? new Date(d).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }) : ''
+    const formattedDate = (d?: string) => d ? new Date(d).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'numeric', day: 'numeric', year: 'numeric' }) : ''
     
     const isWeekly = doc.type === 'Weekly'
     const topBarBg = isWeekly ? 'linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%)' : 'linear-gradient(90deg, #34d399 0%, #10b981 100%)'
