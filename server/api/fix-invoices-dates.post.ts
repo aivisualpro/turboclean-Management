@@ -11,8 +11,8 @@ export default defineEventHandler(async () => {
   const allWOs = await woCollection.find({}).toArray()
   const woMap = new Map<string, string>()
   allWOs.forEach(wo => {
-    if (wo.date instanceof Date) {
-      woMap.set(wo._id.toString(), wo.date.toISOString().split('T')[0])
+    if (wo.date instanceof Date && wo._id) {
+      woMap.set(wo._id.toString(), wo.date.toISOString().slice(0, 10))
     }
   })
 
@@ -24,7 +24,7 @@ export default defineEventHandler(async () => {
     let changed = false
     const lineItems = (inv.lineItems || []).map((li: any) => {
        const wId = li.workOrderId?.toString()
-       const intendedDate = woMap.get(wId)
+       const intendedDate = wId ? woMap.get(wId) : undefined
        
        if (intendedDate && li.date !== intendedDate) {
          changed = true
@@ -45,7 +45,7 @@ export default defineEventHandler(async () => {
        if (newInvDate !== inv.date) {
           const d = new Date(newInvDate + 'T00:00:00Z')
           d.setUTCDate(d.getUTCDate() + (inv.type === 'Daily' ? 15 : 30))
-          newDueDate = d.toISOString().split('T')[0]
+          newDueDate = d.toISOString().slice(0, 10)
        }
 
        invOps.push({

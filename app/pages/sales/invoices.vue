@@ -36,9 +36,10 @@ const computedDates = computed(() => {
   return { start: '', end: '' }
 })
 
-const expandedDealers = ref(new Set<string>())
-const expandedYears   = ref(new Set<string>())
-const expandedMonths  = ref(new Set<string>())
+const expandedDealers   = ref(new Set<string>())
+const expandedYears     = ref(new Set<string>())
+const expandedMonths    = ref(new Set<string>())
+const expandedInvoices  = ref(new Set<string>())
 
 const activeFilter = ref<{
   label: string
@@ -549,51 +550,102 @@ function sortIcon(field: string) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow v-for="inv in invoices" :key="inv.id" class="cursor-pointer hover:bg-muted/50 transition-colors">
-                <TableCell class="font-bold text-xs">
-                  <div class="flex items-center gap-1.5 text-primary">
-                    <FileSpreadsheet class="size-3.5 opacity-70" />
-                    {{ inv.number }}
-                  </div>
-                </TableCell>
-                <TableCell v-if="!activeFilter.dealerId" class="text-xs">
-                  <p class="font-semibold max-w-[140px] truncate">{{ inv.dealerName }}</p>
-                </TableCell>
-                <TableCell class="text-xs whitespace-nowrap">{{ fmtDate(inv.date) }}</TableCell>
-                <TableCell>
-                  <Badge variant="outline" class="text-[9px] uppercase tracking-wide" :class="inv.type === 'Weekly' ? 'bg-amber-500/10 text-amber-600 border-amber-500/20' : 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'">
-                    {{ inv.type || 'Weekly' }}
-                  </Badge>
-                </TableCell>
-                <TableCell class="text-right text-xs tabular-nums text-muted-foreground">{{ fmt(inv.subtotal) }}</TableCell>
-                <TableCell class="text-right text-xs tabular-nums text-muted-foreground">{{ fmt(inv.taxTotal) }}</TableCell>
-                <TableCell class="text-right text-xs tabular-nums font-bold">{{ fmt(inv.total) }}</TableCell>
-                <TableCell class="text-center text-xs tabular-nums">{{ inv.lineItems?.length || 0 }}</TableCell>
-                <TableCell>
-                  <Badge variant="outline" :class="badgeClasses[inv.status] || ''" class="text-[10px]">
-                    {{ inv.status }}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <div class="flex items-center justify-center gap-0.5">
-                    <Button v-if="inv.status === 'Draft'" variant="ghost" size="icon" class="h-7 w-7 text-amber-600 hover:bg-amber-50" @click.stop="updateInvoiceStatus(inv, 'Approved')" title="Approve">
-                      <ThumbsUp class="size-4" />
-                    </Button>
-                    <Button v-if="inv.status === 'Approved' || inv.status === 'Emailed'" variant="ghost" size="icon" class="h-7 w-7 text-emerald-600 hover:bg-emerald-50" @click.stop="updateInvoiceStatus(inv, 'Paid')" title="Mark Paid">
-                      <CheckCircle class="size-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" class="h-7 w-7 text-blue-600 hover:bg-blue-50" @click.stop="openEmailDialog(inv)" title="Email Dealer">
-                      <Send class="size-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" class="h-7 w-7 hover:text-primary hover:bg-primary/10" @click.stop="openPreviewFor(inv)" title="Preview">
-                      <Eye class="size-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:bg-muted" @click.stop="handleDownload(inv)" title="Download">
-                      <Download class="size-4" />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
+              <template v-for="inv in invoices" :key="inv.id">
+                <TableRow 
+                  @click="toggleSet(expandedInvoices, inv.id)"
+                  class="cursor-pointer hover:bg-muted/50 transition-colors"
+                  :class="expandedInvoices.has(inv.id) ? 'bg-muted/30' : ''"
+                >
+                  <TableCell class="font-bold text-xs">
+                    <div class="flex items-center gap-1.5 text-primary">
+                      <ChevronRight v-if="!expandedInvoices.has(inv.id)" class="size-3 text-muted-foreground/50" />
+                      <ChevronDown v-else class="size-3 text-primary" />
+                      <FileSpreadsheet class="size-3.5 opacity-70" />
+                      {{ inv.number }}
+                    </div>
+                  </TableCell>
+                  <TableCell v-if="!activeFilter.dealerId" class="text-xs">
+                    <p class="font-semibold max-w-[140px] truncate">{{ inv.dealerName }}</p>
+                  </TableCell>
+                  <TableCell class="text-xs whitespace-nowrap">{{ fmtDate(inv.date) }}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" class="text-[9px] uppercase tracking-wide" :class="inv.type === 'Weekly' ? 'bg-amber-500/10 text-amber-600 border-amber-500/20' : 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'">
+                      {{ inv.type || 'Weekly' }}
+                    </Badge>
+                  </TableCell>
+                  <TableCell class="text-right text-xs tabular-nums text-muted-foreground">{{ fmt(inv.subtotal) }}</TableCell>
+                  <TableCell class="text-right text-xs tabular-nums text-muted-foreground">{{ fmt(inv.taxTotal) }}</TableCell>
+                  <TableCell class="text-right text-xs tabular-nums font-bold">{{ fmt(inv.total) }}</TableCell>
+                  <TableCell class="text-center text-xs tabular-nums">
+                    {{ inv.lineItems?.length || 0 }}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" :class="badgeClasses[inv.status] || ''" class="text-[10px]">
+                      {{ inv.status }}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div class="flex items-center justify-center gap-0.5">
+                      <Button v-if="inv.status === 'Draft'" variant="ghost" size="icon" class="h-7 w-7 text-amber-600 hover:bg-amber-50" @click.stop="updateInvoiceStatus(inv, 'Approved')" title="Approve">
+                        <ThumbsUp class="size-4" />
+                      </Button>
+                      <Button v-if="inv.status === 'Approved' || inv.status === 'Emailed'" variant="ghost" size="icon" class="h-7 w-7 text-emerald-600 hover:bg-emerald-50" @click.stop="updateInvoiceStatus(inv, 'Paid')" title="Mark Paid">
+                        <CheckCircle class="size-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" class="h-7 w-7 text-blue-600 hover:bg-blue-50" @click.stop="openEmailDialog(inv)" title="Email Dealer">
+                        <Send class="size-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" class="h-7 w-7 hover:text-primary hover:bg-primary/10" @click.stop="openPreviewFor(inv)" title="Preview">
+                        <Eye class="size-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:bg-muted" @click.stop="handleDownload(inv)" title="Download">
+                        <Download class="size-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+
+                <!-- Line Items Accordion Content -->
+                <TableRow v-if="expandedInvoices.has(inv.id)" class="bg-muted/20 border-t-0 hover:bg-muted/20">
+                  <TableCell :colspan="activeFilter.dealerId ? 9 : 10" class="p-0">
+                    <div class="px-10 py-4 animate-in slide-in-from-top-2 duration-200">
+                      <div class="border rounded-lg bg-card shadow-sm overflow-hidden">
+                        <table class="w-full text-[11px]">
+                          <thead class="bg-muted/50 border-b">
+                            <tr>
+                              <th class="px-3 py-2 text-left font-semibold text-muted-foreground">Date</th>
+                              <th class="px-3 py-2 text-left font-semibold text-muted-foreground">Service / Description</th>
+                              <th class="px-3 py-2 text-left font-semibold text-muted-foreground">Stock # / VIN</th>
+                              <th class="px-3 py-2 text-right font-semibold text-muted-foreground">Line Total</th>
+                            </tr>
+                          </thead>
+                          <tbody class="divide-y">
+                            <tr v-for="li in inv.lineItems" :key="li.date + (li.serviceName || li.description) + (li._id || li.workOrderId)" class="hover:bg-muted/30 transition-colors">
+                              <td class="px-3 py-2 text-muted-foreground whitespace-nowrap">{{ fmtDate(li.date) }}</td>
+                              <td class="px-3 py-2">
+                                <div class="font-medium text-foreground">{{ li.serviceName || '—' }}</div>
+                                <div v-if="li.description" class="text-[10px] text-muted-foreground">{{ li.description }}</div>
+                              </td>
+                              <td class="px-3 py-2 font-mono text-[10px]">
+                                <span v-if="li.stockNumber" class="text-foreground font-bold mr-2">{{ li.stockNumber }}</span>
+                                <span v-if="li.vin" class="text-muted-foreground">{{ li.vin }}</span>
+                                <span v-if="!li.stockNumber && !li.vin" class="text-muted-foreground opacity-50">—</span>
+                              </td>
+                              <td class="px-3 py-2 text-right font-semibold tabular-nums">
+                                {{ fmt(li.amount || li.total || li.unitPrice) }}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                        <div class="px-3 py-2 bg-muted/30 flex justify-between items-center border-t">
+                          <span class="text-muted-foreground font-medium italic">* Includes Tax if calculated per line item</span>
+                          <span class="text-foreground font-bold">Items count: {{ inv.lineItems?.length }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              </template>
 
               <template v-if="loading && invoices.length === 0">
                 <TableRow v-for="i in 10" :key="i">
@@ -603,7 +655,7 @@ function sortIcon(field: string) {
                 </TableRow>
               </template>
               <TableRow v-if="!loading && invoices.length === 0">
-                <TableCell :colspan="11" class="text-center py-10">
+                <TableCell :colspan="activeFilter.dealerId ? 9 : 10" class="text-center py-10">
                   <FileSpreadsheet class="size-10 text-muted-foreground/20 mx-auto mb-3" />
                   <p class="text-sm font-medium text-foreground">No invoices found</p>
                   <p class="text-xs text-muted-foreground mt-1">Try adjusting your tabs or date range.</p>
@@ -611,7 +663,7 @@ function sortIcon(field: string) {
               </TableRow>
 
               <tr v-if="hasMore && invoices.length > 0" v-intersect="fetchInvoices" class="h-10">
-                <td :colspan="11" class="text-center">
+                <td :colspan="activeFilter.dealerId ? 9 : 10" class="text-center">
                   <div v-if="loading" class="flex justify-center py-4"><Loader2 class="size-4 animate-spin text-muted-foreground/50" /></div>
                 </td>
               </tr>
