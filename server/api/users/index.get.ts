@@ -21,6 +21,7 @@ export default defineEventHandler(async (event) => {
       email: u.email || '',
       phone: u.phone || '',
       address: u.address || '',
+      password: u.password || '',
       registerDealers: Array.isArray(u.registerDealers) ? u.registerDealers : [],
       role: u.role || 'User',
       status: u.status || 'Active',

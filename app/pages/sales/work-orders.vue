@@ -280,18 +280,9 @@ async function saveEdit() {
   }
 }
 
-// Fire immediately during setup — no loading delay
-// Initial Fetch with SSR/Navigation caching
-await useAsyncData('work-orders-init', async () => {
-  if (treeData.value.length === 0) {
-    await Promise.all([fetchTree(), fetchWorkOrders(true)])
-  } else {
-    // Tree already cached, just refresh data
-    fetchTree()
-    await fetchWorkOrders(true)
-  }
-  return true
-}, { dedupe: 'defer' })
+// Fetch on every visit — non-blocking so navigation is instant
+fetchTree()
+fetchWorkOrders(true)
 
 useLiveSync('WorkOrders', () => {
   fetchTree()
