@@ -256,7 +256,7 @@ export default defineEventHandler(async (event) => {
       if (uninvoicedWOs.length === 0) return { success: true, generated: 0, message: 'No uninvoiced work orders found for selection.' }
       
       invoiceCounter++
-      const invNumber = `W-INV-${sDate.toISOString().split('T')[0].replace(/-/g, '')}-${String(invoiceCounter).padStart(4, '0')}`
+      const invNumber = `W-INV-${(sDate.toISOString().split('T')[0] as string).replace(/-/g, '')}-${String(invoiceCounter).padStart(4, '0')}`
       const dealer = dealerMap.get(dealerId) || { dealer: dealerId }
       
       const lineItems = uninvoicedWOs.map((wo: any) => {

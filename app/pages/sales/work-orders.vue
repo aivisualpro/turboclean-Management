@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { toast } from 'vue-sonner'
-import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, DollarSign, Loader2, Download, Upload, Plus, Search, FileText, Edit2, Settings } from 'lucide-vue-next'
+import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, DollarSign, Loader2, Download, Upload, Plus, Search, FileText, Edit2 } from 'lucide-vue-next'
 
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Work Orders' })
@@ -523,9 +523,9 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                 <Icon :name="generatingWeekly ? 'lucide:loader-2' : 'lucide:calendar-range'" :class="generatingWeekly ? 'animate-spin': ''" class="mr-2 size-4 opacity-70" />
                 <span>Create Weekly Invoices</span>
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
+              <div class="h-px bg-border my-1" />
               <DropdownMenuItem @click="openCustomWeeklyModal" class="cursor-pointer">
-                <Settings class="mr-2 size-4 opacity-70" />
+                <Icon name="lucide:settings" class="mr-2 size-4 opacity-70" />
                 <span>Custom Weekly...</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
