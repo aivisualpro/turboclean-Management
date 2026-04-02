@@ -10,13 +10,13 @@ const canEditWO = computed(() => isActionAllowed('work_orders', 'Edit'))
 
 // ─── Base State ──────────────────────────────────────────────────────────
 const showImportModal = ref(false)
-const search = useState('wo-search', () => '')
+const search = ref('')
 const lastUpdatedBy = ref('')
-const activeTab = useState<'all' | 'false' | 'true'>('wo-tab', () => 'all')
+const activeTab = ref<'all' | 'false' | 'true'>('all')
 
-const globalDatePreset = useState('wo-preset', () => 'this_month')
-const customStartDate = useState('wo-cstart', () => '')
-const customEndDate = useState('wo-cend', () => '')
+const globalDatePreset = ref('this_month')
+const customStartDate = ref('')
+const customEndDate = ref('')
 
 watch(() => customStartDate.value, (newVal) => {
   if (newVal && !customEndDate.value) customEndDate.value = newVal
@@ -66,12 +66,12 @@ const expandedYears   = ref(new Set<string>())
 const expandedMonths  = ref(new Set<string>())
 
 // The active node filter for the right table
-const activeFilter = useState<{
+const activeFilter = ref<{
   label: string
   dealerId?: string
   dateStart?: string
   dateEnd?: string
-}>('wo-filter', () => ({ label: 'All Work Orders' }))
+}>({ label: 'All Work Orders' })
 
 // ─── Formatter Helpers ───────────────────────────────────────────────────
 const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0)
@@ -98,7 +98,7 @@ function closeWoLightbox() {
 }
 
 // ─── Tree Data Fetching ──────────────────────────────────────────────────
-const treeData = useState<any[]>('wo-tree', () => [])
+const treeData = ref<any[]>([])
 const treeLoading = ref(false)
 
 async function fetchTree() {
