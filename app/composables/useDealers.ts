@@ -62,8 +62,8 @@ export function useDealers() {
   async function fetchDealers() {
     isLoading.value = true
     try {
-      const data = await $fetch('/api/dealers')
-      dealers.value = data as Dealer[]
+      const res = await $fetch<{ dealers: Dealer[], meta: any }>('/api/dealers')
+      dealers.value = res.dealers || []
     } catch (error) {
       console.error('Failed to fetch dealers:', error)
     } finally {
@@ -73,15 +73,37 @@ export function useDealers() {
 
 // Fetch on client init handled by pages via useAsyncData to prevent layout shift
 
-  function addDealer(dealer: Omit<Dealer, 'id' | 'createdAt' | 'updatedAt'>) {
-    // For now, optimistic update UI, should add POST /api/dealers
+  async function addDealer(dealer: Omit<Dealer, 'id' | 'createdAt' | 'updatedAt'>) {
     const now = new Date().toISOString()
-    dealers.value.unshift({
+    
+    // Optimistic UI temporary ID
+    const tempId = `temp-${Date.now()}`
+    const newDealer = {
       ...dealer,
-      id: nanoid(8),
+      id: tempId,
       createdAt: now,
       updatedAt: now,
-    })
+    }
+    dealers.value.unshift(newDealer as Dealer)
+
+    try {
+      const res = await $fetch<{ success: boolean; id: string }>('/api/dealers', {
+        method: 'POST',
+        body: dealer
+      })
+      
+      // Update with exact ID from DB
+      const idx = dealers.value.findIndex(d => d.id === tempId)
+      if (idx !== -1) {
+        dealers.value[idx]!.id = res.id
+      }
+      return res
+    } catch (err: any) {
+      // Revert optimistic update
+      dealers.value = dealers.value.filter(d => d.id !== tempId)
+      console.error('Failed to add dealer:', err)
+      throw err
+    }
   }
 
   function updateDealer(id: string, updates: Partial<Pick<Dealer, 'dealerName' | 'address' | 'status' | 'contacts' | 'isTaxApplied' | 'taxPercentage'>>) {

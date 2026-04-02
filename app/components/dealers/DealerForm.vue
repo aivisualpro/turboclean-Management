@@ -124,7 +124,7 @@ function onPhoneInput(contactIdx: number, phoneIdx: number, event: Event) {
   })
 }
 
-function onSubmit() {
+async function onSubmit() {
   if (!dealerName.value.trim()) {
     toast.error('Dealer name is required')
     return
@@ -150,8 +150,9 @@ function onSubmit() {
       contacts: cleanContacts,
     })
     toast.success('Dealer updated')
-  }
-  else {
+    emit('saved')
+    isOpen.value = false
+  } else {
     let finalServices: any[] = []
     if (copyFromDealerId.value) {
       const sourceDealer = dealers.value.find(d => d.id === copyFromDealerId.value)
@@ -169,19 +170,23 @@ function onSubmit() {
       }
     }
 
-    addDealer({
-      dealerName: dealerName.value.trim(),
-      address: address.value.trim(),
-      status: status.value,
-      isTaxApplied: isTaxApplied.value,
-      taxPercentage: taxPercentage.value,
-      contacts: cleanContacts,
-      services: finalServices,
-    })
-    toast.success('Dealer added')
+    try {
+      await addDealer({
+        dealerName: dealerName.value.trim(),
+        address: address.value.trim(),
+        status: status.value,
+        isTaxApplied: isTaxApplied.value,
+        taxPercentage: taxPercentage.value,
+        contacts: cleanContacts,
+        services: finalServices,
+      })
+      toast.success('Dealer added')
+      emit('saved')
+      isOpen.value = false
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to add dealer')
+    }
   }
-  emit('saved')
-  isOpen.value = false
 }
 </script>
 
