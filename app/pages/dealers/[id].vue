@@ -14,6 +14,7 @@ import {
   Receipt,
   MailCheck,
   WrenchIcon,
+  Loader2,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -121,8 +122,20 @@ const canDelete = computed(() => isActionAllowed('dealers', 'Delete'))
 
 <template>
   <div class="absolute inset-0 flex flex-col overflow-hidden">
-    <!-- Loading / Not found -->
-    <div v-if="!dealer" class="flex-1 flex items-center justify-center">
+    <!-- Loading State -->
+    <div v-if="dealersLoading && (!dealers || dealers.length === 0)" class="flex-1 flex flex-col p-4 gap-6">
+      <div class="flex items-center gap-2">
+        <Skeleton class="h-8 w-64" />
+        <Skeleton class="h-8 w-24" />
+      </div>
+      <div class="flex gap-2 p-1 bg-muted/30 border rounded-lg w-fit">
+        <Skeleton v-for="i in 5" :key="i" class="h-8 w-24" />
+      </div>
+      <Skeleton class="flex-1 rounded-xl" />
+    </div>
+
+    <!-- Not found (only after loading completed) -->
+    <div v-else-if="!dealer" class="flex-1 flex items-center justify-center">
       <div class="text-center space-y-4">
         <div class="relative w-20 h-20 mx-auto">
           <div class="absolute inset-0 bg-primary/5 rounded-full animate-pulse"></div>

@@ -346,11 +346,35 @@ const avatarColors = [
         </div>
       </Teleport>
     </ClientOnly>
-    <!-- Loading -->
-    <div v-if="statsLoading" class="flex items-center justify-center py-32">
-      <div class="text-center space-y-3">
-        <Icon name="lucide:loader-2" class="size-8 animate-spin text-muted-foreground mx-auto" />
-        <p class="text-sm text-muted-foreground">Crunching your numbers...</p>
+    <!-- Loading State -->
+    <div v-if="statsLoading" class="space-y-6">
+      <div class="flex items-center gap-1 border rounded-lg p-1 bg-muted/30 w-fit">
+        <Skeleton class="h-8 w-24" />
+        <Skeleton class="h-8 w-24" />
+        <Skeleton class="h-8 w-24" />
+      </div>
+      
+      <div class="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
+        <Card v-for="i in 5" :key="i">
+          <CardContent class="p-4 space-y-3">
+            <Skeleton class="h-8 w-8 rounded-lg" />
+            <div class="space-y-2">
+              <Skeleton class="h-6 w-24" />
+              <Skeleton class="h-3 w-16" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Skeleton class="lg:col-span-2 h-[380px] rounded-xl" />
+        <Skeleton class="h-[380px] rounded-xl" />
+      </div>
+
+      <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Skeleton class="h-[340px] rounded-xl" />
+        <Skeleton class="h-[340px] rounded-xl" />
+        <Skeleton class="h-[340px] rounded-xl" />
       </div>
     </div>
 

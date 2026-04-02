@@ -35,7 +35,12 @@ export default defineEventHandler(async (event) => {
     if (body.vin !== undefined) updateData.vin = body.vin
     if (body.stockNumber !== undefined) updateData.stockNumber = body.stockNumber
     if (body.poNumber !== undefined) updateData.poNumber = body.poNumber
-    if (body.date !== undefined) updateData.date = new Date(body.date)
+    if (body.date !== undefined) {
+      const d = new Date(body.date)
+      if (!isNaN(d.getTime())) {
+        updateData.date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+      }
+    }
     
     const session = await import('../../utils/auth').then(m => m.getUserSession(event))
     updateData.lastUpdatedBy = session?.id || 'Admin'

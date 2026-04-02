@@ -144,9 +144,9 @@ function handleDelete() {
                   </div>
                 </td>
               </tr>
-              <tr v-if="pending">
-                <td colspan="8" class="p-8 text-center text-muted-foreground">
-                  Loading users...
+              <tr v-if="pending" v-for="i in 5" :key="'loader-' + i">
+                <td v-for="j in 8" :key="j" class="p-4">
+                  <Skeleton class="h-4 w-full rounded" />
                 </td>
               </tr>
               <tr v-else-if="displayList.length === 0">

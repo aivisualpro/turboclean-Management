@@ -492,8 +492,12 @@ function sortIcon(field: string) {
           </div>
         </div>
 
-        <div v-else class="flex-1 flex items-center justify-center p-4">
-          <Loader2 class="size-5 animate-spin text-muted-foreground/50" />
+        <div v-else class="flex-1 space-y-3 p-3">
+          <div v-for="i in 8" :key="i" class="flex items-center gap-3">
+            <Skeleton class="h-4 w-4 rounded" />
+            <Skeleton class="h-4 flex-1 rounded" />
+            <Skeleton class="h-4 w-12 rounded" />
+          </div>
         </div>
       </aside>
 
@@ -505,7 +509,7 @@ function sortIcon(field: string) {
           <div class="flex items-center px-4 py-3 gap-3 w-full xl:w-auto overflow-hidden border-b xl:border-b-0">
             <span class="truncate font-semibold text-sm">{{ activeFilter.label }}</span>
             <Badge variant="secondary" class="font-mono text-[10px] shrink-0">
-              <span v-if="loading" class="animate-pulse">...</span>
+              <span v-if="loading && invoices.length === 0"><Skeleton class="h-3 w-12 inline-block" /></span>
               <span v-else>{{ hasMore ? invoices.length + '+' : invoices.length }} invoices</span>
             </Badge>
           </div>
@@ -591,11 +595,13 @@ function sortIcon(field: string) {
                 </TableCell>
               </TableRow>
 
-              <TableRow v-if="loading && invoices.length === 0">
-                <TableCell :colspan="11" class="text-center py-10">
-                  <Loader2 class="size-6 animate-spin text-muted-foreground/50 mx-auto" />
-                </TableCell>
-              </TableRow>
+              <template v-if="loading && invoices.length === 0">
+                <TableRow v-for="i in 10" :key="i">
+                  <TableCell v-for="j in (activeFilter.dealerId ? 9 : 10)" :key="j">
+                    <Skeleton class="h-4 w-full rounded" />
+                  </TableCell>
+                </TableRow>
+              </template>
               <TableRow v-if="!loading && invoices.length === 0">
                 <TableCell :colspan="11" class="text-center py-10">
                   <FileSpreadsheet class="size-10 text-muted-foreground/20 mx-auto mb-3" />

@@ -684,13 +684,17 @@ async function handleGenerate(type: 'daily' | 'weekly') {
             </div>
           </div>
 
-          <div v-else class="flex-1 flex items-center justify-center p-4">
-            <Loader2 class="size-5 animate-spin text-muted-foreground/50" />
+          <div v-else class="flex-1 space-y-3 p-3">
+            <div v-for="i in 8" :key="i" class="flex items-center gap-3">
+              <Skeleton class="h-4 w-4 rounded" />
+              <Skeleton class="h-4 flex-1 rounded" />
+              <Skeleton class="h-4 w-12 rounded" />
+            </div>
           </div>
 
           <template #fallback>
-            <div class="flex-1 flex items-center justify-center p-4">
-              <Loader2 class="size-5 animate-spin text-muted-foreground/50" />
+            <div class="flex-1 space-y-3 p-3">
+              <Skeleton v-for="i in 8" :key="i" class="h-6 w-full rounded" />
             </div>
           </template>
         </ClientOnly>
@@ -705,13 +709,11 @@ async function handleGenerate(type: 'daily' | 'weekly') {
             <span class="truncate font-semibold text-sm">{{ activeFilter.label }}</span>
             <ClientOnly>
               <Badge variant="secondary" class="font-mono text-[10px] shrink-0">
-                <span v-if="loading" class="animate-pulse">...</span>
+                <span v-if="loading && workOrders.length === 0"><Skeleton class="h-3 w-12 inline-block" /></span>
                 <span v-else>{{ hasMore ? workOrders.length + '+' : workOrders.length }} orders</span>
               </Badge>
               <template #fallback>
-                <Badge variant="secondary" class="font-mono text-[10px] shrink-0">
-                  <span class="animate-pulse">...</span>
-                </Badge>
+                <Skeleton class="h-5 w-20 rounded" />
               </template>
             </ClientOnly>
           </div>
@@ -788,6 +790,14 @@ async function handleGenerate(type: 'daily' | 'weekly') {
             </TableHeader>
             <ClientOnly>
               <TableBody>
+                <!-- Initial Load Skeleton -->
+                <template v-if="loading && workOrders.length === 0">
+                  <TableRow v-for="i in 10" :key="i">
+                    <TableCell v-for="j in (activeFilter.dealerId ? 11 : 12)" :key="j">
+                      <Skeleton class="h-4 w-full rounded" />
+                    </TableCell>
+                  </TableRow>
+                </template>
                 <TableRow v-for="wo in workOrders" :key="wo.id" class="cursor-pointer hover:bg-muted/50 transition-colors">
                   <TableCell class="font-medium text-xs whitespace-nowrap">{{ fmtDate(wo.date) }}</TableCell>
                   <TableCell class="text-xs">{{ wo.stockNumber }}</TableCell>

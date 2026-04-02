@@ -171,6 +171,13 @@ function toggleSubMenu(menuId: string, tabName: string) {
               </TableRow>
             </TableHeader>
             <TableBody>
+              <!-- Loading Skeleton -->
+              <tr v-if="loading" v-for="i in 5" :key="i">
+                <td v-for="j in 5" :key="j" class="p-4">
+                  <Skeleton class="h-4 w-full rounded" />
+                </td>
+              </tr>
+              
               <TableRow v-for="ws in workspaces" :key="ws.id" class="hover:bg-muted/50 cursor-pointer" @click="openModal(ws)">
                 <TableCell class="font-medium whitespace-nowrap">
                   <div class="flex items-center gap-2">

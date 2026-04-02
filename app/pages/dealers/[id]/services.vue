@@ -65,9 +65,9 @@ function computedTax(amount: number) {
 
 // ─── CRUD State ───────────────────────────────────────────────────
 const showForm    = ref(false)
-const editingIdx  = ref<number | null>(null)
+const editingId    = ref<string | null>(null)
 const isSaving    = ref(false)
-const deletingIdx = ref<number | null>(null)
+const deletingId  = ref<string | null>(null)
 
 // Form fields
 const formServiceId   = ref('')   // either a service.id OR a raw custom name
@@ -92,9 +92,9 @@ const usedServiceIds = computed(() => {
 
 // Filtered and excluded list for the combobox
 const availableServices = computed(() => {
-  const isEditing = editingIdx.value !== null
+  const isEditing = editingId.value !== null
   const currentEditServiceId = isEditing
-    ? props.dealer.services![editingIdx.value!]?.service
+    ? props.dealer.services?.find(s => s.id === editingId.value)?.service
     : null
 
   return services.value.filter(s => {
@@ -177,7 +177,7 @@ onClickOutside(comboboxRef, () => { dropdownOpen.value = false })
 
 // ─── Open forms ───────────────────────────────────────────────────
 function openAdd() {
-  editingIdx.value = null
+  editingId.value = null
   formServiceId.value = ''
   formServiceName.value = ''
   formAmount.value = undefined
@@ -187,13 +187,12 @@ function openAdd() {
   showForm.value = true
 }
 
-function openEdit(idx: number) {
-  const srv = props.dealer.services![idx]!
-  editingIdx.value = idx
+function openEdit(srv: DealerService) {
+  editingId.value = srv.id || null
   formServiceId.value = srv.service
   formServiceName.value = getServiceName(srv.service)
   formAmount.value = srv.amount || undefined
-  formEnableTax.value = srv.tax > 0
+  formEnableTax.value = (srv.tax || 0) > 0
   serviceSearch.value = ''
   dropdownOpen.value = false
   showForm.value = true
@@ -208,21 +207,20 @@ async function saveService() {
   isSaving.value = true
   try {
     const newEntry: DealerService = {
-      id: editingIdx.value !== null
-        ? props.dealer.services![editingIdx.value]!.id
-        : generateObjectId(),
+      id: editingId.value || generateObjectId(),
       service: formServiceId.value,
       amount: formAmount.value ?? 0,
       tax: formTax.value,
       total: formTotal.value,
     }
 
-    const updated: DealerService[] = editingIdx.value !== null
-      ? props.dealer.services!.map((s, i) => i === editingIdx.value ? newEntry : { ...s })
-      : [...(props.dealer.services || []), newEntry]
+    const currentServices = props.dealer.services || []
+    const updated: DealerService[] = editingId.value
+      ? currentServices.map(s => s.id === editingId.value ? newEntry : { ...s })
+      : [...currentServices, newEntry]
 
     await patchDealer(props.dealer.id, { services: updated })
-    toast.success(editingIdx.value !== null ? 'Service updated' : 'Service added')
+    toast.success(editingId.value ? 'Service updated' : 'Service added')
     showForm.value = false
   } catch (err: any) {
     toast.error(`Save failed: ${err?.message || err}`)
@@ -231,27 +229,29 @@ async function saveService() {
   }
 }
 
-async function deleteService(idx: number) {
-  deletingIdx.value = idx
+async function deleteService(srvId?: string) {
+  if (!srvId) return
+  deletingId.value = srvId
   try {
-    const updated = props.dealer.services!.filter((_, i) => i !== idx)
+    const updated = props.dealer.services!.filter(s => s.id !== srvId)
     await patchDealer(props.dealer.id, { services: updated })
     toast.success('Service removed')
   } catch (err: any) {
     toast.error(`Delete failed: ${err?.message || err}`)
   } finally {
-    deletingIdx.value = null
+    deletingId.value = null
   }
 }
 
 // ─── Per-row tax toggle ───────────────────────────────────────────
-const savingTaxIdx = ref<number | null>(null)
+const savingTaxId = ref<string | null>(null)
 
-async function toggleServiceTax(idx: number, enableTax: boolean) {
-  savingTaxIdx.value = idx
+async function toggleServiceTax(srv: DealerService, enableTax: boolean) {
+  if (!srv.id) return
+  savingTaxId.value = srv.id
   try {
-    const updated = props.dealer.services!.map((s, i) => {
-      if (i !== idx) return { ...s }
+    const updated = props.dealer.services!.map(s => {
+      if (s.id !== srv.id) return { ...s }
       const tax = enableTax ? computedTax(s.amount) : 0
       return { ...s, tax, total: s.amount + tax }
     })
@@ -259,7 +259,7 @@ async function toggleServiceTax(idx: number, enableTax: boolean) {
   } catch (err: any) {
     toast.error(`Failed: ${err?.message || err}`)
   } finally {
-    savingTaxIdx.value = null
+    savingTaxId.value = null
   }
 }
 
@@ -270,6 +270,14 @@ const grandTotal = computed(() =>
 const taxTotal = computed(() =>
   (props.dealer.services || []).reduce((s, v) => s + (v.tax || 0), 0)
 )
+
+const sortedServices = computed(() => {
+  return [...(props.dealer.services || [])].sort((a, b) => {
+    const nameA = getServiceName(a.service).toLowerCase()
+    const nameB = getServiceName(b.service).toLowerCase()
+    return nameA.localeCompare(nameB)
+  })
+})
 </script>
 
 <template>
@@ -351,65 +359,65 @@ const taxTotal = computed(() =>
             </TableRow>
           </TableHeader>
           <TableBody>
-            <TableRow
-              v-for="(srv, i) in dealer.services"
-              :key="srv.id || i"
-              class="hover:bg-muted/40 transition-colors group"
-              :class="{ 'opacity-60': savingTaxIdx === i || deletingIdx === i }"
-            >
-              <TableCell class="text-xs text-muted-foreground tabular-nums">{{ i + 1 }}</TableCell>
-              <TableCell class="text-xs font-medium">{{ getServiceName(srv.service) }}</TableCell>
-              <TableCell class="text-right text-xs tabular-nums text-muted-foreground">{{ fmt(srv.amount) }}</TableCell>
+        <TableRow
+          v-for="(srv, i) in sortedServices"
+          :key="srv.id || i"
+          class="hover:bg-muted/40 transition-colors group"
+          :class="{ 'opacity-60': savingTaxId === srv.id || deletingId === srv.id }"
+        >
+          <TableCell class="text-xs text-muted-foreground tabular-nums">{{ i + 1 }}</TableCell>
+          <TableCell class="text-xs font-medium">{{ getServiceName(srv.service) }}</TableCell>
+          <TableCell class="text-right text-xs tabular-nums text-muted-foreground">{{ fmt(srv.amount) }}</TableCell>
 
-              <!-- Interactive tax toggle -->
-              <TableCell v-if="dealer.isTaxApplied" class="text-center">
-                <div class="flex items-center justify-center gap-2">
-                  <span class="text-xs tabular-nums min-w-[52px] text-right"
-                    :class="srv.tax > 0 ? 'text-emerald-600 font-medium' : 'text-muted-foreground/40'">
-                    {{ srv.tax > 0 ? fmt(srv.tax) : '—' }}
-                  </span>
-                  <button
-                    type="button"
-                    role="switch"
-                    :aria-checked="srv.tax > 0"
-                    :disabled="savingTaxIdx === i || deletingIdx === i"
-                    @click="toggleServiceTax(i, srv.tax === 0)"
-                    class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 disabled:opacity-40 disabled:cursor-wait"
-                    :class="srv.tax > 0 ? 'bg-emerald-500' : 'bg-input'"
-                  >
-                    <span
-                      class="pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform duration-200"
-                      :class="srv.tax > 0 ? 'translate-x-4' : 'translate-x-0'"
-                    />
-                  </button>
-                </div>
-              </TableCell>
+          <!-- Interactive tax toggle -->
+          <TableCell v-if="dealer.isTaxApplied" class="text-center">
+            <div class="flex items-center justify-center gap-2">
+              <span class="text-xs tabular-nums min-w-[52px] text-right"
+                :class="srv.tax > 0 ? 'text-emerald-600 font-medium' : 'text-muted-foreground/40'">
+                {{ srv.tax > 0 ? fmt(srv.tax) : '—' }}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="srv.tax > 0"
+                :disabled="savingTaxId === srv.id || deletingId === srv.id"
+                @click="toggleServiceTax(srv, srv.tax === 0)"
+                class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 disabled:opacity-40 disabled:cursor-wait"
+                :class="srv.tax > 0 ? 'bg-emerald-500' : 'bg-input'"
+              >
+                <span
+                  class="pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform duration-200"
+                  :class="srv.tax > 0 ? 'translate-x-4' : 'translate-x-0'"
+                />
+              </button>
+            </div>
+          </TableCell>
 
-              <TableCell class="text-right text-xs tabular-nums font-semibold">{{ fmt(srv.total ?? srv.amount) }}</TableCell>
+          <TableCell class="text-right text-xs tabular-nums font-semibold">{{ fmt(srv.total ?? srv.amount) }}</TableCell>
 
-              <!-- Hover actions -->
-              <TableCell class="text-right">
-                <div class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    type="button"
-                    @click="openEdit(i)"
-                    class="h-6 w-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                    title="Edit"
-                  >
-                    <Pencil class="size-3" />
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="deletingIdx === i"
-                    @click="deleteService(i)"
-                    class="h-6 w-6 flex items-center justify-center rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-40"
-                    title="Remove"
-                  >
-                    <Trash2 class="size-3" />
-                  </button>
-                </div>
-              </TableCell>
-            </TableRow>
+          <!-- Hover actions -->
+          <TableCell class="text-right">
+            <div class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                type="button"
+                @click="openEdit(srv)"
+                class="h-6 w-6 flex items-center justify-center rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                title="Edit"
+              >
+                <Pencil class="size-3" />
+              </button>
+              <button
+                type="button"
+                :disabled="deletingId === srv.id"
+                @click="deleteService(srv.id)"
+                class="h-6 w-6 flex items-center justify-center rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-40"
+                title="Remove"
+              >
+                <Trash2 class="size-3" />
+              </button>
+            </div>
+          </TableCell>
+        </TableRow>
           </TableBody>
         </table>
       </div>
@@ -430,7 +438,7 @@ const taxTotal = computed(() =>
     <Dialog v-model:open="showForm">
       <DialogContent class="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{{ editingIdx !== null ? 'Edit Service' : 'Add Service' }}</DialogTitle>
+          <DialogTitle>{{ editingId !== null ? 'Edit Service' : 'Add Service' }}</DialogTitle>
           <DialogDescription>
             Configure the service pricing for {{ dealer.dealerName }}.
           </DialogDescription>
@@ -562,7 +570,7 @@ const taxTotal = computed(() =>
           <Button variant="outline" size="sm" @click="showForm = false">Cancel</Button>
           <Button size="sm" :disabled="isSaving || !formServiceId" @click="saveService">
             <span v-if="isSaving">Saving…</span>
-            <span v-else>{{ editingIdx !== null ? 'Update' : 'Add' }} Service</span>
+            <span v-else>{{ editingId !== null ? 'Update' : 'Add' }} Service</span>
           </Button>
         </DialogFooter>
       </DialogContent>

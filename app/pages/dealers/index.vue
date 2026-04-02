@@ -460,22 +460,22 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
 
             <!-- ═══════════════ LOADING SKELETON ═══════════════ -->
             <div v-if="isLoading && dealers.length === 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              <div v-for="i in 6" :key="i" class="rounded-xl border bg-card p-5 space-y-4 animate-pulse">
+              <div v-for="i in 6" :key="i" class="rounded-xl border bg-card p-5 space-y-4">
                 <div class="flex items-center gap-3">
-                  <div class="size-11 rounded-xl bg-muted"></div>
+                  <Skeleton class="h-11 w-11 rounded-xl" />
                   <div class="flex-1 space-y-2">
-                    <div class="h-4 w-32 bg-muted rounded-md"></div>
-                    <div class="h-3 w-48 bg-muted/60 rounded-md"></div>
+                    <Skeleton class="h-4 w-32" />
+                    <Skeleton class="h-3 w-48" />
                   </div>
                 </div>
                 <div class="flex gap-2">
-                  <div class="h-5 w-20 bg-muted/60 rounded-full"></div>
-                  <div class="h-5 w-16 bg-muted/60 rounded-full"></div>
+                  <Skeleton class="h-5 w-20 rounded-full" />
+                  <Skeleton class="h-5 w-16 rounded-full" />
                 </div>
-                <div class="h-px bg-muted"></div>
+                <Skeleton class="h-px w-full" />
                 <div class="flex justify-between">
-                  <div class="h-3 w-24 bg-muted/60 rounded-md"></div>
-                  <div class="h-3 w-16 bg-muted/60 rounded-md"></div>
+                  <Skeleton class="h-3 w-24" />
+                  <Skeleton class="h-3 w-16" />
                 </div>
               </div>
             </div>

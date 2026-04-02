@@ -30,7 +30,14 @@ export default defineEventHandler(async (event) => {
 
     const documentsToInsert = workOrders.map((wo: any) => ({
       dealer: wo.dealer?.length === 24 ? new ObjectId(wo.dealer) : wo.dealer,
-      date: typeof wo.date === 'string' ? new Date(wo.date) : wo.date,
+      date: (() => {
+        if (!wo.date) return new Date()
+        const d = new Date(wo.date)
+        if (isNaN(d.getTime())) return new Date()
+        // If it was parsed as local midnight (3/30 -> 2026-03-29T19:00:00Z in +05:00), 
+        // we snap it to UTC midnight of the day it was intended for.
+        return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+      })(),
       stockNumber: wo.stockNumber || '',
       poNumber: wo.poNumber || '',
       vin: wo.vin || '',

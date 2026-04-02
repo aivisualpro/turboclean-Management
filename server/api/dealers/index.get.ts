@@ -16,7 +16,6 @@ export default defineEventHandler(async (event) => {
 
     let query: any = {}
     const isAdmin = session?.role === 'Admin'
-    console.log(`[DEALERS GET] Session identified: ID=${session?.id}, Email=${session?.email}, Role=${session?.role}, IsAdmin=${isAdmin}`)
 
     // If restricted user, filter to only those in registerDealers
     if (!isAdmin && session && session.registerDealers && session.registerDealers.length > 0) {

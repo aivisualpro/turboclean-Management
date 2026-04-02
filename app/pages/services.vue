@@ -258,15 +258,21 @@ function exportToCsv() {
     <!-- Main Content -->
     <div class="flex-1 min-h-0 overflow-auto">
 
-      <!-- Loading -->
-      <div v-if="isLoading" class="flex items-center justify-center h-full">
-        <div class="flex flex-col items-center gap-3">
-          <div class="relative">
-            <div class="size-12 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
-              <Loader2 class="size-6 animate-spin text-primary" />
+      <!-- Loading State -->
+      <div v-if="isLoading" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
+        <div v-for="i in 10" :key="i" class="rounded-xl border bg-card p-4 space-y-4">
+          <div class="h-1 w-full bg-muted/20" />
+          <div class="flex items-center gap-3">
+            <Skeleton class="h-9 w-9 rounded-lg" />
+            <div class="space-y-2">
+              <Skeleton class="h-4 w-24" />
+              <Skeleton class="h-3 w-16" />
             </div>
           </div>
-          <p class="text-sm text-muted-foreground animate-pulse">Loading services...</p>
+          <div class="space-y-2">
+            <Skeleton class="h-3 w-full" />
+            <Skeleton class="h-3 w-3/4" />
+          </div>
         </div>
       </div>
 
