@@ -14,7 +14,7 @@ const search = ref('')
 const lastUpdatedBy = ref('')
 const activeTab = ref<'all' | 'false' | 'true'>('all')
 
-const globalDatePreset = ref('all')
+const globalDatePreset = ref('this_month')
 const customStartDate = ref('')
 const customEndDate = ref('')
 
@@ -71,7 +71,7 @@ const activeFilter = ref<{
 
 // ─── Formatter Helpers ───────────────────────────────────────────────────
 const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0)
-const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
+const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }) : '—'
 
 function getAppSheetImageUrl(fileName: string | undefined | null) {
   if (!fileName) return null

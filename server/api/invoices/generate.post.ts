@@ -4,18 +4,18 @@ import { appSheetEdit } from '../../utils/appsheet'
 import { WorkOrdersMapper } from '../../utils/sync-mapper'
 
 function getISOWeek(date: Date): { year: number; week: number; weekStart: Date; weekEnd: Date } {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
   d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7))
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
   const weekNo = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
 
   const dayOfWeek = date.getUTCDay() || 7
   const weekStart = new Date(date)
-  weekStart.setDate(date.getDate() - dayOfWeek + 1)
-  weekStart.setHours(0, 0, 0, 0)
+  weekStart.setUTCDate(date.getUTCDate() - dayOfWeek + 1)
+  weekStart.setUTCHours(0, 0, 0, 0)
   const weekEnd = new Date(weekStart)
-  weekEnd.setDate(weekStart.getDate() + 6)
-  weekEnd.setHours(23, 59, 59, 999)
+  weekEnd.setUTCDate(weekStart.getUTCDate() + 6)
+  weekEnd.setUTCHours(23, 59, 59, 999)
 
   return { year: d.getUTCFullYear(), week: weekNo, weekStart, weekEnd }
 }
