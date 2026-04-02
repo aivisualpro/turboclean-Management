@@ -107,36 +107,29 @@ export default defineEventHandler(async (event) => {
       switch (action.toLowerCase()) {
         case 'add': {
           const mongoDoc = mapper.toMongo(row)
+          let filterId: any = rowId;
           
-          // If ID is provided and looks like a valid 24-char hex ObjectId, use it
           if (rowId && rowId.length === 24 && /^[0-9a-fA-F]{24}$/.test(rowId)) {
-            try {
-              // Check if already exists (prevent duplicates)
-              const existing = await collection.findOne({ _id: new ObjectId(rowId) })
-              if (existing) {
-                // Update instead
-                await collection.updateOne(
-                  { _id: new ObjectId(rowId) },
-                  { $set: { ...mongoDoc, updatedAt: new Date() } }
-                )
-                results.push({ success: true, action: 'updated-existing', id: rowId })
-              } else {
-                // Insert with the same _id
-                await collection.insertOne({ ...mongoDoc, _id: new ObjectId(rowId) } as any)
-                results.push({ success: true, action: 'added', id: rowId })
-              }
-            }
-            catch {
-              const result = await collection.insertOne(mongoDoc)
-              const newId = result.insertedId.toString()
-              results.push({ success: true, action: 'added', id: newId, appSheetOldId: rowId })
-            }
+            try { filterId = new ObjectId(rowId) } catch { filterId = rowId }
+          } else if (!rowId) {
+            filterId = new ObjectId()
           }
-          else {
-            // AppSheet _id is not a valid ObjectId — insert and sync the real ID back
-            const result = await collection.insertOne(mongoDoc)
-            const newId = result.insertedId.toString()
-            results.push({ success: true, action: 'added', id: newId, appSheetOldId: rowId })
+
+          try {
+            const existing = await collection.findOne({ _id: filterId })
+            if (existing) {
+              await collection.updateOne(
+                { _id: filterId },
+                { $set: { ...mongoDoc, updatedAt: new Date() } }
+              )
+              results.push({ success: true, action: 'updated-existing', id: filterId.toString() })
+            } else {
+              await collection.insertOne({ ...mongoDoc, _id: filterId } as any)
+              results.push({ success: true, action: 'added', id: filterId.toString() })
+            }
+          } catch (e: any) {
+            console.error('[Webhook] Error during add:', e)
+            results.push({ success: false, action: 'added', error: e.message })
           }
           break
         }

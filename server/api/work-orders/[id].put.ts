@@ -4,8 +4,13 @@ import { ObjectId } from 'mongodb'
 export default defineEventHandler(async (event) => {
   try {
     const id = getRouterParam(event, 'id')
-    if (!id || !ObjectId.isValid(id)) {
+    if (!id) {
       throw createError({ statusCode: 400, statusMessage: 'Invalid ID' })
+    }
+
+    let queryId: any = id;
+    if (id.length === 24 && /^[0-9a-fA-F]{24}$/.test(id)) {
+      queryId = new ObjectId(id);
     }
 
     const body = await readBody(event)
@@ -37,7 +42,7 @@ export default defineEventHandler(async (event) => {
     updateData.updatedAt = new Date()
 
     const result = await collection.findOneAndUpdate(
-      { _id: new ObjectId(id) },
+      { _id: queryId },
       { $set: updateData },
       { returnDocument: 'after' }
     )
