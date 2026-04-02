@@ -23,39 +23,43 @@ watch(() => customStartDate.value, (newVal) => {
 })
 
 const computedDates = computed(() => {
-  const d = new Date()
+  const now = new Date()
   const preset = globalDatePreset.value
   
+  // Helper: format as YYYY-MM-DD (timezone-agnostic, matches backend UTC date-string comparison)
+  const ymd = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+  const y = now.getFullYear()
+  const m = now.getMonth() + 1 // 1-indexed
+  const todayStr = ymd(y, m, now.getDate())
+
   if (preset === 'today') {
-    return { start: new Date(d.setHours(0,0,0,0)).toISOString(), end: new Date(d.setHours(23,59,59,999)).toISOString() }
+    return { start: todayStr, end: todayStr }
   }
   if (preset === 'yesterday') {
-    const y = new Date()
-    y.setDate(y.getDate() - 1)
-    return { start: new Date(y.setHours(0,0,0,0)).toISOString(), end: new Date(y.setHours(23,59,59,999)).toISOString() }
+    const yd = new Date(now)
+    yd.setDate(yd.getDate() - 1)
+    const yStr = ymd(yd.getFullYear(), yd.getMonth() + 1, yd.getDate())
+    return { start: yStr, end: yStr }
   }
   if (preset === 'this_month') {
-    const start = new Date(d.getFullYear(), d.getMonth(), 1)
-    const end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999)
-    return { start: start.toISOString(), end: end.toISOString() }
+    const lastDay = new Date(y, now.getMonth() + 1, 0).getDate()
+    return { start: ymd(y, m, 1), end: ymd(y, m, lastDay) }
   }
   if (preset === 'last_month') {
-    const start = new Date(d.getFullYear(), d.getMonth() - 1, 1)
-    const end = new Date(d.getFullYear(), d.getMonth(), 0, 23, 59, 59, 999)
-    return { start: start.toISOString(), end: end.toISOString() }
+    const lm = now.getMonth() // 0-indexed = last month in 1-indexed
+    const lmYear = lm === 0 ? y - 1 : y
+    const lmMonth = lm === 0 ? 12 : lm
+    const lastDay = new Date(lmYear, lmMonth, 0).getDate()
+    return { start: ymd(lmYear, lmMonth, 1), end: ymd(lmYear, lmMonth, lastDay) }
   }
   if (preset === 'this_year') {
-    const start = new Date(d.getFullYear(), 0, 1)
-    const end = new Date(d.getFullYear(), 11, 31, 23, 59, 59, 999)
-    return { start: start.toISOString(), end: end.toISOString() }
+    return { start: ymd(y, 1, 1), end: ymd(y, 12, 31) }
   }
   if (preset === 'last_year') {
-    const start = new Date(d.getFullYear() - 1, 0, 1)
-    const end = new Date(d.getFullYear() - 1, 11, 31, 23, 59, 59, 999)
-    return { start: start.toISOString(), end: end.toISOString() }
+    return { start: ymd(y - 1, 1, 1), end: ymd(y - 1, 12, 31) }
   }
   if (preset === 'custom' && customStartDate.value && customEndDate.value) {
-     return { start: new Date(customStartDate.value + 'T00:00:00.000Z').toISOString(), end: new Date(customEndDate.value + 'T23:59:59.999Z').toISOString() }
+    return { start: customStartDate.value, end: customEndDate.value }
   }
   return { start: '', end: '' }
 })
