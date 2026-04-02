@@ -8,13 +8,13 @@ const { setHeader } = usePageHeader()
 setHeader({ title: 'Invoices', icon: 'i-lucide-receipt' })
 
 // ─── Base State ──────────────────────────────────────────────────────────
-const search = useState('inv-search', () => '')
-const activeTab = useState<'all' | 'unpaid' | 'paid'>('inv-tab', () => 'all')
-const activeType = useState<'all' | 'daily' | 'weekly'>('inv-type', () => 'all')
+const search = ref('')
+const activeTab = ref<'all' | 'unpaid' | 'paid'>('all')
+const activeType = ref<'all' | 'daily' | 'weekly'>('all')
 
-const globalDatePreset = useState('inv-preset', () => 'this_month')
-const customStartDate = useState('inv-cstart', () => '')
-const customEndDate = useState('inv-cend', () => '')
+const globalDatePreset = ref('this_month')
+const customStartDate = ref('')
+const customEndDate = ref('')
 
 watch(() => customStartDate.value, (newVal) => {
   if (newVal && !customEndDate.value) customEndDate.value = newVal
@@ -40,12 +40,12 @@ const expandedDealers = ref(new Set<string>())
 const expandedYears   = ref(new Set<string>())
 const expandedMonths  = ref(new Set<string>())
 
-const activeFilter = useState<{
+const activeFilter = ref<{
   label: string
   dealerId?: string
   dateStart?: string
   dateEnd?: string
-}>('inv-filter', () => ({ label: 'All Invoices' }))
+}>({ label: 'All Invoices' })
 
 // ─── Formatter Helpers ───────────────────────────────────────────────────
 const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0)
@@ -62,7 +62,7 @@ const badgeClasses: Record<string, string> = {
 }
 
 // ─── Tree Data Fetching ──────────────────────────────────────────────────
-const treeData = useState<any[]>('inv-tree', () => [])
+const treeData = ref<any[]>([])
 const treeLoading = ref(false)
 
 async function fetchTree() {
@@ -85,7 +85,7 @@ async function fetchTree() {
 }
 
 // ─── Table Data Fetching ─────────────────────────────────────────────────
-const invoices = useState<any[]>('inv-list', () => [])
+const invoices = ref<any[]>([])
 const loading = ref(false)
 const hasMore = ref(true)
 const skip = ref(0)
@@ -306,20 +306,9 @@ const vIntersect = {
   },
 }
 
-// Fire immediately during setup — no loading delay
-await useAsyncData('invoices-init', async () => {
-  // Always reset on navigation to prevent useState double-append
-  invoices.value = []
-  skip.value = 0
-  hasMore.value = true
-  if (treeData.value.length === 0) {
-    await Promise.all([fetchTree(), fetchInvoices()])
-  } else {
-    fetchTree()
-    await fetchInvoices()
-  }
-  return true
-})
+// Fetch on every visit — non-blocking so navigation is instant
+fetchTree()
+fetchInvoices()
 
 useLiveSync('Invoices', () => {
   fetchTree()

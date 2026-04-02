@@ -561,16 +561,11 @@ async function handleGenerate(type: 'daily' | 'weekly') {
             <DropdownMenuContent align="end" class="w-48">
               <DropdownMenuItem @click="handleGenerate('daily')" :disabled="generatingDaily" class="cursor-pointer">
                 <Icon :name="generatingDaily ? 'lucide:loader-2' : 'lucide:calendar-days'" :class="generatingDaily ? 'animate-spin': ''" class="mr-2 size-4 opacity-70" />
-                <span>Create Daily Invoices</span>
+                <span>Daily Invoice</span>
               </DropdownMenuItem>
-              <DropdownMenuItem @click="handleGenerate('weekly')" :disabled="generatingWeekly" class="cursor-pointer">
-                <Icon :name="generatingWeekly ? 'lucide:loader-2' : 'lucide:calendar-range'" :class="generatingWeekly ? 'animate-spin': ''" class="mr-2 size-4 opacity-70" />
-                <span>Create Weekly Invoices</span>
-              </DropdownMenuItem>
-              <div class="h-px bg-border my-1" />
               <DropdownMenuItem @click="openCustomWeeklyModal" class="cursor-pointer">
-                <Icon name="lucide:settings" class="mr-2 size-4 opacity-70" />
-                <span>Custom Weekly...</span>
+                <Icon name="lucide:calendar-range" class="mr-2 size-4 opacity-70" />
+                <span>Weekly Invoice</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
