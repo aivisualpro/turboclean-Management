@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { toast } from 'vue-sonner'
-import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, DollarSign, Loader2, Download, Upload, Plus, Search, FileText, Edit2 } from 'lucide-vue-next'
+import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, DollarSign, Loader2, Download, Upload, Plus, Search, FileText, Edit2, Settings } from 'lucide-vue-next'
 
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Work Orders' })
@@ -394,6 +394,53 @@ async function handleExport() {
 const generatingDaily = ref(false)
 const generatingWeekly = ref(false)
 
+const showCustomWeeklyModal = ref(false)
+const customWeeklyForm = ref({ dealerId: '', startDate: '', endDate: '' })
+const generatingCustomWeekly = ref(false)
+const allDealersList = ref<any[]>([])
+
+const maxWeeklyEndDate = computed(() => {
+  if (!customWeeklyForm.value.startDate) return ''
+  const s = new Date(customWeeklyForm.value.startDate)
+  s.setDate(s.getDate() + 6)
+  return s.toISOString().split('T')[0]
+})
+
+const isWeeklyFormValid = computed(() => {
+  return customWeeklyForm.value.dealerId && customWeeklyForm.value.startDate && customWeeklyForm.value.endDate
+})
+
+async function openCustomWeeklyModal() {
+  showCustomWeeklyModal.value = true
+  customWeeklyForm.value = { dealerId: '', startDate: '', endDate: '' }
+  if (allDealersList.value.length === 0) {
+     const res = await $fetch<any[]>('/api/dealers')
+     allDealersList.value = res.sort((a,b) => (a.dealerName || '').localeCompare(b.dealerName || ''))
+  }
+}
+
+async function handleCustomWeeklyGenerate() {
+  if (!isWeeklyFormValid.value || generatingCustomWeekly.value) return
+  generatingCustomWeekly.value = true
+  try {
+    const res: any = await $fetch('/api/invoices/generate', { 
+      method: 'POST', 
+      body: { type: 'custom_weekly', ...customWeeklyForm.value } 
+    })
+    if (res.generated > 0) {
+      toast.success(res.message)
+      showCustomWeeklyModal.value = false
+      fetchWorkOrders(true)
+    } else {
+      toast.info(res.message)
+    }
+  } catch (err: any) {
+    toast.error('Failed to generate custom weekly invoice')
+  } finally {
+    generatingCustomWeekly.value = false
+  }
+}
+
 async function handleGenerate(type: 'daily' | 'weekly') {
   if (type === 'daily') generatingDaily.value = true
   else generatingWeekly.value = true
@@ -475,6 +522,11 @@ async function handleGenerate(type: 'daily' | 'weekly') {
               <DropdownMenuItem @click="handleGenerate('weekly')" :disabled="generatingWeekly" class="cursor-pointer">
                 <Icon :name="generatingWeekly ? 'lucide:loader-2' : 'lucide:calendar-range'" :class="generatingWeekly ? 'animate-spin': ''" class="mr-2 size-4 opacity-70" />
                 <span>Create Weekly Invoices</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem @click="openCustomWeeklyModal" class="cursor-pointer">
+                <Settings class="mr-2 size-4 opacity-70" />
+                <span>Custom Weekly...</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -855,6 +907,51 @@ async function handleGenerate(type: 'daily' | 'weekly') {
           <Button type="button" @click="saveEdit" :disabled="savingEdit">
             <Loader2 v-if="savingEdit" class="mr-2 size-4 animate-spin" />
             Save Changes
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Custom Weekly Invoice Modal -->
+    <Dialog v-model:open="showCustomWeeklyModal">
+      <DialogContent class="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Custom Weekly Invoice</DialogTitle>
+          <DialogDescription>
+            Select a dealer and a date range (max 7 days) to group their unbilled work orders into a single weekly invoice.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div class="grid gap-4 py-4">
+          <div class="space-y-2">
+            <Label>Dealer</Label>
+            <Select v-model="customWeeklyForm.dealerId">
+              <SelectTrigger>
+                 <SelectValue placeholder="Select dealer..." />
+              </SelectTrigger>
+              <SelectContent>
+                 <SelectItem v-for="d in allDealersList" :key="d.id" :value="d.id">{{ d.dealerName }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
+          <div class="space-y-2">
+            <Label>Start Date</Label>
+            <Input type="date" v-model="customWeeklyForm.startDate" />
+          </div>
+
+          <div class="space-y-2">
+            <Label>End Date</Label>
+            <Input type="date" v-model="customWeeklyForm.endDate" :min="customWeeklyForm.startDate" :max="maxWeeklyEndDate" />
+            <p v-if="customWeeklyForm.startDate" class="text-xs text-muted-foreground mt-1">Max end date: {{ maxWeeklyEndDate }}</p>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" @click="showCustomWeeklyModal = false">Cancel</Button>
+          <Button :disabled="!isWeeklyFormValid || generatingCustomWeekly" @click="handleCustomWeeklyGenerate">
+            <Loader2 v-if="generatingCustomWeekly" class="animate-spin mr-2 size-4"/>
+            Generate Invoice
           </Button>
         </DialogFooter>
       </DialogContent>

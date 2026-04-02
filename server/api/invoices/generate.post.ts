@@ -233,6 +233,108 @@ export default defineEventHandler(async (event) => {
       }
 
       return { success: true, generated: newInvoices.length, message: `Generated ${newInvoices.length} weekly invoices.` }
+    } else if (generateType === 'custom_weekly') {
+      const { dealerId, startDate, endDate } = body
+      if (!dealerId || !startDate || !endDate) return { success: false, message: 'Missing required fields' }
+      
+      const sDate = new Date(startDate)
+      const eDate = new Date(endDate)
+      
+      if (eDate.getTime() - sDate.getTime() > 7 * 86400000) {
+         return { success: false, message: 'Date range cannot exceed 7 days' }
+      }
+      
+      const possibleDealerIds: any[] = [dealerId]
+      try { possibleDealerIds.push(new ObjectId(dealerId)) } catch {}
+      
+      const uninvoicedWOs = await db.collection('turboCleanWorkOrders').find({
+         dealer: { $in: possibleDealerIds },
+         date: { $gte: sDate, $lte: eDate },
+         $or: [{ isInvoiced: false }, { isInvoiced: null }, { isInvoiced: { $exists: false } }, { isInvoiced: 'no' }]
+      }).toArray()
+      
+      if (uninvoicedWOs.length === 0) return { success: true, generated: 0, message: 'No uninvoiced work orders found for selection.' }
+      
+      invoiceCounter++
+      const invNumber = `W-INV-${sDate.toISOString().split('T')[0].replace(/-/g, '')}-${String(invoiceCounter).padStart(4, '0')}`
+      const dealer = dealerMap.get(dealerId) || { dealer: dealerId }
+      
+      const lineItems = uninvoicedWOs.map((wo: any) => {
+          const rawServiceId = wo.dealerServiceId?.toString() || ''
+          let serviceName = rawServiceId
+          if (rawServiceId && dealer?.services && Array.isArray(dealer.services)) {
+            const found = dealer.services.find((s: any) => (s.id || s._id || '').toString() === rawServiceId)
+            if (found?.service) serviceName = serviceNameMap.get(found.service.toString()) || found.service.toString()
+          }
+
+          return {
+            workOrderId: wo._id.toString(),
+            date: wo.date ? new Date(wo.date).toISOString() : '',
+            stockNumber: wo.stockNumber || '',
+            poNumber: wo.poNumber || '',
+            vin: wo.vin || '',
+            description: `${serviceName} – Stock# ${wo.stockNumber || 'N/A'} (PO#: ${wo.poNumber || 'N/A'}) (VIN: ${wo.vin || 'N/A'})`,
+            serviceName,
+            serviceId: rawServiceId,
+            amount: Number(wo.amount) || 0,
+            tax: Number(wo.tax) || 0,
+            total: Number(wo.total) || 0,
+            notes: wo.notes || '',
+          }
+      })
+      
+      // Sort linearly by date
+      lineItems.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+      
+      const subtotal = lineItems.reduce((s, li) => s + li.amount, 0)
+      const taxTotal = lineItems.reduce((s, li) => s + li.tax, 0)
+      const total = lineItems.reduce((s, li) => s + li.total, 0)
+      const { year, week, weekStart, weekEnd } = getISOWeek(sDate)
+      
+      const invoice = {
+          number: invNumber,
+          type: 'Weekly',
+          weekKey: `${dealerId}__${year}_W${week}`,
+          dealerId,
+          dealerName: dealer.dealer || dealerId,
+          dealerEmail: dealer.email || '',
+          dealerPhone: dealer.phone || '',
+          dealerAddress: dealer.address || '',
+          status: 'Draft',
+          date: new Date().toISOString().split('T')[0],
+          dueDate: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+          weekNumber: week,
+          weekYear: year,
+          weekStart: weekStart.toISOString(),
+          weekEnd: weekEnd.toISOString(),
+          lineItems,
+          subtotal: Math.round(subtotal * 100) / 100,
+          taxTotal: Math.round(taxTotal * 100) / 100,
+          total: Math.round(total * 100) / 100,
+          paidAmount: 0,
+          paymentMethod: '',
+          notes: `Custom Weekly Invoice for ${dealer.dealer || dealerId} (${startDate} to ${endDate})`,
+          isWeeklyBilled: true,
+          createdAt: new Date().toISOString(),
+      }
+      
+      await invoicesCollection.insertOne(invoice)
+      
+      const updatedWoIds = uninvoicedWOs.map((w: any) => w._id)
+      await db.collection('turboCleanWorkOrders').updateMany(
+         { _id: { $in: updatedWoIds } },
+         { $set: { isInvoiced: true } }
+      )
+      
+      try {
+        const rowsToSync = uninvoicedWOs.map((wo: any) => {
+          wo.isInvoiced = true
+          return WorkOrdersMapper.toAppSheet(wo)
+        })
+        for (let i = 0; i < rowsToSync.length; i += 100) await appSheetEdit('WorkOrders', rowsToSync.slice(i, i + 100))
+      } catch (err) { }
+      
+      return { success: true, generated: 1, message: `Custom weekly invoice generated successfully with ${uninvoicedWOs.length} work orders.` }
     }
 
     return { success: false, message: 'Invalid generation type' }

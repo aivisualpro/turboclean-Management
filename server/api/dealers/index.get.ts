@@ -17,7 +17,7 @@ export default defineEventHandler(async (event) => {
       
       if (allowedIds.length === 0) return []
       query = { _id: { $in: allowedIds } }
-    } else if (session && (!session.registerDealers || session.registerDealers.length === 0)) {
+    } else if (session && session.role !== 'Admin' && (!session.registerDealers || session.registerDealers.length === 0)) {
       return []
     }
 
