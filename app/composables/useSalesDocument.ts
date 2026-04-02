@@ -178,6 +178,9 @@ export function generatePDF(doc: any, docType: 'Work Order' | 'Invoice' | 'Order
           body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
           .print-wrapper { box-shadow: none !important; border: none !important; margin: 0 !important; max-width: 100% !important; border-radius: 0 !important; }
           .print-inner { padding: 20px !important; }
+          table { page-break-inside: auto; }
+          tr { page-break-inside: avoid; page-break-after: auto; }
+          thead { display: table-header-group; }
         }
       </style>
     </head>

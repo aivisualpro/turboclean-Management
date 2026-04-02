@@ -12,6 +12,8 @@ export default defineEventHandler(async (event) => {
     const search = ((query.search as string) || '').trim()
     const statusFilter = (query.status as string) || ''
     const dealerFilter = (query.dealerId as string) || ''
+    const sortBy = (query.sortBy as string) || 'date'
+    const sortOrder = Number(query.sortDir || query.sortOrder) || -1
 
     const matchQuery: any = {}
 
@@ -82,9 +84,17 @@ export default defineEventHandler(async (event) => {
       }
     }
 
+    const sortObject: any = {}
+    if (['number', 'dealerName', 'date', 'type', 'subtotal', 'taxTotal', 'total', 'status'].includes(sortBy)) {
+      sortObject[sortBy] = sortOrder
+    } else {
+      sortObject['date'] = sortOrder
+    }
+    sortObject['createdAt'] = -1 // Secondary fallback sort
+
     const [invoices, totalCount] = await Promise.all([
       collection.find(matchQuery)
-        .sort({ date: -1, createdAt: -1 })
+        .sort(sortObject)
         .skip(skip)
         .limit(limit)
         .toArray(),

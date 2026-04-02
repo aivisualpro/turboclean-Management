@@ -506,15 +506,14 @@ function sortIcon(field: string) {
           <table class="w-full text-sm caption-bottom border-collapse">
             <TableHeader class="sticky top-0 z-10 bg-card backdrop-blur shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
               <TableRow>
-                <TableHead class="w-[80px]">#</TableHead>
-
+                <TableHead class="w-[80px] cursor-pointer" @click="toggleSort('number')"><div class="flex items-center gap-1"># <Icon :name="sortIcon('number')" class="size-3 opacity-50" /></div></TableHead>
                 <TableHead class="cursor-pointer" @click="toggleSort('date')"><div class="flex items-center gap-1">Date <Icon :name="sortIcon('date')" class="size-3 opacity-50" /></div></TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead class="text-right">Subtotal</TableHead>
-                <TableHead class="text-right">Tax</TableHead>
-                <TableHead class="text-right">Total</TableHead>
+                <TableHead class="cursor-pointer" @click="toggleSort('type')"><div class="flex items-center gap-1">Type <Icon :name="sortIcon('type')" class="size-3 opacity-50" /></div></TableHead>
+                <TableHead class="text-right cursor-pointer" @click="toggleSort('subtotal')"><div class="flex items-center justify-end gap-1">Subtotal <Icon :name="sortIcon('subtotal')" class="size-3 opacity-50" /></div></TableHead>
+                <TableHead class="text-right cursor-pointer" @click="toggleSort('taxTotal')"><div class="flex items-center justify-end gap-1">Tax <Icon :name="sortIcon('taxTotal')" class="size-3 opacity-50" /></div></TableHead>
+                <TableHead class="text-right cursor-pointer" @click="toggleSort('total')"><div class="flex items-center justify-end gap-1">Total <Icon :name="sortIcon('total')" class="size-3 opacity-50" /></div></TableHead>
                 <TableHead class="text-center">Items</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead class="cursor-pointer" @click="toggleSort('status')"><div class="flex items-center gap-1">Status <Icon :name="sortIcon('status')" class="size-3 opacity-50" /></div></TableHead>
                 <TableHead class="text-center">Actions</TableHead>
               </TableRow>
             </TableHeader>

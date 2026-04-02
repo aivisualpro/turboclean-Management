@@ -42,6 +42,9 @@ export function generateInvoiceHtml(doc: any): string {
         body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
         .print-wrapper { box-shadow: none !important; border: none !important; margin: 0 !important; max-width: 100% !important; border-radius: 0 !important; }
         .print-inner { padding: 20px !important; }
+        table { page-break-inside: auto; }
+        tr { page-break-inside: avoid; page-break-after: auto; }
+        thead { display: table-header-group; }
       }
     </style>
   </head>
@@ -162,7 +165,7 @@ export async function htmlToPdfBuffer(html: string): Promise<Buffer> {
     const pdfBuffer = await page.pdf({
       format: 'Letter',
       printBackground: true,
-      margin: { top: '0', right: '0', bottom: '0', left: '0' },
+      margin: { top: '20px', right: '0', bottom: '20px', left: '0' },
     })
     return Buffer.from(pdfBuffer)
   } finally {
