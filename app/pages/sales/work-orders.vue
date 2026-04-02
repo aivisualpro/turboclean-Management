@@ -283,11 +283,16 @@ async function saveEdit() {
 // Fire immediately during setup — no loading delay
 // Initial Fetch with SSR/Navigation caching
 await useAsyncData('work-orders-init', async () => {
-  if (treeData.value.length === 0 || workOrders.value.length === 0) {
+  // Always reset on navigation to prevent useState double-append
+  workOrders.value = []
+  skip.value = 0
+  hasMore.value = true
+  if (treeData.value.length === 0) {
     await Promise.all([fetchTree(), fetchWorkOrders()])
   } else {
+    // Tree already cached, just refresh data
     fetchTree()
-    fetchWorkOrders()
+    await fetchWorkOrders()
   }
   return true
 })

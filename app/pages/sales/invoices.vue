@@ -308,11 +308,15 @@ const vIntersect = {
 
 // Fire immediately during setup — no loading delay
 await useAsyncData('invoices-init', async () => {
-  if (treeData.value.length === 0 || invoices.value.length === 0) {
+  // Always reset on navigation to prevent useState double-append
+  invoices.value = []
+  skip.value = 0
+  hasMore.value = true
+  if (treeData.value.length === 0) {
     await Promise.all([fetchTree(), fetchInvoices()])
   } else {
     fetchTree()
-    fetchInvoices()
+    await fetchInvoices()
   }
   return true
 })

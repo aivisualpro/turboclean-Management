@@ -181,7 +181,7 @@ export default defineEventHandler(async (event) => {
 
       rawWorkOrders = await collection
         .find(matchQuery)
-        .sort({ [mongoSortField]: sortDir } as any)
+        .sort({ [mongoSortField]: sortDir, _id: sortDir } as any)
         .skip(skip)
         .limit(limit)
         .toArray()
