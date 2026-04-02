@@ -121,7 +121,7 @@ async function fetchTree() {
 }
 
 // ─── Table Data Fetching ─────────────────────────────────────────────────
-const workOrders = useState<any[]>('wo-list', () => [])
+const workOrders = ref<any[]>([])
 const loading = ref(false)
 const hasMore = ref(true)
 const skip = ref(0)
@@ -283,19 +283,15 @@ async function saveEdit() {
 // Fire immediately during setup — no loading delay
 // Initial Fetch with SSR/Navigation caching
 await useAsyncData('work-orders-init', async () => {
-  // Always reset on navigation to prevent useState double-append
-  workOrders.value = []
-  skip.value = 0
-  hasMore.value = true
   if (treeData.value.length === 0) {
-    await Promise.all([fetchTree(), fetchWorkOrders()])
+    await Promise.all([fetchTree(), fetchWorkOrders(true)])
   } else {
     // Tree already cached, just refresh data
     fetchTree()
-    await fetchWorkOrders()
+    await fetchWorkOrders(true)
   }
   return true
-})
+}, { dedupe: 'defer' })
 
 useLiveSync('WorkOrders', () => {
   fetchTree()
@@ -421,7 +417,8 @@ watch(() => customWeeklyForm.value.startDate, (newVal) => {
 const generatingCustomWeekly = ref(false)
 const allDealersList = ref<any[]>([])
 const dealerSearch = ref('')
-const startDateInputRef = ref<HTMLInputElement | null>(null)
+const dealerPopoverOpen = ref(false)
+const startDateInputRef = ref<any>(null)
 
 const filteredDealersList = computed(() => {
   const q = dealerSearch.value.toLowerCase().trim()
@@ -432,18 +429,23 @@ const filteredDealersList = computed(() => {
 function selectWeeklyDealer(id: string) {
   customWeeklyForm.value.dealerId = id
   dealerSearch.value = ''
-  // Focus start date input after a tick (popover needs to close first)
-  nextTick(() => {
-    startDateInputRef.value?.focus()
-  })
+  dealerPopoverOpen.value = false
+  // Focus start date input after popover close animation
+  setTimeout(() => {
+    const el = startDateInputRef.value?.$el || startDateInputRef.value
+    if (el) {
+      el.focus()
+      el.showPicker?.()
+    }
+  }, 150)
 }
 
-// Auto-select when search narrows to exactly 1 result
-watch(filteredDealersList, (list) => {
-  if (list.length === 1 && dealerSearch.value.trim() && list[0]) {
-    selectWeeklyDealer(list[0].id)
+// Press Enter to select when there is at least 1 filtered result
+function handleDealerSearchEnter() {
+  if (filteredDealersList.value.length >= 1 && dealerSearch.value.trim()) {
+    selectWeeklyDealer(filteredDealersList.value[0].id)
   }
-})
+}
 
 const maxWeeklyEndDate = computed(() => {
   if (!customWeeklyForm.value.startDate) return ''
@@ -972,7 +974,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
         <div class="grid gap-4 py-4">
           <div class="space-y-2">
             <Label>Dealer</Label>
-            <Popover>
+            <Popover v-model:open="dealerPopoverOpen">
               <PopoverTrigger as-child>
                 <Button variant="outline" class="w-full justify-between font-normal" :class="!customWeeklyForm.dealerId && 'text-muted-foreground'">
                   {{ allDealersList.find(d => d.id === customWeeklyForm.dealerId)?.dealerName || 'Select dealer...' }}
@@ -986,6 +988,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                     v-model="dealerSearch"
                     placeholder="Search dealer..."
                     class="flex h-9 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
+                    @keydown.enter.prevent="handleDealerSearchEnter"
                   />
                 </div>
                 <div class="max-h-56 overflow-y-auto p-1">
