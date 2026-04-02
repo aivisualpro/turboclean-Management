@@ -150,13 +150,15 @@ export function generateInvoiceHtml(doc: any): string {
 export async function htmlToPdfBuffer(html: string): Promise<Buffer> {
   const browser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--font-render-hinting=none'],
+    ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
   })
 
   try {
     const page = await browser.newPage()
-    // Using networkidle2 and 35000ms to prevent timeout crashes when loading Google Fonts on large lists.
-    await page.setContent(html, { waitUntil: 'networkidle2', timeout: 35000 })
+    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 60000 })
+    // Small delay to ensure fonts settle
+    await new Promise(r => setTimeout(r, 500))
     const pdfBuffer = await page.pdf({
       format: 'Letter',
       printBackground: true,

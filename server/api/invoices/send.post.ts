@@ -152,7 +152,8 @@ export default defineEventHandler(async (event) => {
           contentType: 'application/pdf',
         })
       } catch (err: any) {
-        console.error('[Invoice Email] PDF generation failed:', err.message)
+        console.error('[Invoice Email] Weekly PDF generation failed:', err.message, err.stack)
+        // Fallback: attach as HTML if PDF fails
         attachments.push({
           filename: `${invoiceNumber || 'Weekly-Invoice'}.html`,
           content: Buffer.from(pdfHtml, 'utf-8'),

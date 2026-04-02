@@ -297,7 +297,7 @@ export default defineEventHandler(async (event) => {
       const taxTotal = lineItems.reduce((s, li) => s + li.tax, 0)
       const total = lineItems.reduce((s, li) => s + li.total, 0)
 
-      const { year, week, weekStart, weekEnd } = getISOWeek(new Date(startStr + 'T00:00:00Z'))
+      const { year, week } = getISOWeek(new Date(startStr + 'T00:00:00Z'))
 
       invoiceCounter++
       const invNumber = `W-INV-${startStr.replace(/-/g, '')}-${String(invoiceCounter).padStart(4, '0')}`
@@ -322,8 +322,8 @@ export default defineEventHandler(async (event) => {
         })(),
         weekNumber: week,
         weekYear: year,
-        weekStart: weekStart.toISOString(),
-        weekEnd: weekEnd.toISOString(),
+        weekStart: startStr + 'T00:00:00.000Z',
+        weekEnd: endStr + 'T23:59:59.999Z',
         lineItems,
         subtotal: Math.round(subtotal * 100) / 100,
         taxTotal: Math.round(taxTotal * 100) / 100,
@@ -338,16 +338,11 @@ export default defineEventHandler(async (event) => {
 
       await invoicesCollection.insertOne(invoice)
 
-      // Mark all included WOs as invoiced
+      // Mark all included WOs as invoiced (MongoDB only — no AppSheet sync for weekly)
       await db.collection('turboCleanWorkOrders').updateMany(
         { _id: { $in: allWOs.map(w => w._id) } },
         { $set: { isInvoiced: true } }
       )
-
-      try {
-        const rows = allWOs.map(wo => { wo.isInvoiced = true; return WorkOrdersMapper.toAppSheet(wo) })
-        for (let i = 0; i < rows.length; i += 100) await appSheetEdit('WorkOrders', rows.slice(i, i + 100))
-      } catch (err) { console.error('[AppSheet Sync Error]', err) }
 
       return { success: true, generated: 1, message: `Weekly invoice ${invNumber} created with ${allWOs.length} work orders (${startStr} to ${endStr}).` }
     }

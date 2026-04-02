@@ -135,7 +135,7 @@ export const WorkOrdersMapper = {
       dealer: mongoDoc.dealer?.toString() || '',
       date: mongoDoc.date ? new Date(mongoDoc.date).toISOString() : new Date().toISOString(),
       stockNumber: mongoDoc.stockNumber || 'N/A',
-      poNumber: mongoDoc.poNumber || 'N/A',
+      poNumber: mongoDoc.poNumber || '',
       vin: mongoDoc.vin || 'N/A',
       dealerServiceId: mongoDoc.dealerServiceId?.toString() || 'N/A',
       amount: Number(mongoDoc.amount) || 0,
