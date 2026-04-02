@@ -421,11 +421,28 @@ watch(() => customWeeklyForm.value.startDate, (newVal) => {
 const generatingCustomWeekly = ref(false)
 const allDealersList = ref<any[]>([])
 const dealerSearch = ref('')
+const startDateInputRef = ref<HTMLInputElement | null>(null)
 
 const filteredDealersList = computed(() => {
   const q = dealerSearch.value.toLowerCase().trim()
   if (!q) return allDealersList.value
   return allDealersList.value.filter(d => d.dealerName.toLowerCase().includes(q))
+})
+
+function selectWeeklyDealer(id: string) {
+  customWeeklyForm.value.dealerId = id
+  dealerSearch.value = ''
+  // Focus start date input after a tick (popover needs to close first)
+  nextTick(() => {
+    startDateInputRef.value?.focus()
+  })
+}
+
+// Auto-select when search narrows to exactly 1 result
+watch(filteredDealersList, (list) => {
+  if (list.length === 1 && dealerSearch.value.trim() && list[0]) {
+    selectWeeklyDealer(list[0].id)
+  }
 })
 
 const maxWeeklyEndDate = computed(() => {
@@ -978,7 +995,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                     :key="d.id"
                     class="relative flex w-full cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
                     :class="customWeeklyForm.dealerId === d.id ? 'bg-accent text-accent-foreground font-medium' : ''"
-                    @click="customWeeklyForm.dealerId = d.id; dealerSearch = ''"
+                    @click="selectWeeklyDealer(d.id)"
                   >
                     <Icon name="lucide:check" class="mr-2 size-4" :class="customWeeklyForm.dealerId === d.id ? 'opacity-100' : 'opacity-0'" />
                     {{ d.dealerName }}
@@ -990,7 +1007,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
           
           <div class="space-y-2">
             <Label>Start Date</Label>
-            <Input type="date" v-model="customWeeklyForm.startDate" />
+            <Input ref="startDateInputRef" type="date" v-model="customWeeklyForm.startDate" />
           </div>
 
           <div class="space-y-2">
