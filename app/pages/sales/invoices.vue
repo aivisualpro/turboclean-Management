@@ -303,10 +303,10 @@ const vIntersect = {
 }
 
 // Fire immediately during setup — no loading delay
-if (import.meta.client) {
-  fetchTree()
-  fetchInvoices()
-}
+await useAsyncData('invoices-init', async () => {
+  await Promise.all([fetchTree(), fetchInvoices()])
+  return true
+})
 
 useLiveSync('Invoices', () => {
   fetchTree()

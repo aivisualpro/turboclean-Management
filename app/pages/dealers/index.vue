@@ -13,6 +13,10 @@ const { setHeader } = usePageHeader()
 setHeader({ title: 'Dealers', icon: 'i-lucide-building-2' })
 
 const { dealers, authorised, pending, rejected, inFollowup, updateDealer, patchDealer, deleteDealer, deleteAllDealerServices, fetchDealers, isLoading } = useDealers()
+await useAsyncData('dealers-init', async () => {
+  await fetchDealers()
+  return true
+})
 const { isActionAllowed, isAdmin } = usePermissions()
 const canAdd = computed(() => isActionAllowed('dealers', 'Add'))
 const canEdit = computed(() => isActionAllowed('dealers', 'Edit'))

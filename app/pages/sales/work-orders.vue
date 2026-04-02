@@ -277,10 +277,11 @@ async function saveEdit() {
 }
 
 // Fire immediately during setup — no loading delay
-if (import.meta.client) {
-  fetchTree()
-  fetchWorkOrders()
-}
+// Initial Fetch with SSR/Navigation caching
+await useAsyncData('work-orders-init', async () => {
+  await Promise.all([fetchTree(), fetchWorkOrders()])
+  return true
+})
 
 useLiveSync('WorkOrders', () => {
   fetchTree()

@@ -24,10 +24,7 @@ export function useServices() {
     }
   }
 
-  // Fetch on client init if empty
-  if (import.meta.client && services.value.length === 0) {
-    fetchServices()
-  }
+  // Fetch on client init handled by pages via useAsyncData to prevent layout shift
 
   async function importServices(newServices: Omit<Service, 'id' | 'createdAt' | 'updatedAt'>[]) {
     try {

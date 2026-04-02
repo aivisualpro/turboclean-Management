@@ -71,10 +71,7 @@ export function useDealers() {
     }
   }
 
-  // Fetch on client init (always, to ensure fresh data)
-  if (import.meta.client) {
-    fetchDealers()
-  }
+// Fetch on client init handled by pages via useAsyncData to prevent layout shift
 
   function addDealer(dealer: Omit<Dealer, 'id' | 'createdAt' | 'updatedAt'>) {
     // For now, optimistic update UI, should add POST /api/dealers

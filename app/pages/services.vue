@@ -8,6 +8,12 @@ const { setHeader } = usePageHeader()
 setHeader({ title: 'Services', icon: 'i-lucide-briefcase' })
 
 const { services, isLoading, fetchServices } = useServices()
+await useAsyncData('services-init', async () => {
+  if (services.value.length === 0) {
+    await fetchServices()
+  }
+  return true
+})
 const { isActionAllowed, isAdmin } = usePermissions()
 const canAdd = computed(() => isActionAllowed('services', 'Add'))
 const canEdit = computed(() => isActionAllowed('services', 'Edit'))

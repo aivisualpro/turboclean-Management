@@ -23,18 +23,12 @@ export function useKanban() {
 
   async function loadBoard() {
     try {
-      if (isClient) {
-        const { columns } = await $fetch<{ columns: Column[] }>('/api/tasks')
-        board.value.columns = columns
-      }
+      const { columns } = await $fetch<{ columns: Column[] }>('/api/tasks')
+      board.value.columns = columns
     } catch {
       board.value = defaultBoard
     }
   }
-
-  onMounted(() => {
-    loadBoard()
-  })
 
   // We remove persist() completely since we'll rely on specific endpoint calls
   async function persist() {
@@ -178,5 +172,6 @@ export function useKanban() {
     removeSubtask,
     addComment,
     removeComment,
+    loadBoard,
   }
 }
