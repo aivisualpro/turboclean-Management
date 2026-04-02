@@ -226,8 +226,8 @@ async function openEditModal(row: any) {
   if (row.dealerId) {
     loadingServices.value = true
     try {
-      const dealers = await $fetch<any[]>('/api/dealers')
-      const dealer = dealers.find((d: any) => d.id === row.dealerId)
+      const res = await $fetch<{ dealers: any[] }>('/api/dealers')
+      const dealer = (res.dealers || []).find((d: any) => d.id === row.dealerId)
       if (dealer?.services) {
         // Resolve service names
         const services = await $fetch<any[]>('/api/services')
@@ -458,8 +458,8 @@ async function openCustomWeeklyModal() {
   customWeeklyForm.value = { dealerId: '', startDate: '', endDate: '' }
   dealerSearch.value = ''
   if (allDealersList.value.length === 0) {
-     const res = await $fetch<any[]>('/api/dealers')
-     allDealersList.value = res.sort((a,b) => (a.dealerName || '').localeCompare(b.dealerName || ''))
+     const res = await $fetch<{ dealers: any[] }>('/api/dealers')
+     allDealersList.value = (res.dealers || []).sort((a,b) => (a.dealerName || '').localeCompare(b.dealerName || ''))
   }
 }
 

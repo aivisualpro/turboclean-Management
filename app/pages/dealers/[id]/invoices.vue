@@ -182,8 +182,8 @@ async function openEmailDialog(inv: any) {
   if (inv.dealerId) {
     isFetchingContacts.value = true
     try {
-      const dealers = await $fetch<any[]>('/api/dealers')
-      const dlr = dealers.find((d: any) => d.id === inv.dealerId)
+      const res = await $fetch<{ dealers: any[] }>('/api/dealers')
+      const dlr = (res.dealers || []).find((d: any) => d.id === inv.dealerId)
       if (dlr) {
         const emails = new Set<string>()
         if (dlr.dealerEmail) emails.add(dlr.dealerEmail)

@@ -4,7 +4,7 @@ export default defineEventHandler(async (event) => {
   try {
     const { db } = await connectToDatabase()
     const collection = db.collection('turboCleanServices')
-    const docs = await collection.find({}).sort({ _id: -1 }).toArray()
+    const docs = await collection.find({}).sort({ service: 1 }).toArray()
     
     return docs.map(doc => ({
       id: doc._id.toString(),

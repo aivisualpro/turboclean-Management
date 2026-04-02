@@ -16,6 +16,7 @@ export default defineEventHandler(async (event) => {
 
     let query: any = {}
     const isAdmin = session?.role === 'Admin'
+    console.log(`[DEALERS GET] Session identified: ID=${session?.id}, Email=${session?.email}, Role=${session?.role}, IsAdmin=${isAdmin}`)
 
     // If restricted user, filter to only those in registerDealers
     if (!isAdmin && session && session.registerDealers && session.registerDealers.length > 0) {
@@ -23,12 +24,12 @@ export default defineEventHandler(async (event) => {
         try { acc.push(new ObjectId(id)); return acc } catch { return acc }
       }, [])
       
-      if (allowedIds.length === 0) return []
+      if (allowedIds.length === 0) return { dealers: [], meta: { totalCount: 0, totalDbCount: 0, isFiltered: true } }
       query = { _id: { $in: allowedIds } }
     } 
     // If not admin and no registerDealers, they see nothing
     else if (!isAdmin && (!session || !session.registerDealers || session.registerDealers.length === 0)) {
-      return []
+      return { dealers: [], meta: { totalCount: 0, totalDbCount: 0, isFiltered: true } }
     }
 
     const docs = await collection.find(query).sort({ dealer: 1 }).toArray()
@@ -54,7 +55,7 @@ export default defineEventHandler(async (event) => {
         status: doc.status || 'Pending',
         isTaxApplied: doc.isTaxApplied === true || doc.isTaxApplied === 'Y' || doc.isTaxApplied === 'true',
         taxPercentage: Number(doc.taxPercentage) || 0,
-        services: doc.services || [],
+        services: Array.isArray(doc.services) ? [...doc.services].sort((a, b) => (a.service || '').localeCompare(b.service || '')) : [],
         createdAt: doc.createdAt?.toISOString() || doc._id.getTimestamp().toISOString(),
         updatedAt: doc.updatedAt?.toISOString() || doc._id.getTimestamp().toISOString(),
         notes: doc.notes || ''

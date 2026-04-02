@@ -6,7 +6,7 @@ export default defineEventHandler(async (event) => {
     
     // Fetch users AND workspaces for resolution
     const [users, workspaces] = await Promise.all([
-      db.collection('turboCleanAppUsers').find({}).sort({ createdAt: -1 }).toArray(),
+      db.collection('turboCleanAppUsers').find({}).sort({ name: 1 }).toArray(),
       db.collection('turboCleanWorkspaces').find({}).toArray()
     ])
     

@@ -4,7 +4,7 @@ import { ObjectId } from 'mongodb'
 export default defineEventHandler(async (event) => {
   try {
     const { db } = await connectToDatabase()
-    const workspaces = await db.collection('turboCleanWorkspaces').find({}).sort({ createdAt: -1 }).toArray()
+    const workspaces = await db.collection('turboCleanWorkspaces').find({}).sort({ name: 1 }).toArray()
     
     // Map _id to id for frontend parity
     const mapped = workspaces.map(w => ({ ...w, id: w._id.toString() }))
