@@ -14,7 +14,11 @@ setHeader({ title: 'Dealers', icon: 'i-lucide-building-2' })
 
 const { dealers, authorised, pending, rejected, inFollowup, updateDealer, patchDealer, deleteDealer, deleteAllDealerServices, fetchDealers, isLoading } = useDealers()
 await useAsyncData('dealers-init', async () => {
-  await fetchDealers()
+  if (dealers.value.length === 0) {
+    await fetchDealers()
+  } else {
+    fetchDealers()
+  }
   return true
 })
 const { isActionAllowed, isAdmin } = usePermissions()

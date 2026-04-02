@@ -10,13 +10,17 @@ const canEditWO = computed(() => isActionAllowed('work_orders', 'Edit'))
 
 // ─── Base State ──────────────────────────────────────────────────────────
 const showImportModal = ref(false)
-const search = ref('')
+const search = useState('wo-search', () => '')
 const lastUpdatedBy = ref('')
-const activeTab = ref<'all' | 'false' | 'true'>('all')
+const activeTab = useState<'all' | 'false' | 'true'>('wo-tab', () => 'all')
 
-const globalDatePreset = ref('this_month')
-const customStartDate = ref('')
-const customEndDate = ref('')
+const globalDatePreset = useState('wo-preset', () => 'this_month')
+const customStartDate = useState('wo-cstart', () => '')
+const customEndDate = useState('wo-cend', () => '')
+
+watch(() => customStartDate.value, (newVal) => {
+  if (newVal && !customEndDate.value) customEndDate.value = newVal
+})
 
 const computedDates = computed(() => {
   const d = new Date()
@@ -62,12 +66,12 @@ const expandedYears   = ref(new Set<string>())
 const expandedMonths  = ref(new Set<string>())
 
 // The active node filter for the right table
-const activeFilter = ref<{
+const activeFilter = useState<{
   label: string
   dealerId?: string
   dateStart?: string
   dateEnd?: string
-}>({ label: 'All Work Orders' })
+}>('wo-filter', () => ({ label: 'All Work Orders' }))
 
 // ─── Formatter Helpers ───────────────────────────────────────────────────
 const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0)
@@ -94,7 +98,7 @@ function closeWoLightbox() {
 }
 
 // ─── Tree Data Fetching ──────────────────────────────────────────────────
-const treeData = ref<any[]>([])
+const treeData = useState<any[]>('wo-tree', () => [])
 const treeLoading = ref(false)
 
 async function fetchTree() {
@@ -117,7 +121,7 @@ async function fetchTree() {
 }
 
 // ─── Table Data Fetching ─────────────────────────────────────────────────
-const workOrders = ref<any[]>([])
+const workOrders = useState<any[]>('wo-list', () => [])
 const loading = ref(false)
 const hasMore = ref(true)
 const skip = ref(0)
@@ -279,7 +283,12 @@ async function saveEdit() {
 // Fire immediately during setup — no loading delay
 // Initial Fetch with SSR/Navigation caching
 await useAsyncData('work-orders-init', async () => {
-  await Promise.all([fetchTree(), fetchWorkOrders()])
+  if (treeData.value.length === 0 || workOrders.value.length === 0) {
+    await Promise.all([fetchTree(), fetchWorkOrders()])
+  } else {
+    fetchTree()
+    fetchWorkOrders()
+  }
   return true
 })
 
@@ -397,6 +406,13 @@ const generatingWeekly = ref(false)
 
 const showCustomWeeklyModal = ref(false)
 const customWeeklyForm = ref({ dealerId: '', startDate: '', endDate: '' })
+
+watch(() => customWeeklyForm.value.startDate, (newVal) => {
+  if (newVal && !customWeeklyForm.value.endDate) {
+    customWeeklyForm.value.endDate = newVal
+  }
+})
+
 const generatingCustomWeekly = ref(false)
 const allDealersList = ref<any[]>([])
 

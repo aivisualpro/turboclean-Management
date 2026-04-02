@@ -5,6 +5,8 @@ const { loadBoard, board } = useKanban()
 await useAsyncData('tasks-init', async () => {
   if (!board.value.columns?.length) {
     await loadBoard()
+  } else {
+    loadBoard()
   }
   return true
 })

@@ -11,6 +11,8 @@ const { services, isLoading, fetchServices } = useServices()
 await useAsyncData('services-init', async () => {
   if (services.value.length === 0) {
     await fetchServices()
+  } else {
+    fetchServices()
   }
   return true
 })
