@@ -208,7 +208,7 @@ function closeLightbox() {
     </div>
 
     <!-- 3. Reading Pane -->
-    <div class="flex-1 flex flex-col min-w-0 bg-white relative">
+    <div class="flex-1 flex flex-col min-w-0 bg-card relative">
       <div v-if="!selectedEmail && !loading" class="absolute inset-0 flex flex-col items-center justify-center opacity-40 select-none">
         <Mail class="size-16 mb-4 text-muted-foreground stroke-1" />
         <h3 class="text-lg font-medium">No Email Selected</h3>
@@ -245,9 +245,9 @@ function closeLightbox() {
           </div>
         </div>
 
-        <!-- Render HTML Body -->
-        <div class="flex-1 overflow-y-auto p-6 md:p-8 relative">
-          <div class="prose prose-sm prose-slate max-w-none w-full break-words [&_a]:text-blue-600 [&_img]:max-w-full" v-html="selectedEmail.bodyHtml"></div>
+        <!-- Render HTML Body (Isolated into iframe so rigid inline bg/colors don't break Dark Mode) -->
+        <div class="flex-1 relative overflow-hidden bg-white/5">
+          <iframe :srcdoc="selectedEmail.bodyHtml" class="w-full h-full border-0 bg-white block"></iframe>
         </div>
         
         <!-- Attachments Strip -->
