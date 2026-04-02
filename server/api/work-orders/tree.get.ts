@@ -13,13 +13,17 @@ export default defineEventHandler(async (event) => {
 
     // Session-based dealer filtering
     if (session && session.registerDealers && session.registerDealers.length > 0) {
-      const allowedIds = session.registerDealers.reduce((acc: any[], id: string) => {
+      const stringDealers = session.registerDealers || []
+      const objDealers = stringDealers.reduce((acc: any[], id: string) => {
         try { acc.push(new ObjectId(id)); return acc } catch { return acc }
       }, [])
-      if (allowedIds.length === 0) return []
-      matchQuery.dealer = { $in: allowedIds }
-    } else if (session) {
-      return []
+      const allowedDealers = [...stringDealers, ...objDealers]
+      
+      if (allowedDealers.length === 0) return { success: true, tree: [] }
+      matchQuery.dealer = { $in: allowedDealers }
+    } else if (session && session.role !== 'Admin' && (!session.registerDealers || session.registerDealers.length === 0)) {
+      // Non-admins with no dealers shouldn't see anything
+      return { success: true, tree: [] }
     }
 
     // 1. Filter: Invoiced vs Not Invoiced (if provided, e.g. 'true' or 'false')
@@ -33,7 +37,11 @@ export default defineEventHandler(async (event) => {
     }
 
     if (queryInfo.dealerId) {
-      matchQuery.dealer = new ObjectId(queryInfo.dealerId as string)
+      try {
+        matchQuery.dealer = new ObjectId(queryInfo.dealerId as string)
+      } catch {
+        matchQuery.dealer = queryInfo.dealerId as string
+      }
     }
 
     // 2. Filter: lastUpdatedBy
