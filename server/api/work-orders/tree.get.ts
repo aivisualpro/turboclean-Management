@@ -49,11 +49,17 @@ export default defineEventHandler(async (event) => {
       matchQuery.lastUpdatedBy = { $regex: queryInfo.lastUpdatedBy, $options: 'i' }
     }
 
-    // 3. Filter: Global Date Range
+    // 3. Filter: Global Date Range — use UTC date-string comparison to avoid timezone shifts
     if (queryInfo.dateStart || queryInfo.dateEnd) {
-      matchQuery.date = {}
-      if (queryInfo.dateStart) matchQuery.date.$gte = new Date(queryInfo.dateStart as string)
-      if (queryInfo.dateEnd) matchQuery.date.$lte = new Date(queryInfo.dateEnd as string)
+      const dateConditions: any[] = []
+      if (queryInfo.dateStart) {
+        dateConditions.push({ $gte: [{ $dateToString: { format: '%Y-%m-%d', date: '$date', timezone: 'UTC' } }, queryInfo.dateStart as string] })
+      }
+      if (queryInfo.dateEnd) {
+        dateConditions.push({ $lte: [{ $dateToString: { format: '%Y-%m-%d', date: '$date', timezone: 'UTC' } }, queryInfo.dateEnd as string] })
+      }
+      if (!matchQuery.$expr) matchQuery.$expr = { $and: dateConditions }
+      else matchQuery.$expr = { $and: [...(matchQuery.$expr.$and || [matchQuery.$expr]), ...dateConditions] }
     }
 
     // Pipeline to aggregate totals grouping by Dealer -> Date (Year/Month/Day)

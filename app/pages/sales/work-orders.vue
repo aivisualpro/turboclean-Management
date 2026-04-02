@@ -415,6 +415,13 @@ watch(() => customWeeklyForm.value.startDate, (newVal) => {
 
 const generatingCustomWeekly = ref(false)
 const allDealersList = ref<any[]>([])
+const dealerSearch = ref('')
+
+const filteredDealersList = computed(() => {
+  const q = dealerSearch.value.toLowerCase().trim()
+  if (!q) return allDealersList.value
+  return allDealersList.value.filter(d => d.dealerName.toLowerCase().includes(q))
+})
 
 const maxWeeklyEndDate = computed(() => {
   if (!customWeeklyForm.value.startDate) return ''
@@ -430,6 +437,7 @@ const isWeeklyFormValid = computed(() => {
 async function openCustomWeeklyModal() {
   showCustomWeeklyModal.value = true
   customWeeklyForm.value = { dealerId: '', startDate: '', endDate: '' }
+  dealerSearch.value = ''
   if (allDealersList.value.length === 0) {
      const res = await $fetch<any[]>('/api/dealers')
      allDealersList.value = res.sort((a,b) => (a.dealerName || '').localeCompare(b.dealerName || ''))
@@ -444,7 +452,7 @@ async function handleCustomWeeklyGenerate() {
       method: 'POST', 
       body: { type: 'custom_weekly', ...customWeeklyForm.value } 
     })
-    if (res.generated > 0) {
+    if (res.success && res.generated > 0) {
       toast.success(res.message)
       showCustomWeeklyModal.value = false
       fetchWorkOrders(true)
@@ -942,14 +950,37 @@ async function handleGenerate(type: 'daily' | 'weekly') {
         <div class="grid gap-4 py-4">
           <div class="space-y-2">
             <Label>Dealer</Label>
-            <Select v-model="customWeeklyForm.dealerId">
-              <SelectTrigger>
-                 <SelectValue placeholder="Select dealer..." />
-              </SelectTrigger>
-              <SelectContent>
-                 <SelectItem v-for="d in allDealersList" :key="d.id" :value="d.id">{{ d.dealerName }}</SelectItem>
-              </SelectContent>
-            </Select>
+            <Popover>
+              <PopoverTrigger as-child>
+                <Button variant="outline" class="w-full justify-between font-normal" :class="!customWeeklyForm.dealerId && 'text-muted-foreground'">
+                  {{ allDealersList.find(d => d.id === customWeeklyForm.dealerId)?.dealerName || 'Select dealer...' }}
+                  <Icon name="lucide:chevrons-up-down" class="ml-2 size-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent class="w-[350px] p-0" align="start">
+                <div class="flex items-center border-b px-3">
+                  <Icon name="lucide:search" class="mr-2 size-4 shrink-0 text-muted-foreground" />
+                  <input
+                    v-model="dealerSearch"
+                    placeholder="Search dealer..."
+                    class="flex h-9 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
+                  />
+                </div>
+                <div class="max-h-56 overflow-y-auto p-1">
+                  <div v-if="filteredDealersList.length === 0" class="py-6 text-center text-sm text-muted-foreground">No dealers found.</div>
+                  <button
+                    v-for="d in filteredDealersList"
+                    :key="d.id"
+                    class="relative flex w-full cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+                    :class="customWeeklyForm.dealerId === d.id ? 'bg-accent text-accent-foreground font-medium' : ''"
+                    @click="customWeeklyForm.dealerId = d.id; dealerSearch = ''"
+                  >
+                    <Icon name="lucide:check" class="mr-2 size-4" :class="customWeeklyForm.dealerId === d.id ? 'opacity-100' : 'opacity-0'" />
+                    {{ d.dealerName }}
+                  </button>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
           
           <div class="space-y-2">
