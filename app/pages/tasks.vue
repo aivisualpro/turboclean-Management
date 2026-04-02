@@ -2,13 +2,8 @@
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Tasks' })
 const { loadBoard, board } = useKanban()
-await useAsyncData('tasks-init', async () => {
-  if (!board.value.columns?.length) {
-    await loadBoard()
-  } else {
-    loadBoard()
-  }
-  return true
+onMounted(() => {
+  loadBoard()
 })
 </script>
 

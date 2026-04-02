@@ -24,9 +24,8 @@ const { setHeader } = usePageHeader()
 const { dealers, fetchDealers, updateDealer, deleteDealer, isLoading: dealersLoading } = useDealers()
 
 // Ensure dealers are loaded (handles direct navigation / page refresh)
-await useAsyncData('dealers-init', async () => {
-  if (dealers.value.length === 0) await fetchDealers()
-  return true
+onMounted(() => {
+  fetchDealers()
 })
 
 const dealer = computed(() => dealers.value.find(d => d.id === dealerId))
