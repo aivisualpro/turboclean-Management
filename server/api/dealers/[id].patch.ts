@@ -28,7 +28,12 @@ export default defineEventHandler(async (event) => {
     if (body.notes !== undefined) updateDoc.notes = body.notes
     if (body.status !== undefined) updateDoc.status = body.status
     if (body.contacts !== undefined) updateDoc.contacts = body.contacts
-    if (body.services !== undefined) updateDoc.services = body.services
+    if (body.services !== undefined) {
+      updateDoc.services = Array.isArray(body.services) ? body.services.map((srv: any) => ({
+        ...srv,
+        id: srv.id || srv._id || new ObjectId().toString()
+      })) : []
+    }
 
     let filter: any
     try {

@@ -15,6 +15,12 @@ export default defineEventHandler(async (event) => {
     const { db } = await connectToDatabase()
     const collection = db.collection('turboCleanDealers')
 
+    // Ensure every service has its own NEW unique ID (essential since it's a new dealer)
+    const services = Array.isArray(body.services) ? body.services.map((srv: any) => ({
+      ...srv,
+      id: new ObjectId().toString()
+    })) : []
+
     const newDealer: Record<string, any> = {
       dealer: body.dealerName,
       address: body.address || '',
@@ -22,7 +28,7 @@ export default defineEventHandler(async (event) => {
       status: body.status || 'Pending',
       isTaxApplied: body.isTaxApplied || false,
       taxPercentage: body.taxPercentage || 0,
-      services: body.services || [],
+      services: services,
       createdAt: new Date(),
       updatedAt: new Date(),
       notes: body.notes || ''
