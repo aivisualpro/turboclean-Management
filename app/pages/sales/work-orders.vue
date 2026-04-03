@@ -371,7 +371,15 @@ async function handleExport() {
   try {
     toast.info('Preparing export...')
     const res = await $fetch('/api/work-orders', {
-      query: { search: search.value, export: 'true', dealerId: activeFilter.value.dealerId, dateStart: activeFilter.value.dateStart, dateEnd: activeFilter.value.dateEnd, isInvoiced: activeTab.value === 'all' ? '' : activeTab.value, lastUpdatedBy: lastUpdatedBy.value }
+      query: { 
+        search: search.value, 
+        export: 'true', 
+        dealerId: activeFilter.value.dealerId, 
+        dateStart: activeFilter.value.dateStart || computedDates.value.start, 
+        dateEnd: activeFilter.value.dateEnd || computedDates.value.end, 
+        isInvoiced: activeTab.value === 'all' ? '' : activeTab.value, 
+        lastUpdatedBy: lastUpdatedBy.value 
+      }
     })
     
     // @ts-ignore
@@ -381,13 +389,17 @@ async function handleExport() {
       return toast.error('No work orders found to export')
     }
 
-    const headers = ['Object ID', 'Date', 'Stock Number', 'PO Number', 'VIN', 'Dealer', 'Service', 'Amount', 'Tax', 'Total', 'Notes', 'Is Invoiced', 'Image', 'Last Updated By']
+    const headers = ['Date', 'Stock Number', 'PO Number', 'VIN', 'Service', 'Amount', 'Tax', 'Total', 'Notes']
     const rows = dataToExport.map((wo: any) => [
-      wo.id, wo.date ? new Date(wo.date).toLocaleDateString() : '', wo.stockNumber, wo.poNumber || '', wo.vin,
-      `"${(wo.dealerName || wo.dealerId || '').replace(/"/g, '""')}"`,
+      wo.date ? new Date(wo.date).toLocaleDateString() : '', 
+      wo.stockNumber, 
+      wo.poNumber || '', 
+      wo.vin,
       `"${(wo.dealerServiceId || wo.rawServiceId || '').replace(/"/g, '""')}"`,
-      wo.amount, wo.tax, wo.total,
-      `"${(wo.notes || '').replace(/"/g, '""')}"`, wo.isInvoiced ? 'Yes' : 'No', wo.upload || '', wo.lastUpdatedBy || ''
+      wo.amount, 
+      wo.tax, 
+      wo.total,
+      `"${(wo.notes || '').replace(/"/g, '""')}"`
     ])
 
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
