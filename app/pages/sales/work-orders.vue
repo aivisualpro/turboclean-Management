@@ -389,18 +389,22 @@ async function handleExport() {
       return toast.error('No work orders found to export')
     }
 
-    const headers = ['Date', 'Stock Number', 'PO Number', 'VIN', 'Service', 'Amount', 'Tax', 'Total', 'Notes']
-    const rows = dataToExport.map((wo: any) => [
-      wo.date ? new Date(wo.date).toLocaleDateString() : '', 
-      wo.stockNumber, 
-      wo.poNumber || '', 
-      wo.vin,
-      `"${(wo.dealerServiceId || wo.rawServiceId || '').replace(/"/g, '""')}"`,
-      wo.amount, 
-      wo.tax, 
-      wo.total,
-      `"${(wo.notes || '').replace(/"/g, '""')}"`
-    ])
+    const headers = ['DATE', 'STOCK #', 'LAST 8 OF VIN', 'CLEAN TYPE', 'PO AMOUNT', 'TAX 6.35%', 'TOTAL', 'PO']
+    const rows = dataToExport.map((wo: any) => {
+      const vinStr = String(wo.vin || '')
+      const last8Vin = vinStr.length > 8 ? vinStr.slice(-8) : vinStr
+      
+      return [
+        wo.date ? new Date(wo.date).toLocaleDateString() : '', 
+        wo.stockNumber || '', 
+        last8Vin,
+        `"${(wo.dealerServiceId || wo.rawServiceId || '').replace(/"/g, '""')}"`,
+        wo.amount || 0, 
+        wo.tax || 0, 
+        wo.total || 0,
+        wo.poNumber || ''
+      ]
+    })
 
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
