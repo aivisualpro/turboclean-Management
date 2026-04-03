@@ -363,7 +363,11 @@ function sortIcon(field: string) {
   return sortDir.value === -1 ? 'lucide:arrow-down' : 'lucide:arrow-up'
 }
 
+const exporting = ref(false)
+
 async function handleExport() {
+  if (exporting.value) return
+  exporting.value = true
   try {
     toast.info('Preparing export...')
     const res = await $fetch('/api/work-orders', {
@@ -372,12 +376,17 @@ async function handleExport() {
     
     // @ts-ignore
     const dataToExport = res.workOrders || []
-    if (dataToExport.length === 0) return toast.error('No work orders found to export')
+    if (dataToExport.length === 0) {
+      exporting.value = false
+      return toast.error('No work orders found to export')
+    }
 
     const headers = ['Object ID', 'Date', 'Stock Number', 'PO Number', 'VIN', 'Dealer', 'Service', 'Amount', 'Tax', 'Total', 'Notes', 'Is Invoiced', 'Image', 'Last Updated By']
     const rows = dataToExport.map((wo: any) => [
       wo.id, wo.date ? new Date(wo.date).toLocaleDateString() : '', wo.stockNumber, wo.poNumber || '', wo.vin,
-      wo.dealerId, wo.rawServiceId, wo.amount, wo.tax, wo.total,
+      `"${(wo.dealerName || wo.dealerId || '').replace(/"/g, '""')}"`,
+      `"${(wo.dealerServiceId || wo.rawServiceId || '').replace(/"/g, '""')}"`,
+      wo.amount, wo.tax, wo.total,
       `"${(wo.notes || '').replace(/"/g, '""')}"`, wo.isInvoiced ? 'Yes' : 'No', wo.upload || '', wo.lastUpdatedBy || ''
     ])
 
@@ -386,13 +395,15 @@ async function handleExport() {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `work-orders-${new Date().toISOString().slice(0, 10)}.csv`
+    link.download = `work-orders-${activeFilter.value.label.replace(/[^a-z0-9]/gi, '_').toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`
     link.click()
     URL.revokeObjectURL(url)
-    toast.success(`Exported ${dataToExport.length} work orders`)
+    toast.success(`Exported ${dataToExport.length} work orders successfully!`)
   } catch (err) {
     console.error('Export failed:', err)
-    toast.error('Failed to export')
+    toast.error('Failed to export data')
+  } finally {
+    exporting.value = false
   }
 }
 
@@ -544,8 +555,14 @@ async function handleGenerate(type: 'daily' | 'weekly') {
             <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
             <Input v-model="search" placeholder="Search orders..." class="pl-8 w-44 h-8 text-sm" />
           </div>
-          <Button v-if="isAdmin" variant="outline" size="sm" class="h-8" @click="handleExport">
-            <Download class="mr-1 size-4" /> Export
+          <Button
+            @click="handleExport"
+            :disabled="exporting"
+            class="h-8 px-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 border-0 text-white shadow-md hover:shadow-lg transition-all duration-300 font-medium"
+          >
+            <Loader2 v-if="exporting" class="mr-1.5 size-4 animate-spin" />
+            <Download v-else class="mr-1.5 size-4" />
+            <span>Export CSV</span>
           </Button>
           <Button v-if="isAdmin" variant="outline" size="sm" class="h-8" @click="showImportModal = true">
             <Upload class="mr-1 size-4" /> Import
