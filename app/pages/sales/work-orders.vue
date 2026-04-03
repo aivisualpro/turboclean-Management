@@ -374,6 +374,8 @@ async function handleExport() {
       query: { 
         search: search.value, 
         export: 'true', 
+        sortBy: 'date',
+        sortDir: 1,
         dealerId: activeFilter.value.dealerId, 
         dateStart: activeFilter.value.dateStart || computedDates.value.start, 
         dateEnd: activeFilter.value.dateEnd || computedDates.value.end, 
