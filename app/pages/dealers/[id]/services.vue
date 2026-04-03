@@ -234,7 +234,7 @@ async function deleteService(srvId?: string) {
   deletingId.value = srvId
   try {
     const updated = props.dealer.services!.filter(s => s.id !== srvId)
-    await patchDealer(props.dealer.id, { services: updated })
+    await patchDealer(props.dealer.id, { services: updated, deletedServiceId: srvId })
     toast.success('Service removed')
   } catch (err: any) {
     toast.error(`Delete failed: ${err?.message || err}`)

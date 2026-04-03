@@ -111,6 +111,8 @@ export function useDealers() {
     return patchDealer(id, updates)
   }
 
+  const patchLocks = new Map<string, Promise<void>>()
+
   /** Patch a dealer field and sync to backend + AppSheet */
   async function patchDealer(id: string, updates: Record<string, any>) {
     console.log('[patchDealer] called with id=', id, 'updates=', JSON.stringify(updates))
@@ -126,6 +128,17 @@ export function useDealers() {
       console.log('[patchDealer] optimistic update done, isTaxApplied=', dealers.value[idx]!.isTaxApplied)
     } else {
       console.warn('[patchDealer] dealer not found in state — will still call API. id=', id)
+    }
+
+    // Serialize network requests to prevent MongoDB read-modify-write race conditions on concurrent rapid clicks
+    let previousLock = patchLocks.get(id)
+    let resolveLock!: () => void
+    const currentLock = new Promise<void>(resolve => { resolveLock = resolve })
+    patchLocks.set(id, currentLock)
+
+    if (previousLock) {
+      console.log(`[patchDealer] Waiting for previous patch to finish for dealer ${id}...`)
+      await previousLock
     }
 
     // Always make the API call regardless of local state
@@ -166,6 +179,11 @@ export function useDealers() {
         dealers.value.splice(idx, 1, snapshot)
       }
       throw err // Re-throw so callers can handle it
+    } finally {
+      if (patchLocks.get(id) === currentLock) {
+        patchLocks.delete(id)
+      }
+      resolveLock()
     }
   }
 

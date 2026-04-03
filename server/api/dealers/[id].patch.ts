@@ -28,7 +28,7 @@ export default defineEventHandler(async (event) => {
     if (body.notes !== undefined) updateDoc.notes = body.notes
     if (body.status !== undefined) updateDoc.status = body.status
     if (body.contacts !== undefined) updateDoc.contacts = body.contacts
-    if (body.services !== undefined) {
+    if (body.services !== undefined && !body.deletedServiceId) {
       updateDoc.services = Array.isArray(body.services) ? body.services.map((srv: any) => ({
         ...srv,
         id: srv.id || srv._id || new ObjectId().toString()
@@ -47,6 +47,15 @@ export default defineEventHandler(async (event) => {
     if (updateDoc.services !== undefined) {
       const existing = await db.collection('turboCleanDealers').findOne(filter, { projection: { services: 1 } })
       existingServiceIds = new Set((existing?.services || []).map((s: any) => s.id || s._id || '').filter(Boolean))
+    }
+
+    let pullResult
+    if (body.deletedServiceId) {
+      pullResult = await db.collection('turboCleanDealers').updateOne(
+        filter,
+        { $pull: { services: { id: body.deletedServiceId } } } as any
+      )
+      console.log(`[PATCH] Targeted delete of service ${body.deletedServiceId}: matched=${pullResult.matchedCount}, modified=${pullResult.modifiedCount}`)
     }
 
     const result = await db.collection('turboCleanDealers').updateOne(
@@ -76,8 +85,12 @@ export default defineEventHandler(async (event) => {
     }
 
     // ── Sync individual service rows to AppSheet DealerServices table ──
-    // Split into 'new' (Add) vs 'existing' (Edit) to avoid 404 warnings.
-    if (updateDoc.services !== undefined && Array.isArray(updateDoc.services)) {
+    if (body.deletedServiceId) {
+      appSheetDelete('DealerServices', [{ _id: body.deletedServiceId }])
+        .catch(e => console.error('[PATCH] AppSheet DealerServices Targeted Delete failed:', e?.message))
+        
+    } else if (updateDoc.services !== undefined && Array.isArray(updateDoc.services)) {
+      // Split into 'new' (Add) vs 'existing' (Edit) to avoid 404 warnings.
       const allRows = (updateDoc.services as any[]).map((srv: any) => ({
         _id: srv.id || srv._id || '',
         dealer: id,

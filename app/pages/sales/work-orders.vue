@@ -395,7 +395,7 @@ async function handleExport() {
       const last8Vin = vinStr.length > 8 ? vinStr.slice(-8) : vinStr
       
       return [
-        wo.date ? new Date(wo.date).toLocaleDateString() : '', 
+        wo.date ? new Date(wo.date).toLocaleDateString('en-US', { timeZone: 'UTC' }) : '', 
         wo.stockNumber || '', 
         last8Vin,
         `"${(wo.dealerServiceId || wo.rawServiceId || '').replace(/"/g, '""')}"`,
