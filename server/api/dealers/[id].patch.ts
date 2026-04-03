@@ -1,6 +1,6 @@
 import { connectToDatabase } from '../../utils/mongodb'
 import { ObjectId } from 'mongodb'
-import { appSheetEdit, appSheetAdd } from '../../utils/appsheet'
+import { appSheetEdit, appSheetAdd, appSheetDelete } from '../../utils/appsheet'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -90,6 +90,11 @@ export default defineEventHandler(async (event) => {
       const newRows      = allRows.filter(r => !existingServiceIds.has(r._id))
       const existingRows = allRows.filter(r =>  existingServiceIds.has(r._id))
 
+      const currentServiceIds = new Set(allRows.map(r => r._id))
+      const deletedRows = Array.from(existingServiceIds)
+        .filter(sid => !currentServiceIds.has(sid))
+        .map(sid => ({ _id: sid }))
+
       if (newRows.length > 0) {
         console.log(`[PATCH] Adding ${newRows.length} new service rows to AppSheet DealerServices`)
         appSheetAdd('DealerServices', newRows)
@@ -99,6 +104,11 @@ export default defineEventHandler(async (event) => {
         console.log(`[PATCH] Editing ${existingRows.length} existing service rows in AppSheet DealerServices`)
         appSheetEdit('DealerServices', existingRows)
           .catch(e => console.error('[PATCH] AppSheet DealerServices Edit failed:', e?.message))
+      }
+      if (deletedRows.length > 0) {
+        console.log(`[PATCH] Deleting ${deletedRows.length} removed service rows from AppSheet DealerServices`)
+        appSheetDelete('DealerServices', deletedRows)
+          .catch(e => console.error('[PATCH] AppSheet DealerServices Delete failed:', e?.message))
       }
     }
 
