@@ -143,6 +143,7 @@ async function fetchWorkOrders(reset = false) {
   if (!hasMore.value) return
 
   loading.value = true
+  const prevHeight = tableContainerRef.value?.scrollHeight || 0
   try {
     const res = await $fetch('/api/work-orders', {
       query: {
@@ -159,17 +160,35 @@ async function fetchWorkOrders(reset = false) {
       }
     })
 
-    // @ts-ignore
-    workOrders.value = [...workOrders.value, ...(res.workOrders || [])]
+    // Since backend sortDir=-1 returns newest first, reversing makes it oldest->newest.
+    const incomingData = (res.workOrders || []).slice().reverse()
+    if (reset) {
+      // @ts-ignore
+      workOrders.value = incomingData
+    } else {
+      // @ts-ignore
+      workOrders.value = [...incomingData, ...workOrders.value]
+    }
     // @ts-ignore
     hasMore.value = res.hasMore
     skip.value += limit
+
+    nextTick(() => {
+      if (reset && tableContainerRef.value) {
+        tableContainerRef.value.scrollTop = tableContainerRef.value.scrollHeight
+      } else if (!reset && tableContainerRef.value) {
+        // maintain scroll position visually when loading older items above
+        const newHeight = tableContainerRef.value.scrollHeight
+        tableContainerRef.value.scrollTop += (newHeight - prevHeight)
+      }
+    })
   } catch (err) {
     console.error(err)
   } finally {
     loading.value = false
   }
 }
+const tableContainerRef = ref<HTMLElement | null>(null)
 
 // ─── Observers & Lifecycles ──────────────────────────────────────────────
 const vIntersect = {
@@ -781,7 +800,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
         </div>
 
         <!-- Table Data -->
-        <div class="flex-1 overflow-auto">
+        <div class="flex-1 overflow-auto" ref="tableContainerRef">
           <table class="w-full text-sm caption-bottom border-collapse">
             <TableHeader class="sticky top-0 z-10 bg-card backdrop-blur shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
               <TableRow>
@@ -833,6 +852,16 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                     </TableCell>
                   </TableRow>
                 </template>
+
+                <!-- Load More Sentinel (Top) -->
+                <tr v-if="hasMore && workOrders.length > 0" v-intersect="fetchWorkOrders" class="h-10">
+                  <td :colspan="12" class="text-center">
+                    <div v-if="loading" class="flex justify-center py-4">
+                      <Loader2 class="size-4 animate-spin text-muted-foreground/50" />
+                    </div>
+                  </td>
+                </tr>
+
                 <TableRow v-for="wo in workOrders" :key="wo.id" class="cursor-pointer hover:bg-muted/50 transition-colors">
                   <TableCell class="font-medium text-xs whitespace-nowrap">{{ fmtDate(wo.date) }}</TableCell>
                   <TableCell class="text-xs">{{ wo.stockNumber }}</TableCell>
@@ -880,15 +909,6 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                     <p class="text-xs text-muted-foreground mt-1">Try adjusting your filters or selecting a different date range.</p>
                   </TableCell>
                 </TableRow>
-
-                <!-- Load More Sentinel -->
-                <tr v-if="hasMore && workOrders.length > 0" v-intersect="fetchWorkOrders" class="h-10">
-                  <td :colspan="12" class="text-center">
-                    <div v-if="loading" class="flex justify-center py-4">
-                      <Loader2 class="size-4 animate-spin text-muted-foreground/50" />
-                    </div>
-                  </td>
-                </tr>
               </TableBody>
 
               <template #fallback>
