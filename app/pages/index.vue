@@ -29,8 +29,8 @@ function getLastDayOfMonth(year: number, month: number) {
   return days
 }
 
-const df = new DateFormatter('en-US', { dateStyle: 'medium' })
-const todayDate = today(getLocalTimeZone())
+const df = new DateFormatter('en-US', { dateStyle: 'medium', timeZone: 'UTC' })
+const todayDate = today('UTC')
 const currentQuarter = Math.ceil(todayDate.month / 3)
 const currentYear = todayDate.year
 
@@ -139,7 +139,7 @@ function applyPreset(preset: string) {
 }
 
 function dateToISO(d: any): string {
-  return d.toDate(getLocalTimeZone()).toISOString().split('T')[0]
+  return d.toDate('UTC').toISOString().split('T')[0]
 }
 
 // ── Fetch real stats ──────────────────────────────
@@ -319,7 +319,7 @@ const avatarColors = [
               <Button variant="outline" size="sm" class="h-8 text-xs gap-1.5">
                 <CalendarIcon class="size-3.5" />
                 <template v-if="dateRange.start">
-                  {{ df.format(dateRange.start.toDate(getLocalTimeZone())) }} – {{ dateRange.end ? df.format(dateRange.end.toDate(getLocalTimeZone())) : '...' }}
+                  {{ df.format(dateRange.start.toDate('UTC')) }} – {{ dateRange.end ? df.format(dateRange.end.toDate('UTC')) : '...' }}
                 </template>
                 <template v-else>
                   Pick a date range
@@ -341,7 +341,7 @@ const avatarColors = [
           <!-- Date Range Display (for non-custom, non-all filters) -->
           <div v-else-if="activeFilter !== 'all' && dateRange.start" class="hidden md:flex items-center h-8 px-2.5 border rounded-lg bg-muted/30 text-xs text-muted-foreground">
             <CalendarIcon class="mr-1.5 size-3.5" />
-            {{ df.format(dateRange.start.toDate(getLocalTimeZone())) }} – {{ dateRange.end ? df.format(dateRange.end.toDate(getLocalTimeZone())) : '...' }}
+            {{ df.format(dateRange.start.toDate('UTC')) }} – {{ dateRange.end ? df.format(dateRange.end.toDate('UTC')) : '...' }}
           </div>
         </div>
       </Teleport>
