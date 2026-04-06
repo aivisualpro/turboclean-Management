@@ -73,8 +73,12 @@ export default defineEventHandler(async (event) => {
       DuplicateStock: newDealer.DuplicateStock ? 'Y' : 'N'
     }
 
-    appSheetAdd('Dealers', [appSheetRow])
-      .catch(e => console.error('[POST] AppSheet Dealers ADD failed:', e?.message))
+    const syncPromises: Promise<any>[] = []
+
+    syncPromises.push(
+      await appSheetAdd('Dealers', [appSheetRow])
+        .catch(e => console.error('[POST] AppSheet Dealers ADD failed:', e?.message))
+    )
 
     // Sync services to AppSheet if any were copied
     if (newDealer.services && newDealer.services.length > 0) {
@@ -88,10 +92,14 @@ export default defineEventHandler(async (event) => {
       })).filter((r: any) => r._id)
 
       if (serviceRows.length > 0) {
-        appSheetAdd('DealerServices', serviceRows)
-          .catch(e => console.error('[POST] AppSheet DealerServices ADD failed:', e?.message))
+        syncPromises.push(
+          await appSheetAdd('DealerServices', serviceRows)
+            .catch(e => console.error('[POST] AppSheet DealerServices ADD failed:', e?.message))
+        )
       }
     }
+
+    if (syncPromises.length > 0) await Promise.allSettled(syncPromises)
 
     return {
       success: true,

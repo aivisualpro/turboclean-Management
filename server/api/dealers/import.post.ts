@@ -47,7 +47,7 @@ export default defineEventHandler(async (event) => {
       const appSheetRows = dealersToInsert.map((doc: any, i: number) => 
         DealersMapper.toAppSheet({ ...doc, _id: insertedIds[i] })
       )
-      appSheetAdd('Dealers', appSheetRows).catch(err =>
+      await appSheetAdd('Dealers', appSheetRows).catch(err =>
         console.error('[Sync] Failed to add dealers to AppSheet:', err)
       )
     }

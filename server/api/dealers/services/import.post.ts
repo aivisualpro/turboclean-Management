@@ -78,7 +78,7 @@ export default defineEventHandler(async (event) => {
 
     // ── Sync to AppSheet ──
     if (allAppSheetRows.length > 0) {
-      appSheetAdd('DealerServices', allAppSheetRows).catch(err =>
+      await appSheetAdd('DealerServices', allAppSheetRows).catch(err =>
         console.error('[Sync] Failed to add dealer services to AppSheet:', err)
       )
     }

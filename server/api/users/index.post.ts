@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
     
     // ── Sync to AppSheet ──
     const insertedDoc = { ...doc, _id: result.insertedId }
-    appSheetAdd('AppUsers', [AppUsersMapper.toAppSheet(insertedDoc)]).catch(err =>
+    await appSheetAdd('AppUsers', [AppUsersMapper.toAppSheet(insertedDoc)]).catch(err =>
       console.error('[Sync] Failed to add user to AppSheet:', err)
     )
 

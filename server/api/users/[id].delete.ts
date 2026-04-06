@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
     await db.collection('turboCleanAppUsers').deleteOne({ _id: new ObjectId(id) })
 
     // ── Sync to AppSheet ──
-    appSheetDelete('AppUsers', [{ _id: id }]).catch(err =>
+    await appSheetDelete('AppUsers', [{ _id: id }]).catch(err =>
       console.error('[Sync] Failed to delete user from AppSheet:', err)
     )
 

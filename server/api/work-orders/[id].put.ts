@@ -64,7 +64,7 @@ export default defineEventHandler(async (event) => {
         // 1. AppSheet Sync
         const { appSheetEdit } = await import('../../utils/appsheet')
         const { WorkOrdersMapper } = await import('../../utils/sync-mapper')
-        appSheetEdit('WorkOrders', [WorkOrdersMapper.toAppSheet(finalDoc)]).catch(err => {
+        await appSheetEdit('WorkOrders', [WorkOrdersMapper.toAppSheet(finalDoc)]).catch(err => {
           console.error('[AppSheet Sync Error] Failed to sync WorkOrder update:', err)
         })
 

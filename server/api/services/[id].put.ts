@@ -29,7 +29,7 @@ export default defineEventHandler(async (event) => {
     const appSheetRow: Record<string, any> = { _id: id }
     if (updateDoc.service !== undefined) appSheetRow.service = updateDoc.service
     if (updateDoc.description !== undefined) appSheetRow.description = updateDoc.description
-    appSheetEdit('Services', [appSheetRow]).catch(err =>
+    await appSheetEdit('Services', [appSheetRow]).catch(err =>
       console.error('[Sync] Failed to edit service in AppSheet:', err)
     )
 

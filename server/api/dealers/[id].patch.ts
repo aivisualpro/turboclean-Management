@@ -85,14 +85,14 @@ export default defineEventHandler(async (event) => {
 
     if (Object.keys(appSheetRow).length > 1) {
       syncPromises.push(
-        appSheetEdit('Dealers', [appSheetRow])
+        await appSheetEdit('Dealers', [appSheetRow])
           .catch(e => console.error('[PATCH] AppSheet Dealers sync failed:', e?.message))
       )
     }
 
     // ── Sync individual service rows to AppSheet DealerServices table ──
     if (body.deletedServiceId) {
-      appSheetDelete('DealerServices', [{ _id: body.deletedServiceId }])
+      await appSheetDelete('DealerServices', [{ _id: body.deletedServiceId }])
         .catch(e => console.error('[PATCH] AppSheet DealerServices Targeted Delete failed:', e?.message))
         
     } else if (updateDoc.services !== undefined && Array.isArray(updateDoc.services)) {

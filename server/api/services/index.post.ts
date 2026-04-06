@@ -18,7 +18,7 @@ export default defineEventHandler(async (event) => {
     
     // ── Sync to AppSheet ──
     const insertedDoc = { ...doc, _id: result.insertedId }
-    appSheetAdd('Services', [ServicesMapper.toAppSheet(insertedDoc)]).catch(err =>
+    await appSheetAdd('Services', [ServicesMapper.toAppSheet(insertedDoc)]).catch(err =>
       console.error('[Sync] Failed to add service to AppSheet:', err)
     )
 

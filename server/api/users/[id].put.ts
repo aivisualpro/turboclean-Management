@@ -52,7 +52,7 @@ export default defineEventHandler(async (event) => {
     }
 
     if (Object.keys(appSheetRow).length > 1) {
-      appSheetEdit('AppUsers', [appSheetRow]).catch(err =>
+      await appSheetEdit('AppUsers', [appSheetRow]).catch(err =>
         console.error('[Sync] Failed to edit user in AppSheet:', err)
       )
     }

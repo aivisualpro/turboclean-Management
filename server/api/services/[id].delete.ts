@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
     await db.collection('turboCleanServices').deleteOne({ _id: new ObjectId(id) })
 
     // ── Sync to AppSheet ──
-    appSheetDelete('Services', [{ _id: id }]).catch(err =>
+    await appSheetDelete('Services', [{ _id: id }]).catch(err =>
       console.error('[Sync] Failed to delete service from AppSheet:', err)
     )
 
