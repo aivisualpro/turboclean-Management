@@ -623,8 +623,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
           <Button
             @click="handleExport"
             :disabled="exporting"
-            size="sm"
-            class="h-8"
+            class="h-8 px-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 border-0 text-white shadow-md hover:shadow-lg transition-all duration-300 font-medium"
           >
             <Loader2 v-if="exporting" class="mr-1.5 size-4 animate-spin" />
             <Download v-else class="mr-1.5 size-4" />
