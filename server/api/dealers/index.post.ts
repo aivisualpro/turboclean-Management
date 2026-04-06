@@ -29,6 +29,7 @@ export default defineEventHandler(async (event) => {
       isTaxApplied: body.isTaxApplied || false,
       taxPercentage: body.taxPercentage || 0,
       services: services,
+      DuplicateStock: body.DuplicateStock !== undefined ? Boolean(body.DuplicateStock) : false,
       createdAt: new Date(),
       updatedAt: new Date(),
       notes: body.notes || ''
@@ -69,7 +70,7 @@ export default defineEventHandler(async (event) => {
       phone: newDealer.phone || '',
       email: newDealer.email || '',
       notes: newDealer.notes || '',
-      DuplicateStock: 'N'
+      DuplicateStock: newDealer.DuplicateStock ? 'Y' : 'N'
     }
 
     appSheetAdd('Dealers', [appSheetRow])

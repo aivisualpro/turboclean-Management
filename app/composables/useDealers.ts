@@ -36,6 +36,7 @@ export interface Dealer {
   status: DealerStatus
   isTaxApplied: boolean
   taxPercentage: number
+  DuplicateStock?: boolean
   services?: DealerService[]
   createdAt: string
   updatedAt: string
@@ -106,7 +107,7 @@ export function useDealers() {
     }
   }
 
-  function updateDealer(id: string, updates: Partial<Pick<Dealer, 'dealerName' | 'address' | 'status' | 'contacts' | 'isTaxApplied' | 'taxPercentage'>>) {
+  function updateDealer(id: string, updates: Partial<Pick<Dealer, 'dealerName' | 'address' | 'status' | 'contacts' | 'isTaxApplied' | 'taxPercentage' | 'DuplicateStock'>>) {
     // Call patchDealer to handle both optimistic UI and API persistence
     return patchDealer(id, updates)
   }

@@ -32,6 +32,7 @@ const address = ref('')
 const status = ref<DealerStatus>('Pending')
 const isTaxApplied = ref(false)
 const taxPercentage = ref(0)
+const duplicateStock = ref(false)
 const copyFromDealerId = ref('')
 const contacts = ref<DealerContact[]>([])
 
@@ -42,6 +43,7 @@ watch(() => props.dealer, (d) => {
     status.value = d.status
     isTaxApplied.value = d.isTaxApplied
     taxPercentage.value = d.taxPercentage
+    duplicateStock.value = d.DuplicateStock ?? false
     contacts.value = JSON.parse(JSON.stringify(d.contacts))
   }
   else {
@@ -58,6 +60,7 @@ function resetForm() {
   address.value = ''
   status.value = 'Pending'
   copyFromDealerId.value = ''
+  duplicateStock.value = false
   contacts.value = [{
     id: Math.random().toString(36).slice(2, 10),
     name: '',
@@ -147,6 +150,7 @@ async function onSubmit() {
       status: status.value,
       isTaxApplied: isTaxApplied.value,
       taxPercentage: taxPercentage.value,
+      DuplicateStock: duplicateStock.value,
       contacts: cleanContacts,
     })
     toast.success('Dealer updated')
@@ -177,6 +181,7 @@ async function onSubmit() {
         status: status.value,
         isTaxApplied: isTaxApplied.value,
         taxPercentage: taxPercentage.value,
+        DuplicateStock: duplicateStock.value,
         contacts: cleanContacts,
         services: finalServices,
       })
@@ -246,6 +251,25 @@ async function onSubmit() {
           <div v-if="isTaxApplied" class="grid gap-2 animate-in fade-in slide-in-from-top-1">
             <Label>Tax Percentage (%)</Label>
             <Input type="number" step="0.01" v-model.number="taxPercentage" placeholder="0.00" />
+          </div>
+          <div class="flex items-center justify-between border rounded-lg p-3 bg-muted/5">
+            <div class="space-y-0.5">
+              <Label class="text-sm">Allow Duplicate Stock Numbers</Label>
+              <p class="text-[11px] text-muted-foreground">Let this dealer use the same stock number multiple times.</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="duplicateStock"
+              @click.stop.prevent="duplicateStock = !duplicateStock"
+              class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              :class="duplicateStock ? 'bg-primary' : 'bg-input'"
+            >
+              <span
+                class="pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform duration-200 ease-in-out"
+                :class="duplicateStock ? 'translate-x-5' : 'translate-x-0'"
+              />
+            </button>
           </div>
           <div v-if="!dealer" class="grid gap-2">
             <Label>Copy Services From</Label>

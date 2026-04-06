@@ -605,7 +605,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                 <TableCell class="text-xs">{{ wo.poNumber || '—' }}</TableCell>
                 <TableCell @click.stop>
                   <a v-if="wo.upload" :href="getAppSheetImageUrl(wo.upload)!" target="_blank" class="block w-9 h-9 rounded bg-muted border overflow-hidden hover:opacity-80 transition-opacity">
-                    <img :src="getAppSheetImageUrl(wo.upload)!" class="w-full h-full object-cover" loading="lazy" />
+                    <img :src="getAppSheetImageUrl(wo.upload)!" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer" @error="(e) => (e.target as HTMLElement).style.display = 'none'" />
                   </a>
                   <div v-else class="w-9 h-9 rounded bg-muted/50 border border-dashed flex items-center justify-center">
                     <Icon name="lucide:image-off" class="size-3.5 text-muted-foreground/40" />
@@ -720,15 +720,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
             <Textarea v-model="editForm.notes" rows="2" />
           </div>
           
-          <div class="space-y-2 col-span-2">
-            <Label>Photo / Image URL</Label>
-            <Input v-model="editForm.upload" placeholder="Upload Image Name or URL" />
-            <a v-if="editForm.upload" :href="getAppSheetImageUrl(editForm.upload)!" target="_blank" class="block max-w-sm h-32 mt-2 border rounded-md overflow-hidden bg-muted/20">
-              <img :src="getAppSheetImageUrl(editForm.upload)!" class="w-full h-full object-contain" />
-            </a>
           </div>
-
-        </div>
 
         <DialogFooter>
           <Button variant="outline" @click="showEditModal = false" :disabled="savingEdit">Cancel</Button>

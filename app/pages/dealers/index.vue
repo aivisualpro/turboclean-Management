@@ -207,6 +207,18 @@ async function handleToggleTax(d: Dealer, val?: boolean | any) {
   }
 }
 
+async function handleToggleDuplicateStock(d: Dealer, val?: boolean | any) {
+  const newVal = typeof val === 'boolean' ? val : !d.DuplicateStock
+  
+  toast.success(`Duplicate Stock ${newVal ? 'allowed' : 'restricted'} for ${d.dealerName}`)
+  
+  try {
+    await patchDealer(d.id, { DuplicateStock: !!newVal })
+  } catch (err: any) {
+    toast.error(`Failed: ${err?.message || err}`)
+  }
+}
+
 // Debounced tax percentage save
 const taxPercentageTimers = new Map<string, ReturnType<typeof setTimeout>>()
 function handleTaxPercentageChange(d: Dealer, value: string) {
@@ -623,6 +635,35 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
                           <span
                             class="pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform duration-200 ease-in-out"
                             :class="d.isTaxApplied ? 'translate-x-5' : 'translate-x-0'"
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- Row 4: Duplicate Stock toggle -->
+                    <div class="mt-4 flex items-center justify-between border-t border-border/40 pt-4" @click.stop>
+                      <div class="flex items-center gap-3">
+                        <div class="size-7 rounded-lg flex items-center justify-center transition-colors duration-300 shrink-0" :class="d.DuplicateStock ? 'bg-amber-500/10' : 'bg-muted/50'">
+                          <Icon name="lucide:copy" class="size-3.5" :class="d.DuplicateStock ? 'text-amber-500' : 'text-muted-foreground/50'" />
+                        </div>
+                        <div class="flex flex-col">
+                          <span class="text-xs font-medium" :class="d.DuplicateStock ? 'text-foreground' : 'text-muted-foreground'">Duplicate Stock</span>
+                          <span class="text-[10px] text-muted-foreground leading-none mt-0.5">{{ d.DuplicateStock ? 'Allowed' : 'Not Allowed' }}</span>
+                        </div>
+                      </div>
+
+                      <div class="flex items-center justify-end gap-3 flex-1 ml-4">
+                        <button
+                          type="button"
+                          role="switch"
+                          :aria-checked="d.DuplicateStock"
+                          @click.stop.prevent="handleToggleDuplicateStock(d, !d.DuplicateStock)"
+                          class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                          :class="d.DuplicateStock ? 'bg-amber-500' : 'bg-input'"
+                        >
+                          <span
+                            class="pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform duration-200 ease-in-out"
+                            :class="d.DuplicateStock ? 'translate-x-5' : 'translate-x-0'"
                           />
                         </button>
                       </div>

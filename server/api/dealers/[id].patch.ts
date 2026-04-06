@@ -21,6 +21,7 @@ export default defineEventHandler(async (event) => {
     // Only set fields that are explicitly provided
     if (body.isTaxApplied !== undefined) updateDoc.isTaxApplied = Boolean(body.isTaxApplied)
     if (body.taxPercentage !== undefined) updateDoc.taxPercentage = Number(body.taxPercentage)
+    if (body.DuplicateStock !== undefined) updateDoc.DuplicateStock = Boolean(body.DuplicateStock)
     if (body.dealer !== undefined) updateDoc.dealer = body.dealer
     if (body.phone !== undefined) updateDoc.phone = body.phone
     if (body.email !== undefined) updateDoc.email = body.email
@@ -78,6 +79,7 @@ export default defineEventHandler(async (event) => {
     if (updateDoc.status !== undefined) appSheetRow.status = updateDoc.status
     if (updateDoc.isTaxApplied !== undefined) appSheetRow.isTaxApplied = updateDoc.isTaxApplied ? 'Y' : 'N'
     if (updateDoc.taxPercentage !== undefined) appSheetRow.taxPercentage = updateDoc.taxPercentage
+    if (updateDoc.DuplicateStock !== undefined) appSheetRow.DuplicateStock = updateDoc.DuplicateStock ? 'Y' : 'N'
 
     if (Object.keys(appSheetRow).length > 1) {
       appSheetEdit('Dealers', [appSheetRow])

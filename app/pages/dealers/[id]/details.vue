@@ -32,6 +32,15 @@ async function handleToggleTax(val: boolean) {
   }
 }
 
+async function handleToggleDuplicateStock(val: boolean) {
+  try {
+    await patchDealer(props.dealer.id, { DuplicateStock: val })
+    toast.success(`Duplicate Stock ${val ? 'allowed' : 'restricted'}`)
+  } catch (err: any) {
+    toast.error(`Failed to update duplicate stock setting: ${err?.message || err}`)
+  }
+}
+
 async function handleTaxPercentageChange(e: FocusEvent) {
   const val = (e.target as HTMLInputElement)?.value ?? '0'
   const num = parseFloat(val) || 0
@@ -160,6 +169,36 @@ const primaryContact = computed(() => props.dealer.contacts?.[0] || null)
                 <span
                   class="pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform duration-200 ease-in-out"
                   :class="dealer.isTaxApplied ? 'translate-x-5' : 'translate-x-0'"
+                />
+              </button>
+            </div>
+          </div>
+
+          <!-- Duplicate Stock Toggle -->
+          <div class="flex items-center justify-between p-3 rounded-lg bg-muted/20 border" @click.stop>
+            <div class="flex items-center gap-3">
+              <div class="size-9 rounded-lg flex items-center justify-center transition-colors duration-300 shrink-0" :class="dealer.DuplicateStock ? 'bg-amber-500/10' : 'bg-muted/50'">
+                <Icon name="lucide:copy" class="size-4" :class="dealer.DuplicateStock ? 'text-amber-500' : 'text-muted-foreground'" />
+              </div>
+              <div class="flex flex-col">
+                <span class="text-xs font-semibold" :class="dealer.DuplicateStock ? 'text-foreground' : 'text-muted-foreground'">Duplicate Stock</span>
+                <span class="text-[10px] text-muted-foreground leading-none mt-0.5">{{ dealer.DuplicateStock ? 'Dealer is allowed to reuse stock numbers' : 'Duplicate stock numbers are restricted' }}</span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <!-- Toggle Switch -->
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="dealer.DuplicateStock"
+                @click.stop.prevent="handleToggleDuplicateStock(!dealer.DuplicateStock)"
+                class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                :class="dealer.DuplicateStock ? 'bg-amber-500' : 'bg-input'"
+              >
+                <span
+                  class="pointer-events-none block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform duration-200 ease-in-out"
+                  :class="dealer.DuplicateStock ? 'translate-x-5' : 'translate-x-0'"
                 />
               </button>
             </div>
