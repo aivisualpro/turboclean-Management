@@ -426,7 +426,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
             <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
             <Input v-model="search" placeholder="Search orders..." class="pl-8 w-44 h-8 text-sm" />
           </div>
-          <Button size="sm" class="h-8" @click="handleExport">
+          <Button class="h-8 px-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 border-0 text-white shadow-md hover:shadow-lg transition-all duration-300 font-medium" @click="handleExport">
             <Download class="mr-1 size-4" /> Export
           </Button>
           <Button variant="outline" size="sm" class="h-8" @click="showImportModal = true">
