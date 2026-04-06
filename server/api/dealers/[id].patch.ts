@@ -81,9 +81,13 @@ export default defineEventHandler(async (event) => {
     if (updateDoc.taxPercentage !== undefined) appSheetRow.taxPercentage = updateDoc.taxPercentage
     if (updateDoc.DuplicateStock !== undefined) appSheetRow.DuplicateStock = updateDoc.DuplicateStock ? 'Y' : 'N'
 
+    const syncPromises: Promise<any>[] = []
+
     if (Object.keys(appSheetRow).length > 1) {
-      appSheetEdit('Dealers', [appSheetRow])
-        .catch(e => console.error('[PATCH] AppSheet Dealers sync failed:', e?.message))
+      syncPromises.push(
+        appSheetEdit('Dealers', [appSheetRow])
+          .catch(e => console.error('[PATCH] AppSheet Dealers sync failed:', e?.message))
+      )
     }
 
     // ── Sync individual service rows to AppSheet DealerServices table ──
@@ -112,19 +116,24 @@ export default defineEventHandler(async (event) => {
 
       if (newRows.length > 0) {
         console.log(`[PATCH] Adding ${newRows.length} new service rows to AppSheet DealerServices`)
-        appSheetAdd('DealerServices', newRows)
-          .catch(e => console.error('[PATCH] AppSheet DealerServices Add failed:', e?.message))
+        syncPromises.push(appSheetAdd('DealerServices', newRows)
+          .catch(e => console.error('[PATCH] AppSheet DealerServices Add failed:', e?.message)))
       }
       if (existingRows.length > 0) {
         console.log(`[PATCH] Editing ${existingRows.length} existing service rows in AppSheet DealerServices`)
-        appSheetEdit('DealerServices', existingRows)
-          .catch(e => console.error('[PATCH] AppSheet DealerServices Edit failed:', e?.message))
+        syncPromises.push(appSheetEdit('DealerServices', existingRows)
+          .catch(e => console.error('[PATCH] AppSheet DealerServices Edit failed:', e?.message)))
       }
       if (deletedRows.length > 0) {
         console.log(`[PATCH] Deleting ${deletedRows.length} removed service rows from AppSheet DealerServices`)
-        appSheetDelete('DealerServices', deletedRows)
-          .catch(e => console.error('[PATCH] AppSheet DealerServices Delete failed:', e?.message))
+        syncPromises.push(appSheetDelete('DealerServices', deletedRows)
+          .catch(e => console.error('[PATCH] AppSheet DealerServices Delete failed:', e?.message)))
       }
+    }
+
+    // Await all AppSheet sync operations to ensure serverless processes don't terminate them prematurely
+    if (syncPromises.length > 0) {
+       await Promise.allSettled(syncPromises)
     }
 
     return {

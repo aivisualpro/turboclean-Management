@@ -33,43 +33,59 @@ interface AppSheetRequest {
 }
 
 /**
- * Make an API call to AppSheet
+ * Make an API call to AppSheet with robust retry logic
  */
-async function callAppSheet(tableName: string, payload: AppSheetRequest): Promise<any> {
+async function callAppSheet(tableName: string, payload: AppSheetRequest, maxRetries = 3): Promise<any> {
   const url = `${APPSHEET_BASE_URL}/${encodeURIComponent(tableName)}/Action`
 
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'ApplicationAccessKey': APPSHEET_ACCESS_KEY,
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(30_000),
-    })
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'ApplicationAccessKey': APPSHEET_ACCESS_KEY,
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(30_000),
+      })
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      if (response.status === 404) {
-        console.warn(`[AppSheet] Row not found in ${tableName} for ${payload.Action} (normal if unsynced).`)
-      } else {
-        console.error(`[AppSheet] Error ${response.status} for ${tableName}/${payload.Action}:`, errorText)
+      if (!response.ok) {
+        const errorText = await response.text()
+        if (response.status === 404) {
+          console.warn(`[AppSheet] Row not found in ${tableName} for ${payload.Action} (normal if unsynced).`)
+          return null // Do not retry 404s
+        }
+        
+        console.error(`[AppSheet] Error ${response.status} for ${tableName}/${payload.Action} on attempt ${attempt}:`, errorText)
+        // Only retry on rate limits (429) or 5xx server errors
+        if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+          return null;
+        }
+        throw new Error(`HTTP ${response.status}: ${errorText}`)
       }
-      return null
-    }
 
-    // Some actions (Delete) may not return JSON
-    const contentType = response.headers.get('content-type') || ''
-    if (contentType.includes('application/json')) {
-      return await response.json()
+      // Some actions (Delete) may not return JSON
+      const contentType = response.headers.get('content-type') || ''
+      if (contentType.includes('application/json')) {
+        return await response.json()
+      }
+      return await response.text()
     }
-    return await response.text()
+    catch (err: any) {
+      lastError = err;
+      console.error(`[AppSheet] Network/API error for ${tableName}/${payload.Action} on attempt ${attempt}:`, err.message)
+      if (attempt < maxRetries) {
+        const backoffMs = attempt * 2000; // 2s, 4s
+        console.log(`[AppSheet] Retrying in ${backoffMs}ms...`);
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
+      }
+    }
   }
-  catch (err: any) {
-    console.error(`[AppSheet] Network error for ${tableName}/${payload.Action}:`, err.message)
-    return null
-  }
+  
+  console.error(`[AppSheet] Exhausted all ${maxRetries} attempts for ${tableName}/${payload.Action}. Final error:`, lastError?.message)
+  return null
 }
 
 /**
