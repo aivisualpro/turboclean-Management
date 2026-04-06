@@ -410,22 +410,50 @@ async function handleExport() {
       return toast.error('No work orders found to export')
     }
 
-    const headers = ['DATE', 'STOCK #', 'LAST 8 OF VIN', 'CLEAN TYPE', 'PO AMOUNT', 'TAX 6.35%', 'TOTAL', 'PO']
-    const rows = dataToExport.map((wo: any) => {
-      const vinStr = String(wo.vin || '')
-      const last8Vin = vinStr.length > 8 ? vinStr.slice(-8) : vinStr
-      
-      return [
-        wo.date ? new Date(wo.date).toLocaleDateString('en-US', { timeZone: 'UTC' }) : '', 
-        (wo.stockNumber || '').toUpperCase(), 
-        last8Vin,
-        `"${(wo.dealerServiceId || wo.rawServiceId || '').replace(/"/g, '""')}"`,
-        wo.amount || 0, 
-        wo.tax || 0, 
-        wo.total || 0,
-        wo.poNumber || ''
-      ]
-    })
+    // Determine context dynamically checking all rows
+    const isAvonSelected = dataToExport.length > 0 && dataToExport.every((wo: any) => (wo.dealerName || '').toUpperCase().includes('AVON BODYSHOP'))
+    const isEhSelected = dataToExport.length > 0 && dataToExport.every((wo: any) => (wo.dealerName || '').toUpperCase().includes('EH BODYSHOP'))
+
+    let headers: string[] = []
+    let rows: any[] = []
+
+    if (isAvonSelected) {
+      headers = ['DATE OPENED', 'RO', 'PO', 'PO AMOUNT', 'TAX', 'TOTAL']
+      rows = dataToExport.map((wo: any) => [
+        wo.date ? new Date(wo.date).toLocaleDateString('en-US', { timeZone: 'UTC' }) : '',
+        `"${(wo.stockNumber || '').toUpperCase()}"`,
+        `"${wo.poNumber || ''}"`,
+        wo.amount || 0,
+        wo.tax || 0,
+        wo.total || 0
+      ])
+    } else if (isEhSelected) {
+      headers = ['DATE OPENED', 'RO', 'PO AMOUNT', 'SALES TAX', 'TOTAL']
+      rows = dataToExport.map((wo: any) => [
+        wo.date ? new Date(wo.date).toLocaleDateString('en-US', { timeZone: 'UTC' }) : '',
+        `"${(wo.stockNumber || '').toUpperCase()}"`,
+        wo.amount || 0,
+        wo.tax || 0,
+        wo.total || 0
+      ])
+    } else {
+      headers = ['DATE', 'STOCK #', 'LAST 8 OF VIN', 'CLEAN TYPE', 'PO AMOUNT', 'TAX 6.35%', 'TOTAL', 'PO']
+      rows = dataToExport.map((wo: any) => {
+        const vinStr = String(wo.vin || '')
+        const last8Vin = vinStr.length > 8 ? vinStr.slice(-8) : vinStr
+        
+        return [
+          wo.date ? new Date(wo.date).toLocaleDateString('en-US', { timeZone: 'UTC' }) : '', 
+          `"${(wo.stockNumber || '').toUpperCase()}"`, 
+          last8Vin,
+          `"${(wo.dealerServiceId || wo.rawServiceId || '').replace(/"/g, '""')}"`,
+          wo.amount || 0, 
+          wo.tax || 0, 
+          wo.total || 0,
+          `"${wo.poNumber || ''}"`
+        ]
+      })
+    }
 
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
@@ -595,7 +623,8 @@ async function handleGenerate(type: 'daily' | 'weekly') {
           <Button
             @click="handleExport"
             :disabled="exporting"
-            class="h-8 px-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 border-0 text-white shadow-md hover:shadow-lg transition-all duration-300 font-medium"
+            size="sm"
+            class="h-8"
           >
             <Loader2 v-if="exporting" class="mr-1.5 size-4 animate-spin" />
             <Download v-else class="mr-1.5 size-4" />

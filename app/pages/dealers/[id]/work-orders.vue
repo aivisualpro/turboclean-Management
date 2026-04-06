@@ -316,12 +316,37 @@ async function handleExport() {
     const dataToExport = res.workOrders || []
     if (dataToExport.length === 0) return toast.error('No work orders found to export')
 
-    const headers = ['Object ID', 'Date', 'Stock Number', 'PO Number', 'VIN', 'Dealer', 'Service', 'Amount', 'Tax', 'Total', 'Notes', 'Is Invoiced', 'Image', 'Last Updated By']
-    const rows = dataToExport.map((wo: any) => [
-      wo.id, wo.date ? new Date(wo.date).toLocaleDateString() : '', (wo.stockNumber || '').toUpperCase(), wo.poNumber || '', wo.vin,
-      wo.dealerName, wo.dealerServiceId, wo.amount, wo.tax, wo.total,
-      `"${(wo.notes || '').replace(/"/g, '""')}"`, wo.isInvoiced ? 'Yes' : 'No', wo.upload || '', wo.lastUpdatedBy || ''
-    ])
+    const dName = (props.dealer.dealerName || '').toUpperCase()
+    let headers: string[] = []
+    let rows: any[] = []
+
+    if (dName.includes('AVON BODYSHOP')) {
+      headers = ['DATE OPENED', 'RO', 'PO', 'PO AMOUNT', 'TAX', 'TOTAL']
+      rows = dataToExport.map((wo: any) => [
+        wo.date ? new Date(wo.date).toLocaleDateString() : '',
+        `"${(wo.stockNumber || '').toUpperCase()}"`,
+        `"${wo.poNumber || ''}"`,
+        wo.amount || 0,
+        wo.tax || 0,
+        wo.total || 0
+      ])
+    } else if (dName.includes('EH BODYSHOP')) {
+      headers = ['DATE OPENED', 'RO', 'PO AMOUNT', 'SALES TAX', 'TOTAL']
+      rows = dataToExport.map((wo: any) => [
+        wo.date ? new Date(wo.date).toLocaleDateString() : '',
+        `"${(wo.stockNumber || '').toUpperCase()}"`,
+        wo.amount || 0,
+        wo.tax || 0,
+        wo.total || 0
+      ])
+    } else {
+      headers = ['Object ID', 'Date', 'Stock Number', 'PO Number', 'VIN', 'Dealer', 'Service', 'Amount', 'Tax', 'Total', 'Notes', 'Is Invoiced', 'Image', 'Last Updated By']
+      rows = dataToExport.map((wo: any) => [
+        wo.id, wo.date ? new Date(wo.date).toLocaleDateString() : '', `"${(wo.stockNumber || '').toUpperCase()}"`, `"${wo.poNumber || ''}"`, wo.vin,
+        wo.dealerName, wo.dealerServiceId, wo.amount, wo.tax, wo.total,
+        `"${(wo.notes || '').replace(/"/g, '""')}"`, wo.isInvoiced ? 'Yes' : 'No', wo.upload || '', wo.lastUpdatedBy || ''
+      ])
+    }
 
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
@@ -401,7 +426,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
             <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
             <Input v-model="search" placeholder="Search orders..." class="pl-8 w-44 h-8 text-sm" />
           </div>
-          <Button variant="outline" size="sm" class="h-8" @click="handleExport">
+          <Button size="sm" class="h-8" @click="handleExport">
             <Download class="mr-1 size-4" /> Export
           </Button>
           <Button variant="outline" size="sm" class="h-8" @click="showImportModal = true">
