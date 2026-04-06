@@ -160,7 +160,7 @@ export function generatePDF(doc: any, docType: 'Work Order' | 'Invoice' | 'Order
       return `
       <tr style="background:${bg};border-bottom:1px solid #e2e8f0">
         <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif">${formattedDate(li.date || doc.date)}</td>
-        <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif">${li.stockNumber || ''}</td>
+        <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif;text-transform:uppercase">${(li.stockNumber || '').toUpperCase()}</td>
         <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif">${li.poNumber || ''}</td>
         <td style="padding:8px 8px;color:#475569;font-size:11px;font-family:'Inter',monospace">${li.vin || ''}</td>
         <td style="padding:8px 8px;color:#0f172a;font-size:11px;font-family:'Inter',Arial,sans-serif;font-weight:600;text-transform:uppercase">${li.serviceName || li.description || ''}</td>

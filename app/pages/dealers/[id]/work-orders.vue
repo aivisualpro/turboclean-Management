@@ -186,7 +186,7 @@ function openEditModal(row: any) {
   editForm.value = {
     id: row.id,
     date: row.date ? new Date(row.date).toISOString().slice(0, 10) : '',
-    stockNumber: row.stockNumber || '',
+    stockNumber: (row.stockNumber || '').toUpperCase(),
     poNumber: row.poNumber || '',
     vin: row.vin || '',
     dealerServiceId: row.dealerServiceId || row.rawServiceId || '',
@@ -318,7 +318,7 @@ async function handleExport() {
 
     const headers = ['Object ID', 'Date', 'Stock Number', 'PO Number', 'VIN', 'Dealer', 'Service', 'Amount', 'Tax', 'Total', 'Notes', 'Is Invoiced', 'Image', 'Last Updated By']
     const rows = dataToExport.map((wo: any) => [
-      wo.id, wo.date ? new Date(wo.date).toLocaleDateString() : '', wo.stockNumber, wo.poNumber || '', wo.vin,
+      wo.id, wo.date ? new Date(wo.date).toLocaleDateString() : '', (wo.stockNumber || '').toUpperCase(), wo.poNumber || '', wo.vin,
       wo.dealerName, wo.dealerServiceId, wo.amount, wo.tax, wo.total,
       `"${(wo.notes || '').replace(/"/g, '""')}"`, wo.isInvoiced ? 'Yes' : 'No', wo.upload || '', wo.lastUpdatedBy || ''
     ])
@@ -601,7 +601,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
             <TableBody>
               <TableRow v-for="wo in workOrders" :key="wo.id" class="cursor-pointer hover:bg-muted/50 transition-colors">
                 <TableCell class="font-medium text-xs whitespace-nowrap">{{ fmtDate(wo.date) }}</TableCell>
-                <TableCell class="text-xs">{{ wo.stockNumber }}</TableCell>
+                <TableCell class="text-xs uppercase">{{ wo.stockNumber }}</TableCell>
                 <TableCell class="text-xs">{{ wo.poNumber || '—' }}</TableCell>
                 <TableCell @click.stop>
                   <a v-if="wo.upload" :href="getAppSheetImageUrl(wo.upload)!" target="_blank" class="block w-9 h-9 rounded bg-muted border overflow-hidden hover:opacity-80 transition-opacity">
@@ -682,7 +682,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
 
           <div class="space-y-2">
             <Label>Stock Number</Label>
-            <Input v-model="editForm.stockNumber" />
+            <Input v-model="editForm.stockNumber" class="uppercase" />
           </div>
 
           <div class="space-y-2">

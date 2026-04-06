@@ -371,7 +371,7 @@ const statuses: DealerStatus[] = ['Authorised', 'Pending', 'Rejected', 'In Follo
                       <tbody>
                         <tr v-for="wo in dealerWorkOrders" :key="wo.id" class="border-b last:border-0 hover:bg-muted/5 transition-colors">
                           <td class="px-3 py-2 text-xs font-medium whitespace-nowrap">{{ fmtDate(wo.date) }}</td>
-                          <td class="px-3 py-2 text-xs">{{ wo.stockNumber }}</td>
+                          <td class="px-3 py-2 text-xs uppercase">{{ wo.stockNumber }}</td>
                           <td class="px-3 py-2 text-xs font-mono text-muted-foreground uppercase">{{ wo.vin || '—' }}</td>
                           <td class="px-3 py-2 text-xs truncate max-w-[140px]" :title="wo.dealerServiceId">{{ wo.dealerServiceId }}</td>
                           <td class="px-3 py-2 text-xs text-right tabular-nums text-muted-foreground">{{ fmt(wo.amount) }}</td>

@@ -38,7 +38,7 @@ export default defineEventHandler(async (event) => {
         // we snap it to UTC midnight of the day it was intended for.
         return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
       })(),
-      stockNumber: wo.stockNumber || '',
+      stockNumber: typeof wo.stockNumber === 'string' ? wo.stockNumber.toUpperCase() : (wo.stockNumber || ''),
       poNumber: wo.poNumber || '',
       vin: wo.vin || '',
       dealerServiceId: wo.dealerServiceId?.length === 24 ? new ObjectId(wo.dealerServiceId) : wo.dealerServiceId,

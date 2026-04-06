@@ -627,7 +627,7 @@ function sortIcon(field: string) {
                                 <div v-if="li.description" class="text-[10px] text-muted-foreground">{{ li.description }}</div>
                               </td>
                               <td class="px-3 py-2 font-mono text-[10px]">
-                                <span v-if="li.stockNumber" class="text-foreground font-bold mr-2">{{ li.stockNumber }}</span>
+                                <span v-if="li.stockNumber" class="text-foreground font-bold mr-2 uppercase">{{ li.stockNumber }}</span>
                                 <span v-if="li.vin" class="text-muted-foreground">{{ li.vin }}</span>
                                 <span v-if="!li.stockNumber && !li.vin" class="text-muted-foreground opacity-50">—</span>
                               </td>

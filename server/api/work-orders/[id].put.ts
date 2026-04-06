@@ -33,7 +33,7 @@ export default defineEventHandler(async (event) => {
     }
     if (body.upload !== undefined) updateData.upload = body.upload
     if (body.vin !== undefined) updateData.vin = body.vin
-    if (body.stockNumber !== undefined) updateData.stockNumber = body.stockNumber
+    if (body.stockNumber !== undefined) updateData.stockNumber = typeof body.stockNumber === 'string' ? body.stockNumber.toUpperCase() : body.stockNumber
     if (body.poNumber !== undefined) updateData.poNumber = body.poNumber
     if (body.date !== undefined) {
       const d = new Date(body.date)

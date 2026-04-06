@@ -229,7 +229,7 @@ async function openEditModal(row: any) {
   editForm.value = {
     id: row.id,
     date: row.date ? new Date(row.date).toISOString().slice(0, 10) : '',
-    stockNumber: row.stockNumber || '',
+    stockNumber: (row.stockNumber || '').toUpperCase(),
     poNumber: String(row.poNumber || ''),
     vin: row.vin || '',
     dealerServiceId: row.rawServiceId || '',
@@ -417,7 +417,7 @@ async function handleExport() {
       
       return [
         wo.date ? new Date(wo.date).toLocaleDateString('en-US', { timeZone: 'UTC' }) : '', 
-        wo.stockNumber || '', 
+        (wo.stockNumber || '').toUpperCase(), 
         last8Vin,
         `"${(wo.dealerServiceId || wo.rawServiceId || '').replace(/"/g, '""')}"`,
         wo.amount || 0, 
@@ -864,7 +864,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
 
                 <TableRow v-for="wo in workOrders" :key="wo.id" class="cursor-pointer hover:bg-muted/50 transition-colors">
                   <TableCell class="font-medium text-xs whitespace-nowrap">{{ fmtDate(wo.date) }}</TableCell>
-                  <TableCell class="text-xs">{{ wo.stockNumber }}</TableCell>
+                  <TableCell class="text-xs uppercase">{{ wo.stockNumber }}</TableCell>
                   <TableCell class="text-xs">{{ wo.poNumber || '—' }}</TableCell>
                   <TableCell @click.stop>
                     <div v-if="wo.upload" class="w-9 h-9 rounded bg-muted border overflow-hidden hover:opacity-80 transition-opacity cursor-pointer" @click="openWoLightbox(getAppSheetImageUrl(wo.upload)!)">
@@ -947,7 +947,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
 
           <div class="space-y-2">
             <Label>Stock Number</Label>
-            <Input v-model="editForm.stockNumber" />
+            <Input v-model="editForm.stockNumber" class="uppercase" />
           </div>
 
           <div class="space-y-2">
