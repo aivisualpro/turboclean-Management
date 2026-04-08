@@ -202,7 +202,7 @@ export async function generatePdfFromData(data: any): Promise<Buffer> {
   try {
     const logoData = await fetchLogoBase64()
     if (logoData) {
-      const logoWidth = 120
+      const logoWidth = 50
       const logoX = (pageWidth - logoWidth) / 2
       pdf.addImage(logoData, 'PNG', logoX, y, logoWidth, 50)
     }

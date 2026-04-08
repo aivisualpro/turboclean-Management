@@ -9,7 +9,7 @@ export default defineNuxtConfig({
   css: ['~/assets/css/tailwind.css'],
   vite: {
     plugins: [
-      tailwindcss(),
+      tailwindcss() as any,
     ],
     optimizeDeps: {
       include: [
@@ -88,6 +88,7 @@ export default defineNuxtConfig({
     },
   },
 
+  // @ts-ignore - Nuxt 4 InputConfig type resolution bug
   routeRules: {
     '/components': { redirect: '/components/accordion' },
     '/settings': { redirect: '/settings/profile' },
@@ -101,3 +102,4 @@ export default defineNuxtConfig({
 
   compatibilityDate: '2024-12-14',
 })
+
