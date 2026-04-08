@@ -224,6 +224,34 @@ const savingEdit = ref(false)
 const dealerServices = ref<any[]>([])
 const loadingServices = ref(false)
 
+const serviceSearch = ref('')
+const servicePopoverOpen = ref(false)
+
+const filteredDealerServices = computed(() => {
+  const q = serviceSearch.value.toLowerCase().trim()
+  if (!q) return dealerServices.value
+  return dealerServices.value.filter(s => s.name.toLowerCase().includes(q))
+})
+
+function selectService(id: string) {
+  editForm.value.dealerServiceId = id
+  serviceSearch.value = ''
+  servicePopoverOpen.value = false
+  
+  const svcInfo = dealerServices.value.find(s => s.id === id)
+  if (svcInfo) {
+    editForm.value.amount = Number(svcInfo.amount) || 0
+    editForm.value.tax = Number(svcInfo.tax) || 0
+    editForm.value.total = Number(svcInfo.total) || 0
+  }
+}
+
+function handleServiceSearchEnter() {
+  if (filteredDealerServices.value.length >= 1 && serviceSearch.value.trim()) {
+    selectService(filteredDealerServices.value[0].id)
+  }
+}
+
 async function openEditModal(row: any) {
   editingWorkOrder.value = row
   editForm.value = {
@@ -902,8 +930,8 @@ async function handleGenerate(type: 'daily' | 'weekly') {
                       <Icon name="lucide:image-off" class="size-3.5 text-muted-foreground/40" />
                     </div>
                   </TableCell>
-                  <TableCell class="text-xs font-mono uppercase text-muted-foreground">{{ wo.vin }}</TableCell>
-                  <TableCell v-if="!activeFilter.dealerId" class="text-xs truncate max-w-[120px] font-semibold">{{ wo.dealerName }}</TableCell>
+                  <TableCell class="text-xs font-mono uppercase text-muted-foreground max-w-[120px] truncate" :title="wo.vin">{{ wo.vin }}</TableCell>
+                  <TableCell v-if="!activeFilter.dealerId" class="text-xs truncate max-w-[120px] font-semibold" :title="wo.dealerName">{{ wo.dealerName }}</TableCell>
                   <TableCell class="text-xs truncate max-w-[120px]">
                     <span>{{ wo.dealerServiceId }}</span>
                   </TableCell>
@@ -960,7 +988,10 @@ async function handleGenerate(type: 'daily' | 'weekly') {
     <Dialog v-model:open="showEditModal">
       <DialogContent class="sm:max-w-[700px] overflow-visible">
         <DialogHeader>
-          <DialogTitle>Edit Work Order</DialogTitle>
+          <DialogTitle class="flex items-center gap-2">
+            Edit Work Order
+            <span v-if="editingWorkOrder?.dealerName" class="text-muted-foreground font-normal opacity-80 text-sm">— {{ editingWorkOrder.dealerName }}</span>
+          </DialogTitle>
           <DialogDescription>
             Modify the details of this work order and click save when finished.
           </DialogDescription>
@@ -990,18 +1021,39 @@ async function handleGenerate(type: 'daily' | 'weekly') {
 
           <div class="space-y-2">
             <Label>Service</Label>
-            <Select v-model="editForm.dealerServiceId">
-              <SelectTrigger>
-                <SelectValue placeholder="Select a service..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-if="loadingServices" value="_loading" disabled>Loading...</SelectItem>
-                <SelectItem v-for="svc in dealerServices" :key="svc.id" :value="svc.id">
-                  {{ svc.name }}
-                </SelectItem>
-                <SelectItem v-if="!loadingServices && dealerServices.length === 0" value="_none" disabled>No services linked</SelectItem>
-              </SelectContent>
-            </Select>
+            <Popover v-model:open="servicePopoverOpen">
+              <PopoverTrigger as-child>
+                <Button variant="outline" class="w-full justify-between font-normal" :class="!editForm.dealerServiceId && 'text-muted-foreground'">
+                  <span v-if="loadingServices" class="flex items-center text-muted-foreground"><Loader2 class="mr-2 size-4 animate-spin" /> Loading...</span>
+                  <span v-else>{{ dealerServices.find(s => s.id === editForm.dealerServiceId)?.name || 'Select a service...' }}</span>
+                  <Icon name="lucide:chevrons-up-down" class="ml-2 size-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent class="w-[315px] p-0" align="start">
+                <div class="flex items-center border-b px-3">
+                  <Icon name="lucide:search" class="mr-2 size-4 shrink-0 text-muted-foreground" />
+                  <input
+                    v-model="serviceSearch"
+                    placeholder="Search service..."
+                    class="flex h-9 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
+                    @keydown.enter.prevent="handleServiceSearchEnter"
+                  />
+                </div>
+                <div class="max-h-56 overflow-y-auto p-1">
+                  <div v-if="filteredDealerServices.length === 0" class="py-6 text-center text-sm text-muted-foreground">No services found.</div>
+                  <button
+                    v-for="svc in filteredDealerServices"
+                    :key="svc.id"
+                    class="relative flex w-full cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+                    :class="editForm.dealerServiceId === svc.id ? 'bg-accent text-accent-foreground font-medium' : ''"
+                    @click="selectService(svc.id)"
+                  >
+                    <Icon name="lucide:check" class="mr-2 size-4" :class="editForm.dealerServiceId === svc.id ? 'opacity-100' : 'opacity-0'" />
+                    {{ svc.name }}
+                  </button>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
 
           <div class="space-y-2">
