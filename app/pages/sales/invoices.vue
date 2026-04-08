@@ -227,7 +227,7 @@ function handleEmailDialogSubmit() {
 
   // Close dialog and show success immediately — backend handles the rest
   showEmailDialog.value = false
-  toast.success('Invoice queued for delivery to ' + finalEmail)
+  toast.success('Invoice sent at ' + finalEmail)
 
   // Optimistic status advance
   if (inv.status === 'Approved' || inv.status === 'Draft' || inv.status === 'Sent') {
