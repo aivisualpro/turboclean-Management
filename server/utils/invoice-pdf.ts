@@ -208,78 +208,108 @@ export async function generatePdfFromData(data: any): Promise<Buffer> {
     }
   } catch { /* graceful fallback — skip logo */ }
 
-  y += 60
+  const boxWidth = 180
 
-  // ── Invoice title ─────────────────────────────────────────────────────
-  pdf.setFontSize(20)
+  // ── Left Side Cards ───────────────────────────────────────────────────
+  let cardY = 36
+  pdf.setFillColor(248, 250, 252) // slate-50 background
+  pdf.roundedRect(margin, cardY, boxWidth, 50, 6, 6, 'F')
+  pdf.setDrawColor(226, 232, 240) // border
+  pdf.roundedRect(margin, cardY, boxWidth, 50, 6, 6, 'S')
+  
+  pdf.setFontSize(7)
+  pdf.setTextColor(100, 116, 139)
   pdf.setFont('helvetica', 'bold')
-  pdf.setTextColor(15, 23, 42) // slate-900
-  const invoiceLabel = data.invoiceType === 'Weekly' ? 'WEEKLY INVOICE' : 'INVOICE'
-  pdf.text(invoiceLabel, margin, y)
-
-  // Invoice number on the right
-  pdf.setFontSize(12)
-  pdf.setTextColor(220, 38, 38) // red-600
-  pdf.text(`#${data.invoiceNumber || data.number || ''}`, pageWidth - margin, y, { align: 'right' })
-
-  y += 28
-
-  // ── Info grid ─────────────────────────────────────────────────────────
-  pdf.setFontSize(9)
-  pdf.setTextColor(100, 116, 139) // slate-500
-  pdf.setFont('helvetica', 'normal')
-
-  const leftCol = margin
-  const rightCol = pageWidth / 2 + 20
-
-  // Left: Invoice For
-  pdf.text('INVOICE FOR', leftCol, y)
-  y += 14
+  pdf.text('INVOICE FOR', margin + 15, cardY + 20)
+  
   pdf.setFontSize(13)
   pdf.setTextColor(15, 23, 42)
   pdf.setFont('helvetica', 'bold')
-  pdf.text(data.dealerName || data.client || '', leftCol, y)
+  pdf.text(data.dealerName || data.client || '', margin + 15, cardY + 38)
 
-  // Right: Date info
-  let ry = y - 14
-  pdf.setFontSize(9)
+  // "Invoice #" Card
+  const invNumY = cardY + 60
+  pdf.setFillColor(255, 255, 255)
+  pdf.roundedRect(margin, invNumY, boxWidth, 50, 6, 6, 'F')
+  pdf.setDrawColor(226, 232, 240)
+  pdf.roundedRect(margin, invNumY, boxWidth, 50, 6, 6, 'S')
+  
+  pdf.setFillColor(239, 68, 68) 
+  pdf.rect(margin, invNumY + 1, 4, 48, 'F') 
+  
+  pdf.setFontSize(7)
+  pdf.setTextColor(100, 116, 139) 
+  pdf.text('INVOICE #', margin + 18, invNumY + 20)
+  
+  pdf.setFontSize(12)
+  pdf.setTextColor(220, 38, 38)
+  pdf.text(`${data.invoiceNumber || data.number || ''}`, margin + 18, invNumY + 38)
+
+  // ── Right Side Cards ──────────────────────────────────────────────────
+  const rX = pageWidth - margin - boxWidth
+  const rdY = 36 
+  
+  pdf.setFillColor(248, 250, 252)
+  pdf.roundedRect(rX, rdY, boxWidth, 110, 6, 6, 'F') // bg for whole right block
+  
+  // Date section background slightly different (white inside bordered box, but html has f8fafc top, wait html is f8fafc top and white bottom)
+  pdf.setFillColor(255, 255, 255)
+  pdf.roundedRect(rX, rdY + 40, boxWidth, 70, 6, 6, 'F')
+  // We redraw the main border
+  pdf.setDrawColor(226, 232, 240)
+  pdf.roundedRect(rX, rdY, boxWidth, 110, 6, 6, 'S')
+  pdf.line(rX, rdY + 40, rX + boxWidth, rdY + 40) // dividing line 
+
+  pdf.setFontSize(8)
   pdf.setTextColor(100, 116, 139)
   pdf.setFont('helvetica', 'normal')
-
+  
   if (data.invoiceType === 'Weekly' || data.type === 'Weekly') {
-    pdf.text('DATE FROM', rightCol, ry)
-    ry += 14
-    pdf.setFontSize(10)
+    pdf.text('Date From', rX + 15, rdY + 16)
+    pdf.text('Date To', rX + 15, rdY + 30)
+    
     pdf.setTextColor(15, 23, 42)
     pdf.setFont('helvetica', 'bold')
-    pdf.text(fmtDate(data.weekStart || data.date), rightCol, ry)
-    ry += 18
-
-    pdf.setFontSize(9)
-    pdf.setTextColor(100, 116, 139)
-    pdf.setFont('helvetica', 'normal')
-    pdf.text('DATE TO', rightCol, ry)
-    ry += 14
-    pdf.setFontSize(10)
-    pdf.setTextColor(15, 23, 42)
-    pdf.setFont('helvetica', 'bold')
-    pdf.text(fmtDate(data.weekEnd || data.date), rightCol, ry)
+    pdf.text(fmtDate(data.weekStart || data.date), rX + boxWidth - 15, rdY + 16, { align: 'right' })
+    pdf.text(fmtDate(data.weekEnd || data.date), rX + boxWidth - 15, rdY + 30, { align: 'right' })
   } else {
-    pdf.text('DATE', rightCol, ry)
-    ry += 14
-    pdf.setFontSize(10)
+    pdf.text('Date', rX + 15, rdY + 24)
     pdf.setTextColor(15, 23, 42)
     pdf.setFont('helvetica', 'bold')
-    pdf.text(fmtDate(data.date), rightCol, ry)
+    pdf.text(fmtDate(data.date), rX + boxWidth - 15, rdY + 24, { align: 'right' })
   }
 
-  y += 40
+  // Totals Breakdown
+  const dtY = rdY + 40
+  pdf.setFontSize(8)
+  pdf.setTextColor(100, 116, 139)
+  pdf.setFont('helvetica', 'normal')
+  pdf.text('Subtotal', rX + 15, dtY + 18)
+  pdf.setTextColor(15, 23, 42)
+  pdf.setFont('helvetica', 'bold')
+  pdf.text(fmtMoney(data.subtotal || 0), rX + boxWidth - 15, dtY + 18, { align: 'right' })
 
-  // ── Separator ─────────────────────────────────────────────────────────
-  pdf.setDrawColor(226, 232, 240) // slate-200
-  pdf.setLineWidth(1)
-  pdf.line(margin, y, pageWidth - margin, y)
-  y += 16
+  pdf.setTextColor(100, 116, 139)
+  pdf.setFont('helvetica', 'normal')
+  pdf.text('Tax', rX + 15, dtY + 34)
+  pdf.setTextColor(15, 23, 42)
+  pdf.setFont('helvetica', 'bold')
+  pdf.text(fmtMoney(data.taxTotal || 0), rX + boxWidth - 15, dtY + 34, { align: 'right' })
+
+  pdf.setDrawColor(226, 232, 240)
+  pdf.setLineDashPattern([2, 2], 0)
+  pdf.line(rX + 15, dtY + 44, rX + boxWidth - 15, dtY + 44)
+  pdf.setLineDashPattern([], 0)
+
+  pdf.setFontSize(10)
+  pdf.setTextColor(15, 23, 42)
+  pdf.setFont('helvetica', 'bold')
+  pdf.text('Total', rX + 15, dtY + 60)
+  pdf.setFontSize(13)
+  pdf.setTextColor(245, 158, 11) // amber
+  pdf.text(fmtMoney(data.total || 0), rX + boxWidth - 15, dtY + 60, { align: 'right' })
+
+  y = rdY + 150
 
   // ── Line Items Table ──────────────────────────────────────────────────
   const items = data.lineItems || []
@@ -317,67 +347,26 @@ export async function generatePdfFromData(data: any): Promise<Buffer> {
       cellPadding: 8,
     },
     columnStyles: {
-      0: { cellWidth: 55 },  // Date
-      1: { cellWidth: 55 },  // Stock #
-      2: { cellWidth: 50 },  // PO #
-      3: { cellWidth: 80 },  // VIN
-      4: { cellWidth: 'auto' },  // Clean Type
-      5: { halign: 'right', cellWidth: 55 },  // Amount
-      6: { halign: 'right', cellWidth: 50 },  // Tax
-      7: { halign: 'right', cellWidth: 55, fontStyle: 'bold', textColor: [15, 23, 42] },  // Total
+      0: { cellWidth: 55 }, 
+      1: { cellWidth: 55 }, 
+      2: { cellWidth: 50 }, 
+      3: { cellWidth: 80 }, 
+      4: { cellWidth: 'auto' }, 
+      5: { halign: 'right', cellWidth: 55 }, 
+      6: { halign: 'right', cellWidth: 50 }, 
+      7: { halign: 'right', cellWidth: 55, fontStyle: 'bold', textColor: [15, 23, 42] }, 
     },
     alternateRowStyles: {
       fillColor: [243, 244, 246], // gray-100
     },
     didDrawPage: () => {
-      // Re-draw brand bar on every page
       pdf.setFillColor(251, 191, 36)
       pdf.rect(0, 0, pageWidth, 6, 'F')
     },
   })
 
-  // ── Totals section below table ────────────────────────────────────────
   const finalY = (pdf as any).lastAutoTable?.finalY || y + 100
-  let ty = finalY + 24
-
-  const totalsX = pageWidth - margin - 180
-  const totalsValueX = pageWidth - margin
-
-  // Subtotal
-  pdf.setFontSize(10)
-  pdf.setTextColor(100, 116, 139)
-  pdf.setFont('helvetica', 'normal')
-  pdf.text('Subtotal', totalsX, ty)
-  pdf.setTextColor(15, 23, 42)
-  pdf.setFont('helvetica', 'bold')
-  pdf.text(fmtMoney(data.subtotal || 0), totalsValueX, ty, { align: 'right' })
-  ty += 18
-
-  // Tax
-  pdf.setTextColor(100, 116, 139)
-  pdf.setFont('helvetica', 'normal')
-  pdf.text('Tax (6.35%)', totalsX, ty)
-  pdf.setTextColor(15, 23, 42)
-  pdf.setFont('helvetica', 'bold')
-  pdf.text(fmtMoney(data.taxTotal || 0), totalsValueX, ty, { align: 'right' })
-  ty += 6
-
-  // Dashed line
-  pdf.setDrawColor(226, 232, 240)
-  pdf.setLineDashPattern([4, 2], 0)
-  pdf.line(totalsX - 10, ty, totalsValueX, ty)
-  pdf.setLineDashPattern([], 0)
-  ty += 18
-
-  // Total
-  pdf.setFontSize(14)
-  pdf.setTextColor(100, 116, 139)
-  pdf.setFont('helvetica', 'bold')
-  pdf.text('Total', totalsX, ty)
-  pdf.setTextColor(245, 158, 11) // amber-500
-  pdf.setFontSize(16)
-  pdf.text(fmtMoney(data.total || 0), totalsValueX, ty, { align: 'right' })
-  ty += 40
+  let ty = finalY + 40
 
   // ── Footer ────────────────────────────────────────────────────────────
   pdf.setFontSize(10)
