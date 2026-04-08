@@ -75,6 +75,7 @@ async function fetchTree() {
         type: activeType.value,
         dateStart: computedDates.value.start,
         dateEnd: computedDates.value.end,
+        search: search.value,
       }
     })
     treeData.value = res.tree || []
@@ -84,6 +85,15 @@ async function fetchTree() {
     treeLoading.value = false
   }
 }
+
+// Client-side instant-filter for tree as user types
+const filteredTreeData = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  if (!q) return treeData.value
+  return treeData.value.filter((dealer: any) =>
+    (dealer.dealerName || '').toLowerCase().includes(q)
+  )
+})
 
 // ─── Table Data Fetching ─────────────────────────────────────────────────
 const invoices = ref<any[]>([])
@@ -431,7 +441,7 @@ function sortIcon(field: string) {
           </div>
 
           <!-- Tree Dealers -->
-          <div v-for="dealer in treeData" :key="dealer.dealerId">
+          <div v-for="dealer in filteredTreeData" :key="dealer.dealerId">
             <div class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors group" :class="activeFilter.dealerId === dealer.dealerId && !activeFilter.dateStart ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'" @click="selectDealer(dealer)">
               <div class="flex items-center gap-1.5 overflow-hidden">
                 <button class="shrink-0 p-0.5 rounded text-muted-foreground hover:bg-muted-foreground/20" @click.stop="toggleSet(expandedDealers, dealer.dealerId)">

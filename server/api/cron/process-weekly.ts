@@ -94,16 +94,17 @@ export default defineEventHandler(async (event) => {
         const emailHtml = generateInvoiceHtml(invoiceData)
         let pdfBuffer: Buffer | null = null
         try {
-          pdfBuffer = await htmlToPdfBuffer(emailHtml)
+          pdfBuffer = await htmlToPdfBuffer(emailHtml, invoiceData)
         } catch (pdfErr: any) {
-          console.warn('[Weekly Cron] PDF generation failed, will attach HTML:', pdfErr.message)
+          console.error('[Weekly Cron] PDF generation failed:', pdfErr.message, pdfErr.stack)
         }
 
         const attachments: { filename: string; content: Buffer; contentType: string }[] = []
         if (pdfBuffer) {
           attachments.push({ filename: `${invoice.number}.pdf`, content: pdfBuffer, contentType: 'application/pdf' })
         } else {
-          attachments.push({ filename: `${invoice.number}.html`, content: Buffer.from(emailHtml, 'utf-8'), contentType: 'text/html' })
+          // Last resort fallback — should never happen with jsPDF
+          attachments.push({ filename: `${invoice.number}.pdf`, content: Buffer.from(emailHtml, 'utf-8'), contentType: 'application/pdf' })
         }
 
         const weekLabel = `W${String(invoice.weekNumber).padStart(2, '0')}-${invoice.weekYear}`

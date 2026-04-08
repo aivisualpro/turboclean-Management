@@ -35,8 +35,28 @@ function getClientPromise(): Promise<MongoClient> {
   return globalThis._mongoClientPromise
 }
 
+let _indexesEnsured = false
+
 export async function connectToDatabase() {
   const resolvedClient = await getClientPromise()
   const db = resolvedClient.db('turboClean')
+
+  // Ensure indexes once per process startup (idempotent, no-ops if already exist)
+  if (!_indexesEnsured) {
+    _indexesEnsured = true
+    try {
+      const invoices = db.collection('turboCleanInvoices')
+      await Promise.all([
+        invoices.createIndex({ dealerId: 1, date: -1 }),
+        invoices.createIndex({ status: 1, type: 1 }),
+        invoices.createIndex({ date: -1 }),
+        invoices.createIndex({ dealerName: 1 }),
+        invoices.createIndex({ number: 1 }),
+      ])
+    } catch (e) {
+      console.warn('[MongoDB] Index creation skipped:', e)
+    }
+  }
+
   return { db, client: resolvedClient }
 }

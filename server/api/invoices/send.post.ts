@@ -68,9 +68,9 @@ export default defineEventHandler(async (event) => {
     const attachments: { filename: string; content: Buffer; contentType?: string }[] = []
 
     if (invoiceType === 'Daily') {
-      // 1. Generate PDF from invoice HTML — MUST be attachment[0]
+      // 1. Generate PDF from invoice data — MUST be attachment[0]
       try {
-        const pdfBuffer = await htmlToPdfBuffer(pdfHtml)
+        const pdfBuffer = await htmlToPdfBuffer(pdfHtml, invoiceData)
         attachments.push({
           filename: `${invoiceNumber || 'Invoice'}.pdf`,
           content: pdfBuffer,
@@ -78,12 +78,6 @@ export default defineEventHandler(async (event) => {
         })
       } catch (err: any) {
         console.error('[Invoice Email] Daily PDF generation failed:', err.message, err.stack)
-        // Fallback: attach as HTML if PDF fails
-        attachments.push({
-          filename: `${invoiceNumber || 'Invoice'}.html`,
-          content: Buffer.from(pdfHtml, 'utf-8'),
-          contentType: 'text/html',
-        })
       }
 
       // 2. Fetch all work order upload images (collected separately to guarantee ordering)
@@ -157,7 +151,7 @@ export default defineEventHandler(async (event) => {
     } else if (invoiceType === 'Weekly') {
       // Weekly: Attach only the weekly invoice PDF
       try {
-        const pdfBuffer = await htmlToPdfBuffer(pdfHtml)
+        const pdfBuffer = await htmlToPdfBuffer(pdfHtml, invoiceData)
         attachments.push({
           filename: `${invoiceNumber || 'Weekly-Invoice'}.pdf`,
           content: pdfBuffer,
@@ -165,12 +159,6 @@ export default defineEventHandler(async (event) => {
         })
       } catch (err: any) {
         console.error('[Invoice Email] Weekly PDF generation failed:', err.message, err.stack)
-        // Fallback: attach as HTML if PDF fails
-        attachments.push({
-          filename: `${invoiceNumber || 'Weekly-Invoice'}.html`,
-          content: Buffer.from(pdfHtml, 'utf-8'),
-          contentType: 'text/html',
-        })
       }
     }
 

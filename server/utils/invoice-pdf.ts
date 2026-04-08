@@ -1,29 +1,53 @@
-import puppeteer from 'puppeteer'
-import { readFileSync } from 'fs'
-import { join } from 'path'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
 
-// Cached logo base64 (loaded once, then reused)
-let _logoBase64: string | null = null
+// ── Cached logo data ────────────────────────────────────────────────────────
+let _logoBase64Cache: string | null = null
+let _logoFetchPromise: Promise<string | null> | null = null
 
-function getLogoBase64(): string {
-  // Use a highly available absolute URL, plus cache buster to fetch the latest logo
+async function fetchLogoBase64(): Promise<string | null> {
+  if (_logoBase64Cache) return _logoBase64Cache
+  if (_logoFetchPromise) return _logoFetchPromise
+
+  _logoFetchPromise = (async () => {
+    try {
+      const url = 'https://raw.githubusercontent.com/aivisualpro/turboclean-Management/main/public/invoice%20logo.png'
+      const response = await fetch(url, { signal: AbortSignal.timeout(10000) })
+      if (!response.ok) return null
+      const arrayBuffer = await response.arrayBuffer()
+      const base64 = Buffer.from(arrayBuffer).toString('base64')
+      _logoBase64Cache = `data:image/png;base64,${base64}`
+      return _logoBase64Cache
+    } catch (err) {
+      console.warn('[Invoice PDF] Failed to fetch logo:', err)
+      return null
+    }
+  })()
+
+  return _logoFetchPromise
+}
+
+// ── Logo URL for HTML emails ────────────────────────────────────────────────
+function getLogoUrl(): string {
   return `https://raw.githubusercontent.com/aivisualpro/turboclean-Management/main/public/invoice%20logo.png?v=${Date.now()}`
 }
 
+// ── Shared helpers ──────────────────────────────────────────────────────────
+const fmtMoney = (n: number) => `$${(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const fmtDate = (d?: string) => d ? new Date(d).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'numeric', day: 'numeric', year: 'numeric' }) : ''
+
 /**
- * Generates the styled invoice HTML with the logo embedded as base64.
- * This works in both browser preview and email contexts.
+ * Generates the styled invoice HTML for email body rendering.
+ * Uses a remote URL for the logo (works in email clients).
  */
 export function generateInvoiceHtml(doc: any): string {
-  const fmtMoney = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  const formattedDate = (d?: string) => d ? new Date(d).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'numeric', day: 'numeric', year: 'numeric' }) : ''
-  const logoSrc = getLogoBase64()
+  const logoSrc = getLogoUrl()
 
   const lineRows = (doc.lineItems || []).map((li: any, i: number) => {
     const bg = i % 2 !== 0 ? '#f3f4f6' : '#ffffff'
     return `
     <tr style="background:${bg};border-bottom:1px solid #e2e8f0">
-      <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif">${formattedDate(li.date || doc.date)}</td>
+      <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif">${fmtDate(li.date || doc.date)}</td>
       <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif;text-transform:uppercase">${(li.stockNumber || '').toUpperCase()}</td>
       <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif">${li.poNumber || ''}</td>
       <td style="padding:8px 8px;color:#475569;font-size:11px;font-family:'Inter',monospace">${li.vin || ''}</td>
@@ -82,16 +106,16 @@ export function generateInvoiceHtml(doc: any): string {
                   ${doc.type === 'Weekly' ? `
                     <tr>
                       <td style="font-size:12px;color:#64748b;font-weight:600;padding-bottom:10px">Date From</td>
-                      <td style="font-size:12px;color:#0f172a;font-weight:800;text-align:right;padding-bottom:10px">${formattedDate(doc.weekStart || doc.date)}</td>
+                      <td style="font-size:12px;color:#0f172a;font-weight:800;text-align:right;padding-bottom:10px">${fmtDate(doc.weekStart || doc.date)}</td>
                     </tr>
                     <tr>
                       <td style="font-size:12px;color:#64748b;font-weight:600">Date To</td>
-                      <td style="font-size:12px;color:#0f172a;font-weight:800;text-align:right">${formattedDate(doc.weekEnd || doc.date)}</td>
+                      <td style="font-size:12px;color:#0f172a;font-weight:800;text-align:right">${fmtDate(doc.weekEnd || doc.date)}</td>
                     </tr>
                   ` : `
                     <tr>
                       <td style="font-size:12px;color:#64748b;font-weight:600">Date</td>
-                      <td style="font-size:12px;color:#0f172a;font-weight:800;text-align:right">${formattedDate(doc.date)}</td>
+                      <td style="font-size:12px;color:#0f172a;font-weight:800;text-align:right">${fmtDate(doc.date)}</td>
                     </tr>
                   `}
                   </table>
@@ -148,27 +172,238 @@ export function generateInvoiceHtml(doc: any): string {
 }
 
 /**
- * Converts invoice HTML to a PDF buffer using Puppeteer.
+ * Converts invoice data to a PDF buffer using jsPDF (pure JavaScript — no Chromium needed).
+ * Works on Vercel, AWS Lambda, and all serverless environments.
  */
-export async function htmlToPdfBuffer(html: string): Promise<Buffer> {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--font-render-hinting=none'],
-    ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+export async function htmlToPdfBuffer(html: string, invoiceData?: any): Promise<Buffer> {
+  // If we have structured invoice data, use it directly for a clean PDF
+  // Otherwise, generate a basic text-based PDF from whatever we have
+  const doc = invoiceData || extractDataFromHtml(html)
+  return await generatePdfFromData(doc)
+}
+
+/**
+ * Generates a PDF buffer directly from structured invoice data.
+ * This is the primary PDF generation method — no browser needed.
+ */
+export async function generatePdfFromData(data: any): Promise<Buffer> {
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' })
+  const pageWidth = pdf.internal.pageSize.getWidth()
+  const margin = 40
+  const contentWidth = pageWidth - margin * 2
+
+  // ── Brand bar at top ──────────────────────────────────────────────────
+  pdf.setFillColor(251, 191, 36) // amber-400
+  pdf.rect(0, 0, pageWidth, 12, 'F')
+
+  let y = 36
+
+  // ── Try to add logo ───────────────────────────────────────────────────
+  try {
+    const logoData = await fetchLogoBase64()
+    if (logoData) {
+      const logoWidth = 120
+      const logoX = (pageWidth - logoWidth) / 2
+      pdf.addImage(logoData, 'PNG', logoX, y, logoWidth, 50)
+    }
+  } catch { /* graceful fallback — skip logo */ }
+
+  y += 60
+
+  // ── Invoice title ─────────────────────────────────────────────────────
+  pdf.setFontSize(20)
+  pdf.setFont('helvetica', 'bold')
+  pdf.setTextColor(15, 23, 42) // slate-900
+  const invoiceLabel = data.invoiceType === 'Weekly' ? 'WEEKLY INVOICE' : 'INVOICE'
+  pdf.text(invoiceLabel, margin, y)
+
+  // Invoice number on the right
+  pdf.setFontSize(12)
+  pdf.setTextColor(220, 38, 38) // red-600
+  pdf.text(`#${data.invoiceNumber || data.number || ''}`, pageWidth - margin, y, { align: 'right' })
+
+  y += 28
+
+  // ── Info grid ─────────────────────────────────────────────────────────
+  pdf.setFontSize(9)
+  pdf.setTextColor(100, 116, 139) // slate-500
+  pdf.setFont('helvetica', 'normal')
+
+  const leftCol = margin
+  const rightCol = pageWidth / 2 + 20
+
+  // Left: Invoice For
+  pdf.text('INVOICE FOR', leftCol, y)
+  y += 14
+  pdf.setFontSize(13)
+  pdf.setTextColor(15, 23, 42)
+  pdf.setFont('helvetica', 'bold')
+  pdf.text(data.dealerName || data.client || '', leftCol, y)
+
+  // Right: Date info
+  let ry = y - 14
+  pdf.setFontSize(9)
+  pdf.setTextColor(100, 116, 139)
+  pdf.setFont('helvetica', 'normal')
+
+  if (data.invoiceType === 'Weekly' || data.type === 'Weekly') {
+    pdf.text('DATE FROM', rightCol, ry)
+    ry += 14
+    pdf.setFontSize(10)
+    pdf.setTextColor(15, 23, 42)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text(fmtDate(data.weekStart || data.date), rightCol, ry)
+    ry += 18
+
+    pdf.setFontSize(9)
+    pdf.setTextColor(100, 116, 139)
+    pdf.setFont('helvetica', 'normal')
+    pdf.text('DATE TO', rightCol, ry)
+    ry += 14
+    pdf.setFontSize(10)
+    pdf.setTextColor(15, 23, 42)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text(fmtDate(data.weekEnd || data.date), rightCol, ry)
+  } else {
+    pdf.text('DATE', rightCol, ry)
+    ry += 14
+    pdf.setFontSize(10)
+    pdf.setTextColor(15, 23, 42)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text(fmtDate(data.date), rightCol, ry)
+  }
+
+  y += 40
+
+  // ── Separator ─────────────────────────────────────────────────────────
+  pdf.setDrawColor(226, 232, 240) // slate-200
+  pdf.setLineWidth(1)
+  pdf.line(margin, y, pageWidth - margin, y)
+  y += 16
+
+  // ── Line Items Table ──────────────────────────────────────────────────
+  const items = data.lineItems || []
+  const tableData = items.map((li: any) => [
+    fmtDate(li.date || data.date),
+    (li.stockNumber || '').toUpperCase(),
+    li.poNumber || '',
+    li.vin || '',
+    (li.serviceName || li.description || '').toUpperCase(),
+    fmtMoney(li.unitPrice || li.amount || 0),
+    fmtMoney(li.tax || 0),
+    fmtMoney((li.unitPrice || li.amount || 0) + (li.tax || 0)),
+  ])
+
+  autoTable(pdf, {
+    startY: y,
+    margin: { left: margin, right: margin },
+    head: [['DATE', 'STOCK #', 'PO #', 'VIN', 'CLEAN TYPE', 'AMOUNT', 'TAX 6.35%', 'TOTAL']],
+    body: tableData,
+    theme: 'grid',
+    styles: {
+      fontSize: 8,
+      cellPadding: 6,
+      lineColor: [226, 232, 240],
+      lineWidth: 0.5,
+      textColor: [51, 65, 85], // slate-700
+      font: 'helvetica',
+    },
+    headStyles: {
+      fillColor: [15, 23, 42], // slate-900
+      textColor: [251, 191, 36], // amber-400
+      fontStyle: 'bold',
+      fontSize: 7.5,
+      halign: 'left',
+      cellPadding: 8,
+    },
+    columnStyles: {
+      0: { cellWidth: 55 },  // Date
+      1: { cellWidth: 55 },  // Stock #
+      2: { cellWidth: 50 },  // PO #
+      3: { cellWidth: 80 },  // VIN
+      4: { cellWidth: 'auto' },  // Clean Type
+      5: { halign: 'right', cellWidth: 55 },  // Amount
+      6: { halign: 'right', cellWidth: 50 },  // Tax
+      7: { halign: 'right', cellWidth: 55, fontStyle: 'bold', textColor: [15, 23, 42] },  // Total
+    },
+    alternateRowStyles: {
+      fillColor: [243, 244, 246], // gray-100
+    },
+    didDrawPage: () => {
+      // Re-draw brand bar on every page
+      pdf.setFillColor(251, 191, 36)
+      pdf.rect(0, 0, pageWidth, 6, 'F')
+    },
   })
 
-  try {
-    const page = await browser.newPage()
-    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 30000 })
-    // Ensure fonts and images have time to render over the network
-    await new Promise(r => setTimeout(r, 1500))
-    const pdfBuffer = await page.pdf({
-      format: 'Letter',
-      printBackground: true,
-      margin: { top: '20px', right: '0', bottom: '20px', left: '0' },
-    })
-    return Buffer.from(pdfBuffer)
-  } finally {
-    await browser.close()
+  // ── Totals section below table ────────────────────────────────────────
+  const finalY = (pdf as any).lastAutoTable?.finalY || y + 100
+  let ty = finalY + 24
+
+  const totalsX = pageWidth - margin - 180
+  const totalsValueX = pageWidth - margin
+
+  // Subtotal
+  pdf.setFontSize(10)
+  pdf.setTextColor(100, 116, 139)
+  pdf.setFont('helvetica', 'normal')
+  pdf.text('Subtotal', totalsX, ty)
+  pdf.setTextColor(15, 23, 42)
+  pdf.setFont('helvetica', 'bold')
+  pdf.text(fmtMoney(data.subtotal || 0), totalsValueX, ty, { align: 'right' })
+  ty += 18
+
+  // Tax
+  pdf.setTextColor(100, 116, 139)
+  pdf.setFont('helvetica', 'normal')
+  pdf.text('Tax (6.35%)', totalsX, ty)
+  pdf.setTextColor(15, 23, 42)
+  pdf.setFont('helvetica', 'bold')
+  pdf.text(fmtMoney(data.taxTotal || 0), totalsValueX, ty, { align: 'right' })
+  ty += 6
+
+  // Dashed line
+  pdf.setDrawColor(226, 232, 240)
+  pdf.setLineDashPattern([4, 2], 0)
+  pdf.line(totalsX - 10, ty, totalsValueX, ty)
+  pdf.setLineDashPattern([], 0)
+  ty += 18
+
+  // Total
+  pdf.setFontSize(14)
+  pdf.setTextColor(100, 116, 139)
+  pdf.setFont('helvetica', 'bold')
+  pdf.text('Total', totalsX, ty)
+  pdf.setTextColor(245, 158, 11) // amber-500
+  pdf.setFontSize(16)
+  pdf.text(fmtMoney(data.total || 0), totalsValueX, ty, { align: 'right' })
+  ty += 40
+
+  // ── Footer ────────────────────────────────────────────────────────────
+  pdf.setFontSize(10)
+  pdf.setTextColor(100, 116, 139)
+  pdf.setFont('helvetica', 'normal')
+  pdf.text('Thank you for your business!', pageWidth / 2, ty, { align: 'center' })
+
+  // Convert to Buffer
+  const arrayBuffer = pdf.output('arraybuffer')
+  return Buffer.from(arrayBuffer)
+}
+
+/**
+ * Attempts to extract basic invoice data from HTML when structured data isn't available.
+ * This is a fallback — the structured data path is always preferred.
+ */
+function extractDataFromHtml(html: string): any {
+  // Basic regex extraction for fallback
+  const numberMatch = html.match(/Invoice\s+#?\s*([A-Z0-9-]+)/i)
+  return {
+    invoiceNumber: numberMatch?.[1] || 'Unknown',
+    dealerName: '',
+    date: new Date().toISOString(),
+    lineItems: [],
+    subtotal: 0,
+    taxTotal: 0,
+    total: 0,
   }
 }

@@ -98,6 +98,15 @@ export default defineEventHandler(async (event) => {
         .sort(sortObject)
         .skip(skip)
         .limit(limit)
+        .project({
+          number: 1, dealerId: 1, dealerName: 1, dealerEmail: 1,
+          dealerPhone: 1, dealerAddress: 1, status: 1, date: 1,
+          dueDate: 1, weekNumber: 1, weekYear: 1, weekStart: 1, weekEnd: 1,
+          lineItems: 1,
+          subtotal: 1, taxTotal: 1, total: 1,
+          paidAmount: 1, paymentMethod: 1, notes: 1,
+          type: 1, createdAt: 1,
+        })
         .toArray(),
       collection.countDocuments(matchQuery),
     ])

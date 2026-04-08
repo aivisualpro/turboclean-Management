@@ -47,6 +47,15 @@ export default defineEventHandler(async (event) => {
       if (queryInfo.dateEnd) matchQuery.date.$lte = (queryInfo.dateEnd as string).split('T')[0]
     }
 
+    // Filter: Search text (filter tree by dealer name or invoice number)
+    const searchText = ((queryInfo.search as string) || '').trim()
+    if (searchText) {
+      matchQuery.$or = [
+        { dealerName: { $regex: searchText, $options: 'i' } },
+        { number: { $regex: searchText, $options: 'i' } },
+      ]
+    }
+
     const pipeline = [
       { $match: matchQuery },
       {
