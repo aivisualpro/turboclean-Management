@@ -63,6 +63,35 @@ export default defineEventHandler(async (event) => {
       await appSheetAdd('WorkOrders', appSheetRows).catch(err =>
         console.error('[Sync] Failed to add work orders to AppSheet:', err)
       )
+
+      // ── Auto-sync existing invoices (fire-and-forget) ──
+      // Group new WOs by dealer+date to find unique combinations
+      ;(async () => {
+        try {
+          const syncedKeys = new Set<string>()
+          for (let i = 0; i < documentsToInsert.length; i++) {
+            const doc = documentsToInsert[i]!
+            const woId = insertedIds[i]!
+            const dealerId = doc.dealer?.toString() || ''
+            const dateStr = doc.date instanceof Date ? doc.date.toISOString().split('T')[0] : ''
+            const key = `${dealerId}__${dateStr}`
+
+            // Only sync once per dealer+date combination
+            if (!dealerId || !dateStr || syncedKeys.has(key)) continue
+            syncedKeys.add(key)
+
+            // Call sync endpoint to rebuild daily and weekly invoices
+            await $fetch('/api/invoices/sync-work-order', {
+              method: 'POST',
+              body: { workOrderId: woId.toString() }
+            }).catch((err: any) => {
+              console.error('[Import→Invoice Sync] Failed for', key, err.message || err)
+            })
+          }
+        } catch (err) {
+          console.error('[Import→Invoice Sync] Background error:', err)
+        }
+      })()
     }
 
     return {

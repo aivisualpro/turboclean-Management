@@ -252,28 +252,6 @@ export default defineEventHandler(async (event) => {
       const daysDiff = (new Date(endStr).getTime() - new Date(startStr).getTime()) / 86400000
       if (daysDiff > 7) return { success: false, message: 'Date range cannot exceed 7 days' }
 
-      // ── Duplicate check ──
-      const existingInvoice = await invoicesCollection.findOne({
-        type: 'Weekly',
-        dealerId,
-        date: { $gte: startStr, $lte: endStr },
-        // Also check if same date range already covered
-        $or: [
-          { startDate: startStr },
-          { weekKey: { $regex: `^${dealerId}__` } }
-        ]
-      })
-      // More precise duplicate: look for weekly invoice that covers startStr to endStr for this dealer
-      const duplicateCheck = await invoicesCollection.findOne({
-        type: 'Weekly',
-        dealerId,
-        customStartDate: startStr,
-        customEndDate: endStr,
-      })
-      if (duplicateCheck) {
-        return { success: false, message: `A weekly invoice for this dealer and date range (${startStr} to ${endStr}) already exists: ${duplicateCheck.number}` }
-      }
-
       const possibleDealerIds: any[] = [dealerId]
       try { possibleDealerIds.push(new ObjectId(dealerId)) } catch {}
 
@@ -297,12 +275,20 @@ export default defineEventHandler(async (event) => {
       const taxTotal = lineItems.reduce((s, li) => s + li.tax, 0)
       const total = lineItems.reduce((s, li) => s + li.total, 0)
 
-      // Generate unique invoice number
+      // ── Upsert: check for existing invoice for same dealer + date range ──
+      const existingInvoice = await invoicesCollection.findOne({
+        type: 'Weekly',
+        dealerId,
+        customStartDate: startStr,
+        customEndDate: endStr,
+      })
 
-      invoiceCounter++
-      const invNumber = `W-INV-${startStr.replace(/-/g, '')}-${String(invoiceCounter).padStart(4, '0')}`
+      // Keep the original invoice number if updating, otherwise generate new
+      const invNumber = existingInvoice
+        ? existingInvoice.number
+        : (() => { invoiceCounter++; return `W-INV-${startStr.replace(/-/g, '')}-${String(invoiceCounter).padStart(4, '0')}` })()
 
-      const invoice = {
+      const invoiceDoc = {
         number: invNumber,
         type: 'Weekly',
         customStartDate: startStr,
@@ -312,7 +298,7 @@ export default defineEventHandler(async (event) => {
         dealerEmail: dealer.email || '',
         dealerPhone: dealer.phone || '',
         dealerAddress: dealer.address || '',
-        status: 'Draft',
+        status: existingInvoice?.status || 'Draft',
         date: endStr,
         dueDate: (() => {
           const d = new Date(endStr + 'T00:00:00Z')
@@ -325,15 +311,20 @@ export default defineEventHandler(async (event) => {
         subtotal: Math.round(subtotal * 100) / 100,
         taxTotal: Math.round(taxTotal * 100) / 100,
         total: Math.round(total * 100) / 100,
-        paidAmount: 0,
-        paymentMethod: '',
+        paidAmount: existingInvoice?.paidAmount || 0,
+        paymentMethod: existingInvoice?.paymentMethod || '',
         notes: `Custom Weekly Invoice for ${dealer.dealer || dealerId} (${startStr} to ${endStr})`,
         isWeeklyBilled: true,
         workOrderIds: allWOs.map(wo => wo._id.toString()),
-        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       }
 
-      await invoicesCollection.insertOne(invoice)
+      // Upsert: replace existing or insert new
+      await invoicesCollection.updateOne(
+        { type: 'Weekly', dealerId, customStartDate: startStr, customEndDate: endStr },
+        { $set: invoiceDoc, $setOnInsert: { createdAt: new Date().toISOString() } },
+        { upsert: true }
+      )
 
       // Mark all included WOs as invoiced (MongoDB only — no AppSheet sync for weekly)
       await db.collection('turboCleanWorkOrders').updateMany(
@@ -341,7 +332,8 @@ export default defineEventHandler(async (event) => {
         { $set: { isInvoiced: true } }
       )
 
-      return { success: true, generated: 1, message: `Weekly invoice ${invNumber} created with ${allWOs.length} work orders (${startStr} to ${endStr}).` }
+      const action = existingInvoice ? 'updated' : 'created'
+      return { success: true, generated: 1, message: `Weekly invoice ${invNumber} ${action} with ${allWOs.length} work orders (${startStr} to ${endStr}).` }
     }
 
     return { success: false, message: 'Invalid generation type' }

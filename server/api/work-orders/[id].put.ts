@@ -68,43 +68,14 @@ export default defineEventHandler(async (event) => {
           console.error('[AppSheet Sync Error] Failed to sync WorkOrder update:', err)
         })
 
-        // 2. Auto-Update Parent Invoices
-        // If this work order is linked to any daily or weekly invoice, propagate the changes directly.
-        const invoicesCollection = db.collection('turboCleanInvoices')
-        const relatedInvoices = await invoicesCollection.find({ 'lineItems.workOrderId': id }).toArray()
-
-        for (const inv of relatedInvoices) {
-          let updatedLineItems = false
-          const nextLineItems = inv.lineItems.map((li: any) => {
-            if (li.workOrderId === id) {
-              updatedLineItems = true
-              const svcName = finalDoc.dealerServiceId || li.serviceName
-              return {
-                ...li,
-                amount: Number(finalDoc.amount) || 0,
-                tax: Number(finalDoc.tax) || 0,
-                total: Number(finalDoc.total) || 0,
-                stockNumber: finalDoc.stockNumber || '',
-                poNumber: finalDoc.poNumber || '',
-                vin: finalDoc.vin || '',
-                serviceName: svcName,
-                description: `${svcName} – Stock# ${finalDoc.stockNumber || 'N/A'} (PO#: ${finalDoc.poNumber || 'N/A'}) (VIN: ${finalDoc.vin || 'N/A'})`
-              }
-            }
-            return li
-          })
-
-          if (updatedLineItems) {
-            const subtotal = nextLineItems.reduce((s: number, li: any) => s + (li.amount || 0), 0)
-            const taxTotal = nextLineItems.reduce((s: number, li: any) => s + (li.tax || 0), 0)
-            const total = nextLineItems.reduce((s: number, li: any) => s + (li.total || 0), 0)
-            
-            await invoicesCollection.updateOne(
-              { _id: inv._id },
-              { $set: { lineItems: nextLineItems, subtotal, taxTotal, total } }
-            )
-          }
-        }
+        // 2. Auto-Update Parent Invoices (daily + weekly)
+        // Uses the centralized sync endpoint which fully rebuilds both daily and weekly invoices
+        await $fetch('/api/invoices/sync-work-order', {
+          method: 'POST',
+          body: { workOrderId: id }
+        }).catch((err: any) => {
+          console.error('[Invoice Propagation Error]', err.message || err)
+        })
       } catch (err) {
         console.error('[Background Propagation Error]:', err)
       }

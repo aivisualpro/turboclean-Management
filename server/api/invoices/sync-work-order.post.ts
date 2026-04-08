@@ -3,9 +3,9 @@ import { ObjectId } from 'mongodb'
 
 /**
  * POST /api/invoices/sync-work-order
- * Called automatically after any work order is updated.
+ * Called automatically after any work order is created or updated.
  * Rebuilds the daily invoice that contains that work order,
- * and marks the parent weekly invoice (if any) as stale/updated.
+ * and fully rebuilds any parent weekly invoice covering the same date range.
  */
 
 function toDateStr(d: any): string {
@@ -95,47 +95,66 @@ export default defineEventHandler(async (event) => {
       { returnDocument: 'after' }
     )
 
-    const updatedDailyInv = result
+    // ── Rebuild ALL weekly invoices that cover this date ──
+    // Find weekly invoices for this dealer where dateStr falls within the range
+    const weeklyInvoices = await db.collection('turboCleanInvoices').find({
+      type: 'Weekly',
+      dealerId,
+      $or: [
+        // Custom weekly invoices with explicit start/end dates
+        { customStartDate: { $lte: dateStr }, customEndDate: { $gte: dateStr } },
+        // Standard weekly invoices with weekStart/weekEnd
+        { weekStart: { $lte: dateStr + 'T23:59:59.999Z' }, weekEnd: { $gte: dateStr + 'T00:00:00.000Z' } },
+        // Also match by workOrderId (existing line items)
+        { 'lineItems.workOrderId': workOrderId },
+      ]
+    }).toArray()
 
-    // If this daily invoice belongs to a weekly invoice, update that too
-    if (updatedDailyInv) {
-      const dailyId = (updatedDailyInv as any)._id
-      const weeklyInv = await db.collection('turboCleanInvoices').findOne({
-        type: 'Weekly',
-        dealerId,
-        'lineItems.workOrderId': workOrderId,
-      })
+    for (const weeklyInv of weeklyInvoices) {
+      // Determine the date range for this weekly invoice
+      const rangeStart = weeklyInv.customStartDate || (weeklyInv.weekStart ? toDateStr(weeklyInv.weekStart) : null)
+      const rangeEnd = weeklyInv.customEndDate || (weeklyInv.weekEnd ? toDateStr(weeklyInv.weekEnd) : null)
 
-      if (weeklyInv) {
-        // Rebuild weekly line items by replacing lines from this daily
-        const updatedLineItems = (weeklyInv.lineItems || []).map((li: any) => {
-          const refreshed = lineItems.find(l => l.workOrderId === li.workOrderId)
-          return refreshed || li
-        })
-        updatedLineItems.sort((a: any, b: any) => a.date.localeCompare(b.date))
+      if (!rangeStart || !rangeEnd) continue
 
-        const wSubtotal = updatedLineItems.reduce((s: number, li: any) => s + li.amount, 0)
-        const wTaxTotal = updatedLineItems.reduce((s: number, li: any) => s + li.tax, 0)
-        const wTotal = updatedLineItems.reduce((s: number, li: any) => s + li.total, 0)
+      // Re-query ALL work orders in this weekly invoice's date range
+      const allWOsInRange = await db.collection('turboCleanWorkOrders').aggregate([
+        { $match: { dealer: { $in: possibleDealerIds } } },
+        { $addFields: { dateStr: { $dateToString: { format: '%Y-%m-%d', date: '$date', timezone: 'UTC' } } } },
+        { $match: { dateStr: { $gte: rangeStart, $lte: rangeEnd } } }
+      ]).toArray()
 
-        await db.collection('turboCleanInvoices').updateOne(
-          { _id: weeklyInv._id },
-          {
-            $set: {
-              lineItems: updatedLineItems,
-              subtotal: Math.round(wSubtotal * 100) / 100,
-              taxTotal: Math.round(wTaxTotal * 100) / 100,
-              total: Math.round(wTotal * 100) / 100,
-              updatedAt: new Date().toISOString(),
-            }
+      // Rebuild line items from scratch
+      const weeklyLineItems = allWOsInRange.map(buildLineItem)
+      weeklyLineItems.sort((a: any, b: any) => a.date.localeCompare(b.date))
+
+      const wSubtotal = weeklyLineItems.reduce((s: number, li: any) => s + li.amount, 0)
+      const wTaxTotal = weeklyLineItems.reduce((s: number, li: any) => s + li.tax, 0)
+      const wTotal = weeklyLineItems.reduce((s: number, li: any) => s + li.total, 0)
+
+      await db.collection('turboCleanInvoices').updateOne(
+        { _id: weeklyInv._id },
+        {
+          $set: {
+            lineItems: weeklyLineItems,
+            subtotal: Math.round(wSubtotal * 100) / 100,
+            taxTotal: Math.round(wTaxTotal * 100) / 100,
+            total: Math.round(wTotal * 100) / 100,
+            workOrderIds: allWOsInRange.map(w => w._id.toString()),
+            updatedAt: new Date().toISOString(),
           }
-        )
-      }
+        }
+      )
     }
 
-    return { success: true, message: `Invoice synced for dealer ${dealerId} on ${dateStr}` }
+    return {
+      success: true,
+      message: `Invoice synced for dealer ${dealerId} on ${dateStr}`,
+      weeklyUpdated: weeklyInvoices.length,
+    }
   } catch (error: any) {
     console.error('[Invoice Sync Error]', error)
     throw createError({ statusCode: 500, statusMessage: error.message || 'Failed to sync invoice' })
   }
 })
+
