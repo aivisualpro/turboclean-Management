@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
 import { toast } from 'vue-sonner'
 import { generatePDF, downloadPDF, calcLineTotal } from '~/composables/useSalesDocument'
 import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, Loader2, Download, Search, FileText, FileSpreadsheet, Eye, Mail, ThumbsUp, CheckCircle, Send } from 'lucide-vue-next'
@@ -16,7 +15,7 @@ const globalDatePreset = ref('this_month')
 const customStartDate = ref('')
 const customEndDate = ref('')
 
-watch(() => customStartDate.value, (newVal) => {
+watch(() => customStartDate.value, (newVal: string) => {
   if (newVal && !customEndDate.value) customEndDate.value = newVal
 })
 
