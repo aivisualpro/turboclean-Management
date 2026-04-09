@@ -1,12 +1,21 @@
 import { connectToDatabase } from '../../utils/mongodb'
 import { getUserSession } from '../../utils/auth'
 import { ObjectId } from 'mongodb'
+const cache = new Map<string, { timestamp: number; data: any }>()
+const CACHE_TTL = 15000 // 15s cache buffer
 
 export default defineEventHandler(async (event) => {
   try {
     const session = await getUserSession(event)
-    const { db } = await connectToDatabase()
     const queryInfo = getQuery(event)
+
+    const cacheKey = JSON.stringify({ ...queryInfo, r: session?.role, e: session?.email })
+    const cached = cache.get(cacheKey)
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+       return { success: true, tree: cached.data }
+    }
+
+    const { db } = await connectToDatabase()
 
     // Build Match query based on filters
     const matchQuery: any = {}
@@ -71,9 +80,9 @@ export default defineEventHandler(async (event) => {
             dealer: "$dealer",
             date: { $dateToString: { format: "%Y-%m-%d", date: "$date", timezone: "UTC" } }
           },
-          totalAmount: { $sum: { $toDouble: "$total" } },
-          totalTax: { $sum: { $toDouble: "$tax" } },
-          totalSub: { $sum: { $toDouble: "$amount" } },
+          totalAmount: { $sum: { $convert: { input: "$total", to: "double", onError: 0, onNull: 0 } } },
+          totalTax: { $sum: { $convert: { input: "$tax", to: "double", onError: 0, onNull: 0 } } },
+          totalSub: { $sum: { $convert: { input: "$amount", to: "double", onError: 0, onNull: 0 } } },
           count: { $sum: 1 }
         }
       }
@@ -96,11 +105,13 @@ export default defineEventHandler(async (event) => {
       if (!dateStr) continue
 
       const [yearStr, monthStr, dayStr] = dateStr.split('-')
-      const year = parseInt(yearStr)
-      // Convert month to name, e.g., '03' -> 'Mar'
-      const dateObj = new Date(Date.UTC(year, parseInt(monthStr) - 1, parseInt(dayStr)))
-      const month = dateObj.toLocaleString('default', { month: 'short', timeZone: 'UTC' })
-      const day = parseInt(dayStr)
+      const year = parseInt(yearStr, 10)
+      
+      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+      const mIdx = parseInt(monthStr, 10) - 1
+      const month = monthNames[mIdx] || 'Unknown'
+      
+      const day = parseInt(dayStr, 10)
 
       // Initialize deeper levels
       if (!tree[dealerId]) {
@@ -190,6 +201,7 @@ export default defineEventHandler(async (event) => {
       return dlr
     }).sort((a: any, b: any) => a.dealerName.localeCompare(b.dealerName)) // alphabetical dealers
 
+    cache.set(cacheKey, { timestamp: Date.now(), data: finalTree })
     return { success: true, tree: finalTree }
   } catch (error: any) {
     console.error('Error fetching work order tree:', error)

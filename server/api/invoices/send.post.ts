@@ -51,6 +51,11 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Missing parameters' })
   }
 
+  const targetEmails = Array.isArray(email) ? email : email.split(',').map((e: string) => e.trim()).filter(Boolean)
+  if (targetEmails.length === 0) {
+    throw createError({ statusCode: 400, statusMessage: 'No valid recipient email provided.' })
+  }
+
   const resend = new Resend(process.env.RESEND_API_KEY)
 
   try {
@@ -168,7 +173,7 @@ export default defineEventHandler(async (event) => {
     // ── Send Email ──────────────────────────────────────────────────
     const data = await resend.emails.send({
       from: fromAddress,
-      to: email,
+      to: targetEmails,
       subject: subject,
       html: emailHtml,
       ...(attachments.length > 0 ? { attachments } : {}),
@@ -180,7 +185,7 @@ export default defineEventHandler(async (event) => {
       await db.collection('turboCleanEmailLogs').insertOne({
         dealerId,
         invoiceId,
-        email, // Legacy
+        email: Array.isArray(email) ? email.join(', ') : email, // Legacy
         subject,
         type: 'Invoice',
         invoiceType: invoiceType || 'Unknown',
@@ -191,7 +196,7 @@ export default defineEventHandler(async (event) => {
         // Mailbox UI Support Fields:
         folder: 'sent',
         from: fromAddress,
-        to: email,
+        to: targetEmails,
         bodyHtml: emailHtml,
         receivedAt: new Date().toISOString(), // Fallback for unified sorting
         attachments: attachments.map(att => ({

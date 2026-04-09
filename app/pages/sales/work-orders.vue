@@ -124,6 +124,15 @@ async function fetchTree() {
   }
 }
 
+// Client-side instant-filter for tree as user types
+const filteredTreeData = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  if (!q) return treeData.value
+  return treeData.value.filter((dealer: any) =>
+    (dealer.dealerName || '').toLowerCase().includes(q)
+  )
+})
+
 // ─── Table Data Fetching ─────────────────────────────────────────────────
 const workOrders = ref<any[]>([])
 const loading = ref(false)
@@ -709,7 +718,7 @@ async function handleGenerate(type: 'daily' | 'weekly') {
             </div>
 
             <!-- Tree Dealers -->
-            <div v-for="dealer in treeData" :key="dealer.dealerId">
+            <div v-for="dealer in filteredTreeData" :key="dealer.dealerId">
               <div
                 class="flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer text-sm transition-colors group"
                 :class="activeFilter.dealerId === dealer.dealerId && !activeFilter.dateStart ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'"

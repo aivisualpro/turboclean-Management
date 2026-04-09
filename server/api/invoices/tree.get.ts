@@ -1,12 +1,21 @@
 import { connectToDatabase } from '../../utils/mongodb'
 import { getUserSession } from '../../utils/auth'
 import { ObjectId } from 'mongodb'
+const cache = new Map<string, { timestamp: number; data: any }>()
+const CACHE_TTL = 15000 // 15s cache buffer to prevent DB thrashing during search typing
 
 export default defineEventHandler(async (event) => {
   try {
     const session = await getUserSession(event)
-    const { db } = await connectToDatabase()
     const queryInfo = getQuery(event)
+
+    const cacheKey = JSON.stringify({ ...queryInfo, r: session?.role, e: session?.email })
+    const cached = cache.get(cacheKey)
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+       return { success: true, tree: cached.data }
+    }
+
+    const { db } = await connectToDatabase()
 
     const isAdmin = session?.role === 'Admin'
     const matchQuery: any = {}
@@ -66,8 +75,8 @@ export default defineEventHandler(async (event) => {
             // The grouped date
             date: "$date"
           },
-          totalAmount: { $sum: { $toDouble: "$total" } },
-          totalPaid: { $sum: { $toDouble: "$paidAmount" } },
+          totalAmount: { $sum: { $convert: { input: "$total", to: "double", onError: 0, onNull: 0 } } },
+          totalPaid: { $sum: { $convert: { input: "$paidAmount", to: "double", onError: 0, onNull: 0 } } },
           count: { $sum: 1 }
         }
       }
@@ -84,10 +93,13 @@ export default defineEventHandler(async (event) => {
       if (!dateStr) continue
 
       const [yearStr, monthStr, dayStr] = dateStr.split('-')
-      const year = parseInt(yearStr)
-      const dateObj = new Date(Date.UTC(year, parseInt(monthStr) - 1, parseInt(dayStr)))
-      const month = dateObj.toLocaleString('default', { month: 'short', timeZone: 'UTC' })
-      const day = parseInt(dayStr)
+      const year = parseInt(yearStr, 10)
+      
+      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+      const mIdx = parseInt(monthStr, 10) - 1
+      const month = monthNames[mIdx] || 'Unknown'
+      
+      const day = parseInt(dayStr, 10)
 
       if (!tree[dealerId]) {
         tree[dealerId] = {
@@ -163,6 +175,7 @@ export default defineEventHandler(async (event) => {
       return dlr
     }).sort((a: any, b: any) => a.dealerName.localeCompare(b.dealerName))
 
+    cache.set(cacheKey, { timestamp: Date.now(), data: finalTree })
     return { success: true, tree: finalTree }
   } catch (error: any) {
     console.error('Error fetching invoices tree:', error)

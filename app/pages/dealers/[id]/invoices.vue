@@ -168,14 +168,18 @@ async function updateInvoiceStatus(inv: any, newStatus: string) {
 
 const showEmailDialog = ref(false)
 const selectedEmailInvoice = ref<any>(null)
-const emailForm = ref({ email: '' })
-const dealerContacts = ref<string[]>([])
+const emailForm = ref<{ emails: string[], customEmails: string }>({ emails: [], customEmails: '' })
+const dealerContacts = ref<{email: string, name: string}[]>([])
 const isFetchingContacts = ref(false)
 const isEmailing = ref(false)
 
 async function openEmailDialog(inv: any) {
   selectedEmailInvoice.value = inv
-  emailForm.value.email = inv.dealerEmail || ''
+  emailForm.value = { emails: [], customEmails: '' }
+  if (inv.dealerEmail) {
+    emailForm.value.emails.push(inv.dealerEmail)
+  }
+  
   dealerContacts.value = []
   showEmailDialog.value = true
   
@@ -185,12 +189,19 @@ async function openEmailDialog(inv: any) {
       const res = await $fetch<{ dealers: any[] }>('/api/dealers')
       const dlr = (res.dealers || []).find((d: any) => d.id === inv.dealerId)
       if (dlr) {
-        const emails = new Set<string>()
-        if (dlr.dealerEmail) emails.add(dlr.dealerEmail)
-        dlr.contacts?.forEach((c: any) => c.emails?.forEach((e: string) => emails.add(e)))
-        dealerContacts.value = Array.from(emails).filter(Boolean)
-        if (!emailForm.value.email && dealerContacts.value.length) {
-          emailForm.value.email = dealerContacts.value[0] || ''
+        const items = new Map<string, string>()
+        if (dlr.dealerEmail) items.set(dlr.dealerEmail, dlr.dealerName || 'Primary Contact')
+        dlr.contacts?.forEach((c: any) => {
+          c.emails?.forEach((e: string) => {
+            if (!items.has(e)) items.set(e, c.name || 'Contact')
+          })
+        })
+        dealerContacts.value = Array.from(items.entries()).map(([email, name]) => ({ email, name })).filter(d => Boolean(d.email))
+        if (emailForm.value.emails.length === 0 && dealerContacts.value.length > 0) {
+          const firstContact = dealerContacts.value[0]
+          if (firstContact?.email) {
+            emailForm.value.emails.push(firstContact.email)
+          }
         }
       }
     } catch { }
@@ -199,13 +210,10 @@ async function openEmailDialog(inv: any) {
 }
 
 function handleEmailDialogSubmit() {
-  if (!emailForm.value.email) return toast.error('Email is required')
-  let finalEmail = emailForm.value.email
-  if (finalEmail === 'custom') {
-    const customEmail = prompt('Enter the custom email address:')
-    if (!customEmail) return
-    finalEmail = customEmail
-  }
+  const customList = emailForm.value.customEmails.split(',').map(s => s.trim()).filter(Boolean)
+  const finalEmails = Array.from(new Set([...emailForm.value.emails, ...customList]))
+
+  if (finalEmails.length === 0) return toast.error('At least one email is required')
 
   const inv = selectedEmailInvoice.value
   const doc = toSalesDoc(inv)
@@ -213,7 +221,7 @@ function handleEmailDialogSubmit() {
 
   // Close dialog and show success immediately — backend handles the rest
   showEmailDialog.value = false
-  toast.success('Invoice queued for delivery to ' + finalEmail)
+  toast.success(`Invoice queued for delivery to ${finalEmails.length} recipient${finalEmails.length > 1 ? 's' : ''}`)
 
   // Optimistic status advance
   if (inv.status === 'Approved' || inv.status === 'Draft' || inv.status === 'Sent') {
@@ -225,7 +233,7 @@ function handleEmailDialogSubmit() {
     method: 'POST' as any,
     body: {
       html: htmlPayload,
-      email: finalEmail,
+      email: finalEmails,
       subject: `Invoice ${doc.number} from ZRZ OPS`,
       dealerId: inv.dealerId,
       invoiceId: inv.id,
@@ -632,22 +640,34 @@ function sortIcon(field: string) {
             <Loader2 class="size-3 animate-spin" /> Fetching dealer contacts...
           </div>
           
-          <div class="space-y-3">
-            <select v-if="dealerContacts.length > 0" v-model="emailForm.email" class="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 focus:ring-2 focus:ring-ring">
-              <optgroup label="Dealer Contacts">
-                <option v-for="c in dealerContacts" :key="c" :value="c">{{ c }}</option>
-              </optgroup>
-              <optgroup label="Other">
-                <option value="custom">Enter new email address...</option>
-              </optgroup>
-            </select>
+          <div class="space-y-4">
+            <div v-if="dealerContacts.length > 0" class="space-y-3 border rounded-lg p-4 bg-muted/10 shadow-sm">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">Dealer Contacts</span>
+                <button type="button" class="text-[10px] uppercase font-bold text-primary hover:underline" @click="emailForm.emails.length === dealerContacts.length ? emailForm.emails = [] : emailForm.emails = dealerContacts.map(c => c.email)">
+                  {{ emailForm.emails.length === dealerContacts.length ? 'Deselect All' : 'Select All' }}
+                </button>
+              </div>
+              <div class="space-y-2">
+                <div v-for="c in dealerContacts" :key="c.email" class="flex items-center gap-2.5">
+                  <Checkbox :id="'contact-' + c.email" :checked="emailForm.emails.includes(c.email)" @update:checked="$event ? emailForm.emails.push(c.email) : emailForm.emails.splice(emailForm.emails.indexOf(c.email), 1)" />
+                  <label :for="'contact-' + c.email" class="text-sm font-medium leading-none cursor-pointer text-foreground/90 flex flex-wrap gap-1.5 items-center">
+                    <span class="font-semibold">{{ c.name }}</span>
+                    <span class="text-xs text-muted-foreground">&lt;{{ c.email }}&gt;</span>
+                  </label>
+                </div>
+              </div>
+            </div>
             
-            <Input v-if="dealerContacts.length === 0 || emailForm.email === 'custom' || !dealerContacts.includes(emailForm.email)" v-model="emailForm.email" placeholder="billing@dealership.com" type="email" />
+            <div>
+              <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block" :class="dealerContacts.length ? 'mt-2' : ''">Additional Emails</span>
+              <Input v-model="emailForm.customEmails" placeholder="comma, separated, list@domain.com" />
+            </div>
           </div>
         </div>
         <div class="p-4 border-t bg-muted/20 flex justify-end gap-2">
           <Button variant="outline" @click="showEmailDialog = false" :disabled="isEmailing">Cancel</Button>
-          <Button class="bg-blue-600 hover:bg-blue-700 text-white shadow" :disabled="!emailForm.email || isEmailing" @click="handleEmailDialogSubmit">
+          <Button class="bg-blue-600 hover:bg-blue-700 text-white shadow" :disabled="(!emailForm.emails.length && !emailForm.customEmails.trim()) || isEmailing" @click="handleEmailDialogSubmit">
             <Loader2 v-if="isEmailing" class="mr-2 size-4 animate-spin" />
             <Send v-else class="mr-2 size-4" />
             {{ isEmailing ? 'Sending...' : 'Send Invoice' }}

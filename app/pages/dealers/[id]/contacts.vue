@@ -22,15 +22,28 @@ function openEdit(contact: DealerContact) {
   showForm.value = true
 }
 
-async function removeContact(contactId: string) {
-  if (!confirm('Are you sure you want to delete this contact?')) return
-  const newContacts = props.dealer.contacts.filter(c => c.id !== contactId)
-  try {
-    await patchDealer(props.dealer.id, { contacts: newContacts })
-    toast.success('Contact deleted')
-  } catch (err: any) {
-    toast.error('Failed to delete contact: ' + err.message)
-  }
+function removeContact(contactId: string, contactName: string) {
+  toast('Delete Contact?', {
+    description: `Are you sure you want to delete ${contactName}?`,
+    action: {
+      label: 'Confirm Delete',
+      onClick: () => {
+        const newContacts = props.dealer.contacts.filter(c => c.id !== contactId)
+        toast.promise(
+          patchDealer(props.dealer.id, { contacts: newContacts }),
+          {
+            loading: 'Deleting contact...',
+            success: 'Contact deleted successfully',
+            error: (err: any) => 'Failed to delete contact: ' + (err.message || 'Unknown error')
+          }
+        )
+      }
+    },
+    cancel: {
+      label: 'Cancel',
+      onClick: () => {}
+    }
+  })
 }
 
 async function toggleReceiveInvoices(contact: DealerContact) {
@@ -154,9 +167,9 @@ function getPreferredLabel(method: string) {
                   <Button variant="ghost" size="icon" class="size-7 hover:bg-primary/10 hover:text-primary transition-colors duration-200" @click="openEdit(contact)">
                     <Edit3 class="size-3.5" />
                   </Button>
-                  <Button variant="ghost" size="icon" class="size-7 hover:bg-destructive/10 hover:text-destructive transition-colors duration-200" @click="removeContact(contact.id)">
+                  <Button variant="ghost" size="icon" class="size-7 hover:bg-destructive/10 hover:text-destructive transition-colors duration-200" @click="removeContact(contact.id, contact.name)">
                     <Trash2 class="size-3.5" />
-                  </Button>
+                  </Button>>
                 </div>
               </TableCell>
             </TableRow>
