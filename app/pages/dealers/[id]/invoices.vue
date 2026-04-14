@@ -179,11 +179,6 @@ async function openEmailDialog(inv: any) {
   selectedEmailInvoice.value = inv
   emailForm.value = { emails: [], customEmails: '' }
   
-  const primaryEmail = cleanEmail(inv.dealerEmail)
-  if (primaryEmail) {
-    emailForm.value.emails.push(primaryEmail)
-  }
-  
   dealerContacts.value = []
   showEmailDialog.value = true
   
