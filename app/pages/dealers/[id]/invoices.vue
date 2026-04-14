@@ -185,12 +185,10 @@ async function openEmailDialog(inv: any) {
   if (inv.dealerId) {
     isFetchingContacts.value = true
     try {
-      const res = await $fetch<{ dealers: any[] }>('/api/dealers')
-      const dlr = (res.dealers || []).find((d: any) => d.id === inv.dealerId)
+      const res = await $fetch<{ dealer: any }>(`/api/dealers/${inv.dealerId}`)
+      const dlr = res.dealer
       if (dlr) {
         const items = new Map<string, string>()
-        const cleanDlr = cleanEmail(dlr.dealerEmail)
-        if (cleanDlr) items.set(cleanDlr, dlr.dealerName || 'Primary Contact')
         dlr.contacts?.forEach((c: any) => {
           c.emails?.forEach((e: string) => {
             const cleaned = cleanEmail(e)
@@ -198,12 +196,6 @@ async function openEmailDialog(inv: any) {
           })
         })
         dealerContacts.value = Array.from(items.entries()).map(([email, name]) => ({ email, name }))
-        if (emailForm.value.emails.length === 0 && dealerContacts.value.length > 0) {
-          const firstContact = dealerContacts.value[0]
-          if (firstContact?.email) {
-            emailForm.value.emails.push(firstContact.email)
-          }
-        }
       }
     } catch { }
     finally { isFetchingContacts.value = false }
