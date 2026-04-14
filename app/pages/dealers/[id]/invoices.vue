@@ -173,11 +173,15 @@ const dealerContacts = ref<{email: string, name: string}[]>([])
 const isFetchingContacts = ref(false)
 const isEmailing = ref(false)
 
+const cleanEmail = (e: string) => e?.trim().replace(/,+$/, '') || '';
+
 async function openEmailDialog(inv: any) {
   selectedEmailInvoice.value = inv
   emailForm.value = { emails: [], customEmails: '' }
-  if (inv.dealerEmail) {
-    emailForm.value.emails.push(inv.dealerEmail)
+  
+  const primaryEmail = cleanEmail(inv.dealerEmail)
+  if (primaryEmail) {
+    emailForm.value.emails.push(primaryEmail)
   }
   
   dealerContacts.value = []
@@ -190,13 +194,15 @@ async function openEmailDialog(inv: any) {
       const dlr = (res.dealers || []).find((d: any) => d.id === inv.dealerId)
       if (dlr) {
         const items = new Map<string, string>()
-        if (dlr.dealerEmail) items.set(dlr.dealerEmail, dlr.dealerName || 'Primary Contact')
+        const cleanDlr = cleanEmail(dlr.dealerEmail)
+        if (cleanDlr) items.set(cleanDlr, dlr.dealerName || 'Primary Contact')
         dlr.contacts?.forEach((c: any) => {
           c.emails?.forEach((e: string) => {
-            if (!items.has(e)) items.set(e, c.name || 'Contact')
+            const cleaned = cleanEmail(e)
+            if (cleaned && !items.has(cleaned)) items.set(cleaned, c.name || 'Contact')
           })
         })
-        dealerContacts.value = Array.from(items.entries()).map(([email, name]) => ({ email, name })).filter(d => Boolean(d.email))
+        dealerContacts.value = Array.from(items.entries()).map(([email, name]) => ({ email, name }))
         if (emailForm.value.emails.length === 0 && dealerContacts.value.length > 0) {
           const firstContact = dealerContacts.value[0]
           if (firstContact?.email) {
@@ -210,8 +216,13 @@ async function openEmailDialog(inv: any) {
 }
 
 function handleEmailDialogSubmit() {
-  const customList = emailForm.value.customEmails.split(',').map(s => s.trim()).filter(Boolean)
-  const finalEmails = Array.from(new Set([...emailForm.value.emails, ...customList]))
+  const rawCustom = emailForm.value.customEmails.split(',')
+  const finalEmails = Array.from(new Set(
+    [...emailForm.value.emails, ...rawCustom]
+      .flatMap(s => typeof s === 'string' ? s.split(',') : [])
+      .map(s => s.trim().replace(/,+$/, ''))
+      .filter(Boolean)
+  ))
 
   if (finalEmails.length === 0) return toast.error('At least one email is required')
 
