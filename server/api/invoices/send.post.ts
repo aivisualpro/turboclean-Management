@@ -45,13 +45,19 @@ function extFromContentType(ct: string): string {
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
-  const { email, html, subject, dealerId, invoiceId, invoiceType, invoiceNumber, invoiceData } = body
+  const { email, to, html, subject, dealerId, invoiceId, invoiceType, invoiceNumber, invoiceData } = body
 
-  if (!email || !subject) {
+  const emailField = email || to
+  if (!emailField || !subject) {
     throw createError({ statusCode: 400, statusMessage: 'Missing parameters' })
   }
 
-  const targetEmails = Array.isArray(email) ? email : email.split(',').map((e: string) => e.trim()).filter(Boolean)
+  const rawEmails = Array.isArray(emailField) ? emailField : emailField.split(',')
+  const targetEmails = rawEmails
+    .flatMap((e: any) => typeof e === 'string' ? e.split(',') : [])
+    .map((e: string) => e.trim().replace(/,+$/, ''))
+    .filter(Boolean)
+
   if (targetEmails.length === 0) {
     throw createError({ statusCode: 400, statusMessage: 'No valid recipient email provided.' })
   }

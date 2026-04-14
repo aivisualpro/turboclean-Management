@@ -50,7 +50,7 @@ export default defineEventHandler(async (event) => {
     for (const dealer of dealers) {
       const validEmails: string[] = (dealer.contacts || [])
         .filter((c: any) => c.receiveInvoices && c.emails?.length > 0)
-        .flatMap((c: any) => c.emails.filter((e: string) => !!e?.trim()))
+        .flatMap((c: any) => c.emails.flatMap((e: string) => typeof e === 'string' ? e.split(',') : []).map((e: string) => e.trim().replace(/,+$/, '')).filter(Boolean))
       if (validEmails.length > 0) {
         dealerEmailMap.set(dealer._id.toString(), validEmails)
       }
