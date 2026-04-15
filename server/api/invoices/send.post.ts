@@ -47,6 +47,12 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event)
   const { email, to, html, subject, dealerId, invoiceId, invoiceType, invoiceNumber, invoiceData } = body
 
+  // ── DEBUG: Log exactly what the frontend sent ─────────────────────
+  console.log(`[Invoice Email] RAW body.email:`, JSON.stringify(email))
+  console.log(`[Invoice Email] RAW body.to:`, JSON.stringify(to))
+  console.log(`[Invoice Email] Subject:`, subject)
+  console.log(`[Invoice Email] InvoiceNumber:`, invoiceNumber)
+
   const emailField = email || to
   if (!emailField || !subject) {
     throw createError({ statusCode: 400, statusMessage: 'Missing parameters' })
@@ -57,6 +63,8 @@ export default defineEventHandler(async (event) => {
     .flatMap((e: any) => typeof e === 'string' ? e.split(',') : [])
     .map((e: string) => e.trim().replace(/,+$/, ''))
     .filter(Boolean)
+
+  console.log(`[Invoice Email] FINAL targetEmails:`, JSON.stringify(targetEmails))
 
   if (targetEmails.length === 0) {
     throw createError({ statusCode: 400, statusMessage: 'No valid recipient email provided.' })
