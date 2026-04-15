@@ -168,7 +168,8 @@ async function updateInvoiceStatus(inv: any, newStatus: string) {
 
 const showEmailDialog = ref(false)
 const selectedEmailInvoice = ref<any>(null)
-const emailForm = ref<{ emails: string[], customEmails: string }>({ emails: [], customEmails: '' })
+const recipientEmails = ref<string[]>([])
+const newEmailInput = ref('')
 const dealerContacts = ref<{email: string, name: string}[]>([])
 const isFetchingContacts = ref(false)
 const isEmailing = ref(false)
@@ -177,8 +178,8 @@ const cleanEmail = (e: string) => e?.trim().replace(/,+$/, '') || '';
 
 async function openEmailDialog(inv: any) {
   selectedEmailInvoice.value = inv
-  emailForm.value = { emails: [], customEmails: '' }
-  
+  recipientEmails.value = []
+  newEmailInput.value = ''
   dealerContacts.value = []
   showEmailDialog.value = true
   
@@ -202,31 +203,69 @@ async function openEmailDialog(inv: any) {
   }
 }
 
-function handleEmailDialogSubmit() {
-  const rawCustom = emailForm.value.customEmails.split(',')
-  const finalEmails = Array.from(new Set(
-    [...emailForm.value.emails, ...rawCustom]
-      .flatMap(s => typeof s === 'string' ? s.split(',') : [])
-      .map(s => s.trim().replace(/,+$/, ''))
-      .filter(Boolean)
-  ))
+function toggleContact(email: string) {
+  if (recipientEmails.value.includes(email)) {
+    recipientEmails.value = recipientEmails.value.filter(e => e !== email)
+  } else {
+    recipientEmails.value = [...recipientEmails.value, email]
+  }
+}
 
+function selectAllContacts() {
+  const allContactEmails = dealerContacts.value.map(c => c.email)
+  const allSelected = allContactEmails.every(e => recipientEmails.value.includes(e))
+  if (allSelected) {
+    recipientEmails.value = recipientEmails.value.filter(e => !allContactEmails.includes(e))
+  } else {
+    const newEmails = allContactEmails.filter(e => !recipientEmails.value.includes(e))
+    recipientEmails.value = [...recipientEmails.value, ...newEmails]
+  }
+}
+
+function addCustomEmail() {
+  const raw = newEmailInput.value
+  const emails = raw.split(/[,;\s]+/).map(s => cleanEmail(s)).filter(Boolean)
+  const fresh = emails.filter(e => !recipientEmails.value.includes(e))
+  if (fresh.length > 0) recipientEmails.value = [...recipientEmails.value, ...fresh]
+  newEmailInput.value = ''
+}
+
+function handleEmailInputKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault()
+    addCustomEmail()
+  }
+  if (e.key === 'Backspace' && !newEmailInput.value && recipientEmails.value.length > 0) {
+    recipientEmails.value = recipientEmails.value.slice(0, -1)
+  }
+}
+
+function removeRecipient(email: string) {
+  recipientEmails.value = recipientEmails.value.filter(e => e !== email)
+}
+
+function getContactName(email: string): string | null {
+  const contact = dealerContacts.value.find(c => c.email === email)
+  return contact?.name || null
+}
+
+function handleEmailDialogSubmit() {
+  addCustomEmail()
+  
+  const finalEmails = [...recipientEmails.value]
   if (finalEmails.length === 0) return toast.error('At least one email is required')
 
   const inv = selectedEmailInvoice.value
   const doc = toSalesDoc(inv)
   const htmlPayload = generatePDF(doc, 'Invoice')
 
-  // Close dialog and show success immediately — backend handles the rest
   showEmailDialog.value = false
-  toast.success(`Invoice queued for delivery to ${finalEmails.length} recipient${finalEmails.length > 1 ? 's' : ''}`)
+  toast.success(`Invoice sending to ${finalEmails.length} recipient${finalEmails.length > 1 ? 's' : ''}`)
 
-  // Optimistic status advance
   if (inv.status === 'Approved' || inv.status === 'Draft' || inv.status === 'Sent') {
     inv.status = 'Emailed'
   }
 
-  // Fire-and-forget: API call + status update run in background
   $fetch('/api/invoices/send', {
     method: 'POST' as any,
     body: {
@@ -243,7 +282,6 @@ function handleEmailDialogSubmit() {
     ($fetch as any)(`/api/invoices/${inv.id}`, { method: 'PUT', body: { status: 'Emailed' } }).catch(() => {})
   }).catch((err: any) => {
     toast.error('Email delivery failed: ' + (err.message || 'Unknown error'))
-    // Revert optimistic status
     inv.status = 'Approved'
   })
 }
@@ -622,56 +660,101 @@ function sortIcon(field: string) {
 
     <!-- Email Dialog -->
     <Dialog v-model:open="showEmailDialog">
-      <DialogContent class="sm:max-w-[425px]">
-        <div class="p-4 border-b bg-muted/20">
-          <DialogTitle class="flex items-center gap-2 text-lg">
-            <div class="p-1.5 bg-blue-500/10 text-blue-600 rounded-md"><Send class="size-4" /></div>
+      <DialogContent class="sm:max-w-[480px] p-0 gap-0 overflow-hidden">
+        <div class="px-5 pt-5 pb-4 border-b bg-gradient-to-b from-muted/50 to-transparent">
+          <DialogTitle class="flex items-center gap-2.5 text-lg">
+            <div class="p-2 bg-muted text-foreground rounded-lg"><Send class="size-4" /></div>
             Email Invoice
           </DialogTitle>
-          <DialogDescription class="mt-2 text-muted-foreground">
-            Send Invoice {{ selectedEmailInvoice?.number }} to {{ selectedEmailInvoice?.dealerName }}
+          <DialogDescription class="mt-1.5 text-muted-foreground text-sm">
+            Send <span class="font-semibold text-foreground">{{ selectedEmailInvoice?.number }}</span> to <span class="font-semibold text-foreground">{{ selectedEmailInvoice?.dealerName }}</span>
           </DialogDescription>
         </div>
-        <div class="p-6">
-          <label class="block text-sm font-medium mb-2">Recipient Email Address</label>
-          <div v-if="isFetchingContacts" class="flex items-center text-sm text-muted-foreground mb-3 gap-2">
-            <Loader2 class="size-3 animate-spin" /> Fetching dealer contacts...
+
+        <div class="px-5 py-4 space-y-4">
+          <!-- Quick-pick Contacts -->
+          <div v-if="isFetchingContacts" class="flex items-center text-sm text-muted-foreground gap-2 py-3">
+            <Loader2 class="size-3.5 animate-spin" /> Loading contacts...
           </div>
-          
-          <div class="space-y-4">
-            <div v-if="dealerContacts.length > 0" class="space-y-3 border rounded-lg p-4 bg-muted/10 shadow-sm">
-              <div class="flex items-center justify-between mb-2">
-                <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">Dealer Contacts</span>
-                <button type="button" class="text-[10px] uppercase font-bold text-primary hover:underline" @click="emailForm.emails.length === dealerContacts.length ? emailForm.emails = [] : emailForm.emails = dealerContacts.map(c => c.email)">
-                  {{ emailForm.emails.length === dealerContacts.length ? 'Deselect All' : 'Select All' }}
-                </button>
-              </div>
-              <div class="space-y-2">
-                <div v-for="c in dealerContacts" :key="c.email" class="flex items-center gap-2.5">
-                  <Checkbox :id="'contact-' + c.email" :checked="emailForm.emails.includes(c.email)" @update:checked="$event ? emailForm.emails.push(c.email) : emailForm.emails.splice(emailForm.emails.indexOf(c.email), 1)" />
-                  <label :for="'contact-' + c.email" class="text-sm font-medium leading-none cursor-pointer text-foreground/90 flex flex-wrap gap-1.5 items-center">
-                    <span class="font-semibold">{{ c.name }}</span>
-                    <span class="text-xs text-muted-foreground">&lt;{{ c.email }}&gt;</span>
-                  </label>
-                </div>
-              </div>
+          <div v-else-if="dealerContacts.length > 0">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Quick Add from Contacts</span>
+              <button type="button" class="text-[10px] uppercase font-bold tracking-wider transition-colors" :class="dealerContacts.every(c => recipientEmails.includes(c.email)) ? 'text-destructive hover:text-destructive/80' : 'text-primary hover:text-primary/80'" @click="selectAllContacts">
+                {{ dealerContacts.every(c => recipientEmails.includes(c.email)) ? 'Remove All' : 'Add All' }}
+              </button>
             </div>
-            
-            <div>
-              <span class="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block" :class="dealerContacts.length ? 'mt-2' : ''">Additional Emails</span>
-              <Input v-model="emailForm.customEmails" placeholder="comma, separated, list@domain.com" />
+            <div class="flex flex-wrap gap-1.5">
+              <button
+                v-for="c in dealerContacts" :key="c.email"
+                type="button"
+                @click="toggleContact(c.email)"
+                class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 border"
+                :class="recipientEmails.includes(c.email)
+                  ? 'bg-primary text-primary-foreground border-primary shadow-sm scale-[1.02]'
+                  : 'bg-card text-muted-foreground border-border hover:border-foreground/30 hover:text-foreground hover:bg-muted'"
+              >
+                <Icon :name="recipientEmails.includes(c.email) ? 'lucide:check' : 'lucide:plus'" class="size-3" />
+                <span class="font-semibold">{{ c.name }}</span>
+              </button>
             </div>
+          </div>
+
+          <!-- Recipients Tag Input -->
+          <div>
+            <span class="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5 block">Recipients</span>
+            <div
+              class="min-h-[44px] flex flex-wrap items-center gap-1.5 p-2 rounded-lg border border-border bg-background transition-colors focus-within:ring-2 focus-within:ring-ring focus-within:border-foreground/40 cursor-text"
+              @click="($refs.emailInputEl as HTMLInputElement)?.focus()"
+            >
+              <TransitionGroup name="tag">
+                <span
+                  v-for="email in recipientEmails" :key="email"
+                  class="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-md text-xs font-medium transition-all bg-muted text-foreground border border-border"
+                >
+                  {{ getContactName(email) || email }}
+                  <span v-if="getContactName(email)" class="text-[9px] opacity-60 ml-0.5">&lt;{{ email }}&gt;</span>
+                  <button type="button" @click.stop="removeRecipient(email)" class="ml-0.5 p-0.5 rounded hover:bg-foreground/10 transition-colors">
+                    <Icon name="lucide:x" class="size-3" />
+                  </button>
+                </span>
+              </TransitionGroup>
+              <input
+                ref="emailInputEl"
+                v-model="newEmailInput"
+                type="email"
+                class="flex-1 min-w-[140px] bg-transparent text-sm outline-none placeholder:text-muted-foreground/50 h-7"
+                placeholder="Type email & press Enter"
+                @keydown="handleEmailInputKeydown"
+                @blur="addCustomEmail"
+              />
+            </div>
+            <p v-if="recipientEmails.length === 0 && !newEmailInput" class="text-[11px] text-muted-foreground/60 mt-1.5 ml-0.5">Click contacts above or type an email address</p>
           </div>
         </div>
-        <div class="p-4 border-t bg-muted/20 flex justify-end gap-2">
-          <Button variant="outline" @click="showEmailDialog = false" :disabled="isEmailing">Cancel</Button>
-          <Button class="bg-blue-600 hover:bg-blue-700 text-white shadow" :disabled="(!emailForm.emails.length && !emailForm.customEmails.trim()) || isEmailing" @click="handleEmailDialogSubmit">
-            <Loader2 v-if="isEmailing" class="mr-2 size-4 animate-spin" />
-            <Send v-else class="mr-2 size-4" />
-            {{ isEmailing ? 'Sending...' : 'Send Invoice' }}
-          </Button>
+
+        <div class="px-5 py-3.5 border-t bg-muted/30 flex items-center justify-between gap-3">
+          <span v-if="recipientEmails.length > 0" class="text-xs text-muted-foreground tabular-nums">
+            <span class="font-bold text-foreground">{{ recipientEmails.length }}</span> recipient{{ recipientEmails.length > 1 ? 's' : '' }}
+          </span>
+          <span v-else />
+          <div class="flex gap-2">
+            <Button variant="outline" size="sm" @click="showEmailDialog = false">Cancel</Button>
+            <Button size="sm" class="bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm min-w-[120px]" :disabled="recipientEmails.length === 0 || isEmailing" @click="handleEmailDialogSubmit">
+              <Loader2 v-if="isEmailing" class="mr-2 size-3.5 animate-spin" />
+              <Send v-else class="mr-2 size-3.5" />
+              Send{{ recipientEmails.length > 0 ? ` to ${recipientEmails.length}` : '' }}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
   </div>
 </template>
+
+<style scoped>
+.tag-enter-active { animation: tag-in 0.2s ease-out; }
+.tag-leave-active { animation: tag-out 0.15s ease-in; position: absolute; }
+.tag-move { transition: transform 0.2s ease; }
+@keyframes tag-in { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+@keyframes tag-out { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.8); } }
+</style>

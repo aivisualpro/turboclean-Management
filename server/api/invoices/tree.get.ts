@@ -41,7 +41,10 @@ export default defineEventHandler(async (event) => {
     }
 
     if (queryInfo.dealerId) {
-      matchQuery.dealerId = queryInfo.dealerId as string
+      const dealerIdStr = queryInfo.dealerId as string
+      const dealerIdVariants: any[] = [dealerIdStr]
+      try { dealerIdVariants.push(new ObjectId(dealerIdStr)) } catch {}
+      matchQuery.dealerId = { $in: dealerIdVariants }
     }
 
     // Filter: Type (Daily vs Weekly)
