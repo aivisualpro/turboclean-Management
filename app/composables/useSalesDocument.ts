@@ -162,7 +162,7 @@ export function generatePDF(doc: any, docType: 'Work Order' | 'Invoice' | 'Order
         <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif">${formattedDate(li.date || doc.date)}</td>
         <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif;text-transform:uppercase;word-break:break-word">${(li.stockNumber || '').toUpperCase()}</td>
         <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif;word-break:break-word">${li.poNumber || ''}</td>
-        <td style="padding:8px 8px;color:#475569;font-size:9.5px;font-family:'Inter',monospace;white-space:nowrap">${li.vin || ''}</td>
+        <td style="padding:8px 8px;color:#475569;font-size:9.5px;font-family:'Inter',monospace;white-space:nowrap">${(li.vin || '').substring(0, 19)}</td>
         <td style="padding:8px 8px;color:#0f172a;font-size:11px;font-family:'Inter',Arial,sans-serif;font-weight:600;text-transform:uppercase;word-break:break-word">${li.serviceName || li.description || ''}</td>
         <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif;text-align:right">${fmtMoney(li.unitPrice || 0)}</td>
         <td style="padding:8px 8px;color:#64748b;font-size:11px;font-family:'Inter',Arial,sans-serif;text-align:right">${fmtMoney(li.tax || 0)}</td>
