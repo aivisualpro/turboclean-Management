@@ -3,11 +3,14 @@ import { ObjectId } from 'mongodb'
 import { appSheetEdit } from '../../utils/appsheet'
 import { WorkOrdersMapper } from '../../utils/sync-mapper'
 
-// Returns YYYY-MM-DD string from a work order's date field (handles ISODate or string)
+// Returns YYYY-MM-DD string from a work order's date field (handles ISODate or string safely)
 function toDateStr(d: any): string {
   if (!d) return ''
   if (typeof d === 'string') return d.split('T')[0] as string
-  if (d instanceof Date) return d.toISOString().split('T')[0] as string
+  if (d instanceof Date) {
+    if (isNaN(d.getTime())) return '' // Prevent RangeError: Invalid time value
+    return d.toISOString().split('T')[0] as string
+  }
   return String(d).split('T')[0] as string
 }
 
@@ -243,6 +246,8 @@ export default defineEventHandler(async (event) => {
     // ─────────────────────────────────────────────────────────────────
     } else if (generateType === 'custom_weekly') {
       const { dealerId, startDate, endDate } = body
+      console.log('[custom_weekly] START — dealerId:', dealerId, 'startDate:', startDate, 'endDate:', endDate)
+
       if (!dealerId || !startDate || !endDate) return { success: false, message: 'Missing required fields' }
 
       const startStr = startDate as string
@@ -255,16 +260,19 @@ export default defineEventHandler(async (event) => {
       const possibleDealerIds: any[] = [dealerId]
       try { possibleDealerIds.push(new ObjectId(dealerId)) } catch {}
 
+      console.log('[custom_weekly] Step 1: Fetching work orders for dealer...')
       // Fetch ALL work orders for this dealer and filter in memory to avoid MongoDB type errors with mixed date types
       const rawWOs = await db.collection('turboCleanWorkOrders').find({
         dealer: { $in: possibleDealerIds }
       }).toArray()
+      console.log('[custom_weekly] Step 1 DONE — rawWOs:', rawWOs.length)
 
       const allWOs = rawWOs.filter(wo => {
         if (!wo.date) return false
         const dStr = toDateStr(wo.date)
         return dStr >= startStr && dStr <= endStr
       })
+      console.log('[custom_weekly] Step 2: Filtered to date range —', allWOs.length, 'WOs')
 
       if (allWOs.length === 0) {
         return { success: false, message: `No work orders found for selected dealer between ${startStr} and ${endStr}.` }
@@ -278,14 +286,17 @@ export default defineEventHandler(async (event) => {
       const subtotal = lineItems.reduce((s, li) => s + li.amount, 0)
       const taxTotal = lineItems.reduce((s, li) => s + li.tax, 0)
       const total = lineItems.reduce((s, li) => s + li.total, 0)
+      console.log('[custom_weekly] Step 3: Built', lineItems.length, 'line items. subtotal:', subtotal, 'tax:', taxTotal, 'total:', total)
 
       // ── Upsert: check for existing invoice for same dealer + date range ──
+      console.log('[custom_weekly] Step 4: Looking for existing invoice...')
       const existingInvoice = await invoicesCollection.findOne({
         type: 'Weekly',
         dealerId,
         customStartDate: startStr,
         customEndDate: endStr,
       })
+      console.log('[custom_weekly] Step 4 DONE — existingInvoice:', existingInvoice ? existingInvoice.number : 'NONE')
 
       // Keep the original invoice number if updating, otherwise generate new
       const invNumber = existingInvoice
@@ -324,17 +335,21 @@ export default defineEventHandler(async (event) => {
       }
 
       // Upsert: replace existing or insert new
+      console.log('[custom_weekly] Step 5: Upserting invoice', invNumber, '...')
       await invoicesCollection.updateOne(
         { type: 'Weekly', dealerId, customStartDate: startStr, customEndDate: endStr },
         { $set: invoiceDoc, $setOnInsert: { createdAt: new Date().toISOString() } },
         { upsert: true }
       )
+      console.log('[custom_weekly] Step 5 DONE')
 
       // Mark all included WOs as invoiced (MongoDB only — no AppSheet sync for weekly)
+      console.log('[custom_weekly] Step 6: Marking', allWOs.length, 'WOs as invoiced...')
       await db.collection('turboCleanWorkOrders').updateMany(
         { _id: { $in: allWOs.map(w => w._id) } },
         { $set: { isInvoiced: true } }
       )
+      console.log('[custom_weekly] Step 6 DONE — ALL COMPLETE')
 
       const action = existingInvoice ? 'updated' : 'created'
       return { success: true, generated: 1, message: `Weekly invoice ${invNumber} ${action} with ${allWOs.length} work orders (${startStr} to ${endStr}).` }
