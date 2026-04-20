@@ -134,8 +134,7 @@ export default defineEventHandler(async (event) => {
               bodyHtml: emailHtml,
               receivedAt: new Date().toISOString(),
               attachments: attachments.map(att => ({
-                filename: att.filename,
-                content: `data:${att.contentType};base64,${att.content.toString('base64')}`
+                filename: att.filename
               }))
             })
 

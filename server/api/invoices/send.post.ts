@@ -214,8 +214,7 @@ export default defineEventHandler(async (event) => {
         bodyHtml: emailHtml,
         receivedAt: new Date().toISOString(), // Fallback for unified sorting
         attachments: attachments.map(att => ({
-          filename: att.filename,
-          content: `data:${att.contentType || 'application/pdf'};base64,${Buffer.isBuffer(att.content) ? att.content.toString('base64') : Buffer.from(att.content).toString('base64')}`
+          filename: att.filename
         }))
       })
     }

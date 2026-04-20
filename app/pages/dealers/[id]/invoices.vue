@@ -166,6 +166,37 @@ async function updateInvoiceStatus(inv: any, newStatus: string) {
   })
 }
 
+// ─── Payment Dialog ──────────────────────────────────────────────────────
+const showPaymentDialog = ref(false)
+const selectedPaymentInvoice = ref<any>(null)
+const paymentAmount = ref<number | ''>('')
+const isPaying = ref(false)
+
+function openPaymentDialog(inv: any) {
+  selectedPaymentInvoice.value = inv
+  paymentAmount.value = inv.total || ''
+  showPaymentDialog.value = true
+}
+
+async function handlePaymentSubmit() {
+  if (!selectedPaymentInvoice.value || !paymentAmount.value) return
+  isPaying.value = true
+  try {
+    await $fetch(`/api/invoices/${selectedPaymentInvoice.value.id}`, {
+      method: 'PUT',
+      body: { status: 'Paid', paidAmount: Number(paymentAmount.value) }
+    })
+    selectedPaymentInvoice.value.status = 'Paid'
+    selectedPaymentInvoice.value.paidAmount = Number(paymentAmount.value)
+    showPaymentDialog.value = false
+    toast.success('Invoice marked as paid')
+  } catch (err: any) {
+    toast.error('Failed to update invoice: ' + err.message)
+  } finally {
+    isPaying.value = false
+  }
+}
+
 const showEmailDialog = ref(false)
 const selectedEmailInvoice = ref<any>(null)
 const recipientEmails = ref<string[]>([])
@@ -553,9 +584,11 @@ function sortIcon(field: string) {
                 <TableHead class="w-[80px] cursor-pointer" @click="toggleSort('number')"><div class="flex items-center gap-1"># <Icon :name="sortIcon('number')" class="size-3 opacity-50" /></div></TableHead>
                 <TableHead class="cursor-pointer" @click="toggleSort('date')"><div class="flex items-center gap-1">Date <Icon :name="sortIcon('date')" class="size-3 opacity-50" /></div></TableHead>
                 <TableHead class="cursor-pointer" @click="toggleSort('type')"><div class="flex items-center gap-1">Type <Icon :name="sortIcon('type')" class="size-3 opacity-50" /></div></TableHead>
+                <TableHead v-if="activeType === 'weekly'">Range</TableHead>
                 <TableHead class="text-right cursor-pointer" @click="toggleSort('subtotal')"><div class="flex items-center justify-end gap-1">Subtotal <Icon :name="sortIcon('subtotal')" class="size-3 opacity-50" /></div></TableHead>
                 <TableHead class="text-right cursor-pointer" @click="toggleSort('taxTotal')"><div class="flex items-center justify-end gap-1">Tax <Icon :name="sortIcon('taxTotal')" class="size-3 opacity-50" /></div></TableHead>
                 <TableHead class="text-right cursor-pointer" @click="toggleSort('total')"><div class="flex items-center justify-end gap-1">Total <Icon :name="sortIcon('total')" class="size-3 opacity-50" /></div></TableHead>
+                <TableHead class="text-right cursor-pointer" @click="toggleSort('paidAmount')"><div class="flex items-center justify-end gap-1">Paid $ <Icon :name="sortIcon('paidAmount')" class="size-3 opacity-50" /></div></TableHead>
                 <TableHead class="text-center">Items</TableHead>
                 <TableHead class="cursor-pointer" @click="toggleSort('status')"><div class="flex items-center gap-1">Status <Icon :name="sortIcon('status')" class="size-3 opacity-50" /></div></TableHead>
                 <TableHead class="text-center">Actions</TableHead>
@@ -576,9 +609,13 @@ function sortIcon(field: string) {
                     {{ inv.type || 'Weekly' }}
                   </Badge>
                 </TableCell>
+                <TableCell v-if="activeType === 'weekly'" class="text-[11px] text-muted-foreground whitespace-nowrap">
+                  {{ fmtDate(inv.customStartDate || inv.weekStart) }} - {{ fmtDate(inv.customEndDate || inv.weekEnd) }}
+                </TableCell>
                 <TableCell class="text-right text-xs tabular-nums text-muted-foreground">{{ fmt(inv.subtotal) }}</TableCell>
                 <TableCell class="text-right text-xs tabular-nums text-muted-foreground">{{ fmt(inv.taxTotal) }}</TableCell>
                 <TableCell class="text-right text-xs tabular-nums font-bold">{{ fmt(inv.total) }}</TableCell>
+                <TableCell class="text-right text-xs tabular-nums text-emerald-600 font-semibold">{{ inv.paidAmount ? fmt(inv.paidAmount) : '—' }}</TableCell>
                 <TableCell class="text-center text-xs tabular-nums">{{ inv.lineItems?.length || 0 }}</TableCell>
                 <TableCell>
                   <Badge variant="outline" :class="badgeClasses[inv.status] || ''" class="text-[10px]">
@@ -590,7 +627,7 @@ function sortIcon(field: string) {
                     <Button v-if="inv.status === 'Draft'" variant="ghost" size="icon" class="h-7 w-7 text-amber-600 hover:bg-amber-50" @click.stop="updateInvoiceStatus(inv, 'Approved')" title="Approve">
                       <ThumbsUp class="size-4" />
                     </Button>
-                    <Button v-if="inv.status === 'Approved' || inv.status === 'Emailed'" variant="ghost" size="icon" class="h-7 w-7 text-emerald-600 hover:bg-emerald-50" @click.stop="updateInvoiceStatus(inv, 'Paid')" title="Mark Paid">
+                    <Button v-if="inv.status === 'Approved' || inv.status === 'Emailed'" variant="ghost" size="icon" class="h-7 w-7 text-emerald-600 hover:bg-emerald-50" @click.stop="openPaymentDialog(inv)" title="Mark Paid">
                       <CheckCircle class="size-4" />
                     </Button>
                     <Button variant="ghost" size="icon" class="h-7 w-7 text-blue-600 hover:bg-blue-50" @click.stop="openEmailDialog(inv)" title="Email Dealer">
@@ -745,6 +782,37 @@ function sortIcon(field: string) {
               Send{{ recipientEmails.length > 0 ? ` to ${recipientEmails.length}` : '' }}
             </Button>
           </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    <!-- Payment Dialog -->
+    <Dialog v-model:open="showPaymentDialog">
+      <DialogContent class="sm:max-w-[400px]">
+        <div class="px-2 pt-2">
+          <DialogTitle class="flex items-center gap-2 text-lg">
+            <div class="p-1.5 bg-emerald-500/10 text-emerald-600 rounded-md"><CheckCircle class="size-5" /></div>
+            Mark as Paid
+          </DialogTitle>
+          <DialogDescription class="mt-2 text-muted-foreground">
+            Enter the amount paid for <span class="font-semibold text-foreground">{{ selectedPaymentInvoice?.number }}</span>.
+          </DialogDescription>
+          
+          <div class="mt-6 space-y-4">
+            <div class="space-y-2">
+              <label class="text-sm font-medium">Payment Amount</label>
+              <div class="relative">
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                <Input type="number" step="0.01" v-model="paymentAmount" class="pl-7" placeholder="0.00" @keydown.enter="handlePaymentSubmit" />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="mt-6 flex justify-end gap-2 px-2 pb-2">
+          <Button variant="outline" @click="showPaymentDialog = false">Cancel</Button>
+          <Button class="bg-emerald-600 hover:bg-emerald-700 text-white" :disabled="isPaying || !paymentAmount" @click="handlePaymentSubmit">
+            <Loader2 v-if="isPaying" class="mr-2 size-4 animate-spin" />
+            Confirm Payment
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
