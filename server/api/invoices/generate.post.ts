@@ -255,12 +255,16 @@ export default defineEventHandler(async (event) => {
       const possibleDealerIds: any[] = [dealerId]
       try { possibleDealerIds.push(new ObjectId(dealerId)) } catch {}
 
-      // Fetch ALL work orders in date range (invoiced or not) using string-safe date comparison
-      const allWOs = await db.collection('turboCleanWorkOrders').aggregate([
-        { $match: { dealer: { $in: possibleDealerIds } } },
-        { $addFields: { dateStr: { $dateToString: { format: '%Y-%m-%d', date: '$date', timezone: 'UTC' } } } },
-        { $match: { dateStr: { $gte: startStr, $lte: endStr } } }
-      ]).toArray()
+      // Fetch ALL work orders for this dealer and filter in memory to avoid MongoDB type errors with mixed date types
+      const rawWOs = await db.collection('turboCleanWorkOrders').find({
+        dealer: { $in: possibleDealerIds }
+      }).toArray()
+
+      const allWOs = rawWOs.filter(wo => {
+        if (!wo.date) return false
+        const dStr = toDateStr(wo.date)
+        return dStr >= startStr && dStr <= endStr
+      })
 
       if (allWOs.length === 0) {
         return { success: false, message: `No work orders found for selected dealer between ${startStr} and ${endStr}.` }
