@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { toast } from 'vue-sonner'
 import { generatePDF, downloadPDF, calcLineTotal } from '~/composables/useSalesDocument'
-import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, Loader2, Download, Search, FileText, FileSpreadsheet, Eye, Mail, ThumbsUp, CheckCircle, Send } from 'lucide-vue-next'
+import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, Loader2, Download, Search, FileText, FileSpreadsheet, Eye, Mail, ThumbsUp, CheckCircle, Send, RefreshCw } from 'lucide-vue-next'
 
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Invoices', icon: 'i-lucide-receipt' })
@@ -142,10 +142,37 @@ async function fetchInvoices(reset = false) {
 // ─── Document Generation / Print ─────────────────────────────────────────
 const selectedInvoice = ref<any>(null)
 const showPreview = ref(false)
+const regeneratingId = ref<string>('')
 
 function openPreviewFor(inv: any) {
   selectedInvoice.value = inv
   showPreview.value = true
+}
+
+async function regenerateInvoice(inv: any) {
+  if (regeneratingId.value) return
+  regeneratingId.value = inv.id
+  try {
+    const res: any = await $fetch('/api/invoices/regenerate', {
+      method: 'POST',
+      body: { invoiceId: inv.id }
+    })
+    if (res.success) {
+      if (res.addedCount > 0) {
+        toast.success(res.message)
+      } else {
+        toast.info(res.message)
+      }
+      fetchTree()
+      fetchInvoices(true)
+    } else {
+      toast.error(res.message || 'Failed to regenerate')
+    }
+  } catch (err: any) {
+    toast.error('Failed to regenerate invoice: ' + (err.message || 'Unknown error'))
+  } finally {
+    regeneratingId.value = ''
+  }
 }
 
 function handleDownload(inv: any) {
@@ -677,6 +704,10 @@ function sortIcon(field: string) {
                   </TableCell>
                   <TableCell>
                     <div class="flex items-center justify-center gap-0.5">
+                      <Button variant="ghost" size="icon" class="h-7 w-7 text-orange-600 hover:bg-orange-50" :disabled="regeneratingId === inv.id" @click.stop="regenerateInvoice(inv)" title="Regenerate — re-scan work orders and update">
+                        <Loader2 v-if="regeneratingId === inv.id" class="size-4 animate-spin" />
+                        <RefreshCw v-else class="size-4" />
+                      </Button>
                       <Button v-if="inv.status === 'Draft'" variant="ghost" size="icon" class="h-7 w-7 text-amber-600 hover:bg-amber-50" @click.stop="updateInvoiceStatus(inv, 'Approved')" title="Approve">
                         <ThumbsUp class="size-4" />
                       </Button>
