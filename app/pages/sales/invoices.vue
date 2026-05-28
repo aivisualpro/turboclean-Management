@@ -6,14 +6,18 @@ import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIc
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Invoices', icon: 'i-lucide-receipt' })
 
-// ─── Base State ──────────────────────────────────────────────────────────
-const search = ref('')
-const activeTab = ref<'all' | 'unpaid' | 'paid'>('all')
-const activeType = ref<'all' | 'daily' | 'weekly'>('all')
+// ─── URL Query Sync ──────────────────────────────────────────────────────
+const route = useRoute()
+const router = useRouter()
 
-const globalDatePreset = ref('this_month')
-const customStartDate = ref('')
-const customEndDate = ref('')
+// ─── Base State (initialized from URL) ───────────────────────────────────
+const search = ref((route.query.search as string) || '')
+const activeTab = ref<'all' | 'unpaid' | 'paid'>((route.query.status as any) || 'all')
+const activeType = ref<'all' | 'daily' | 'weekly'>((route.query.type as any) || 'all')
+
+const globalDatePreset = ref((route.query.date as string) || 'this_month')
+const customStartDate = ref((route.query.from as string) || '')
+const customEndDate = ref((route.query.to as string) || '')
 
 watch(() => customStartDate.value, (newVal: string) => {
   if (newVal && !customEndDate.value) customEndDate.value = newVal
@@ -100,8 +104,8 @@ const loading = ref(false)
 const hasMore = ref(true)
 const skip = ref(0)
 const limit = 20
-const sortBy = ref('date')
-const sortDir = ref(-1)
+const sortBy = ref((route.query.sortBy as string) || 'date')
+const sortDir = ref(route.query.sortDir ? Number(route.query.sortDir) : -1)
 
 async function fetchInvoices(reset = false) {
   if (loading.value) return
@@ -214,7 +218,7 @@ const isPaying = ref(false)
 
 function openPaymentDialog(inv: any) {
   selectedPaymentInvoice.value = inv
-  paymentAmount.value = inv.total || ''
+  paymentAmount.value = inv.paidAmount || inv.total || ''
   showPaymentDialog.value = true
 }
 
@@ -437,6 +441,29 @@ watch([search, activeTab, activeType, computedDates], () => {
   }, 300)
 })
 
+// ─── Sync State → URL ────────────────────────────────────────────────────
+let urlSyncTimeout: any
+watch(
+  [search, activeTab, activeType, globalDatePreset, customStartDate, customEndDate, sortBy, sortDir],
+  () => {
+    clearTimeout(urlSyncTimeout)
+    urlSyncTimeout = setTimeout(() => {
+      const q: Record<string, string> = {}
+      if (search.value.trim()) q.search = search.value.trim()
+      if (activeTab.value !== 'all') q.status = activeTab.value
+      if (activeType.value !== 'all') q.type = activeType.value
+      if (globalDatePreset.value !== 'this_month') q.date = globalDatePreset.value
+      if (globalDatePreset.value === 'custom') {
+        if (customStartDate.value) q.from = customStartDate.value
+        if (customEndDate.value) q.to = customEndDate.value
+      }
+      if (sortBy.value !== 'date') q.sortBy = sortBy.value
+      if (sortDir.value !== -1) q.sortDir = String(sortDir.value)
+      router.replace({ query: q })
+    }, 300)
+  }
+)
+
 watch(activeFilter, () => fetchInvoices(true), { deep: true })
 
 // ─── Tree Interactions ───────────────────────────────────────────────────
@@ -657,7 +684,7 @@ function sortIcon(field: string) {
                 <TableHead class="text-right cursor-pointer" @click="toggleSort('subtotal')"><div class="flex items-center justify-end gap-1">Subtotal <Icon :name="sortIcon('subtotal')" class="size-3 opacity-50" /></div></TableHead>
                 <TableHead class="text-right cursor-pointer" @click="toggleSort('taxTotal')"><div class="flex items-center justify-end gap-1">Tax <Icon :name="sortIcon('taxTotal')" class="size-3 opacity-50" /></div></TableHead>
                 <TableHead class="text-right cursor-pointer" @click="toggleSort('total')"><div class="flex items-center justify-end gap-1">Total <Icon :name="sortIcon('total')" class="size-3 opacity-50" /></div></TableHead>
-                <TableHead class="text-right cursor-pointer" @click="toggleSort('paidAmount')"><div class="flex items-center justify-end gap-1">Paid $ <Icon :name="sortIcon('paidAmount')" class="size-3 opacity-50" /></div></TableHead>
+                <TableHead v-if="activeType !== 'daily'" class="text-right cursor-pointer" @click="toggleSort('paidAmount')"><div class="flex items-center justify-end gap-1">Paid $ <Icon :name="sortIcon('paidAmount')" class="size-3 opacity-50" /></div></TableHead>
                 <TableHead class="text-center">Items</TableHead>
                 <TableHead class="cursor-pointer" @click="toggleSort('status')"><div class="flex items-center gap-1">Status <Icon :name="sortIcon('status')" class="size-3 opacity-50" /></div></TableHead>
                 <TableHead class="text-center">Actions</TableHead>
@@ -693,7 +720,14 @@ function sortIcon(field: string) {
                   <TableCell class="text-right text-xs tabular-nums text-muted-foreground">{{ fmt(inv.subtotal) }}</TableCell>
                   <TableCell class="text-right text-xs tabular-nums text-muted-foreground">{{ fmt(inv.taxTotal) }}</TableCell>
                   <TableCell class="text-right text-xs tabular-nums font-bold">{{ fmt(inv.total) }}</TableCell>
-                  <TableCell class="text-right text-xs tabular-nums text-emerald-600 font-semibold">{{ inv.paidAmount ? fmt(inv.paidAmount) : '—' }}</TableCell>
+                  <TableCell v-if="activeType !== 'daily'" class="text-right text-xs tabular-nums text-emerald-600 font-semibold">
+                    <button
+                      v-if="inv.type === 'Weekly'"
+                      class="hover:underline hover:text-emerald-700 cursor-pointer transition-colors"
+                      @click.stop="openPaymentDialog(inv)"
+                    >{{ inv.paidAmount ? fmt(inv.paidAmount) : '—' }}</button>
+                    <span v-else>{{ inv.paidAmount ? fmt(inv.paidAmount) : '—' }}</span>
+                  </TableCell>
                   <TableCell class="text-center text-xs tabular-nums">
                     {{ inv.lineItems?.length || 0 }}
                   </TableCell>
@@ -708,10 +742,10 @@ function sortIcon(field: string) {
                         <Loader2 v-if="regeneratingId === inv.id" class="size-4 animate-spin" />
                         <RefreshCw v-else class="size-4" />
                       </Button>
-                      <Button v-if="inv.status === 'Draft'" variant="ghost" size="icon" class="h-7 w-7 text-amber-600 hover:bg-amber-50" @click.stop="updateInvoiceStatus(inv, 'Approved')" title="Approve">
+                      <Button v-if="inv.type !== 'Daily' && inv.status === 'Draft'" variant="ghost" size="icon" class="h-7 w-7 text-amber-600 hover:bg-amber-50" @click.stop="updateInvoiceStatus(inv, 'Approved')" title="Approve">
                         <ThumbsUp class="size-4" />
                       </Button>
-                      <Button v-if="inv.status === 'Approved' || inv.status === 'Emailed'" variant="ghost" size="icon" class="h-7 w-7 text-emerald-600 hover:bg-emerald-50" @click.stop="openPaymentDialog(inv)" title="Mark Paid">
+                      <Button v-if="inv.type === 'Weekly' && (inv.status === 'Approved' || inv.status === 'Emailed')" variant="ghost" size="icon" class="h-7 w-7 text-emerald-600 hover:bg-emerald-50" @click.stop="openPaymentDialog(inv)" title="Mark Paid">
                         <CheckCircle class="size-4" />
                       </Button>
                       <Button variant="ghost" size="icon" class="h-7 w-7 text-blue-600 hover:bg-blue-50" @click.stop="openEmailDialog(inv)" title="Email Dealer">

@@ -627,7 +627,7 @@ function sortIcon(field: string) {
                     <Button v-if="inv.status === 'Draft'" variant="ghost" size="icon" class="h-7 w-7 text-amber-600 hover:bg-amber-50" @click.stop="updateInvoiceStatus(inv, 'Approved')" title="Approve">
                       <ThumbsUp class="size-4" />
                     </Button>
-                    <Button v-if="inv.status === 'Approved' || inv.status === 'Emailed'" variant="ghost" size="icon" class="h-7 w-7 text-emerald-600 hover:bg-emerald-50" @click.stop="openPaymentDialog(inv)" title="Mark Paid">
+                    <Button v-if="inv.type === 'Weekly' && (inv.status === 'Approved' || inv.status === 'Emailed')" variant="ghost" size="icon" class="h-7 w-7 text-emerald-600 hover:bg-emerald-50" @click.stop="openPaymentDialog(inv)" title="Mark Paid">
                       <CheckCircle class="size-4" />
                     </Button>
                     <Button variant="ghost" size="icon" class="h-7 w-7 text-blue-600 hover:bg-blue-50" @click.stop="openEmailDialog(inv)" title="Email Dealer">

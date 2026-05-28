@@ -23,6 +23,8 @@ export interface DealerContact {
 export interface DealerService {
   id?: string
   service: string
+  /** Denormalized name from turboCleanServices, populated server-side */
+  serviceName?: string
   amount: number
   tax: number
   total: number

@@ -26,6 +26,39 @@ export default defineEventHandler(async (event) => {
       throw createError({ statusCode: 404, statusMessage: 'Dealer not found' })
     }
 
+    // ── Denormalize service names from turboCleanServices ──
+    // dealer.services[i].service stores the string ObjectId of the master
+    // service record. Build an id → name map and inject `serviceName` so
+    // the UI never has to render a raw ObjectId.
+    const rawServices: any[] = Array.isArray(doc.services) ? doc.services : []
+    const serviceIdSet = new Set(
+      rawServices
+        .map((s: any) => (typeof s?.service === 'string' ? s.service : ''))
+        .filter(Boolean)
+    )
+
+    const serviceNameMap = new Map<string, string>()
+    if (serviceIdSet.size > 0) {
+      const objectIds = Array.from(serviceIdSet)
+        .filter(sid => ObjectId.isValid(sid))
+        .map(sid => new ObjectId(sid))
+
+      if (objectIds.length > 0) {
+        const svcDocs = await db
+          .collection('turboCleanServices')
+          .find({ _id: { $in: objectIds } }, { projection: { service: 1 } })
+          .toArray()
+        for (const sd of svcDocs) {
+          serviceNameMap.set(sd._id.toString(), sd.service || '')
+        }
+      }
+    }
+
+    const enrichedServices = rawServices.map((s: any) => ({
+      ...s,
+      serviceName: serviceNameMap.get(s.service) || s.serviceName || ''
+    }))
+
     return {
       dealer: {
         id: doc._id.toString(),
@@ -42,7 +75,9 @@ export default defineEventHandler(async (event) => {
         status: doc.status || 'Pending',
         isTaxApplied: doc.isTaxApplied === true || doc.isTaxApplied === 'Y' || doc.isTaxApplied === 'true',
         taxPercentage: Number(doc.taxPercentage) || 0,
-        services: Array.isArray(doc.services) ? [...doc.services].sort((a, b) => (a.service || '').localeCompare(b.service || '')) : [],
+        services: [...enrichedServices].sort((a, b) =>
+          (a.serviceName || a.service || '').localeCompare(b.serviceName || b.service || '')
+        ),
         createdAt: doc.createdAt?.toISOString() || doc._id.getTimestamp().toISOString(),
         updatedAt: doc.updatedAt?.toISOString() || doc._id.getTimestamp().toISOString(),
         notes: doc.notes || ''

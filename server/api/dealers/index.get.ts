@@ -37,28 +37,67 @@ export default defineEventHandler(async (event) => {
 
     const firstThree = docs.slice(0, 3).map(d => d.dealer).join(', ')
     console.log(`[DEALERS GET] Found ${docs.length} dealers for user ${session?.email || 'unknown'} (Role: ${session?.role || 'None'}). First 3: [${firstThree}]. Filter query: ${JSON.stringify(query)}. Total count: ${totalCount}. Total DB records: ${totalDbCount}`)
-    
+
+    // ── Build a global id → name map for turboCleanServices so we can
+    // denormalize service names across every dealer's services subdoc. ──
+    const allServiceIds = new Set<string>()
+    for (const doc of docs) {
+      if (Array.isArray(doc.services)) {
+        for (const s of doc.services) {
+          if (typeof s?.service === 'string' && s.service) allServiceIds.add(s.service)
+        }
+      }
+    }
+
+    const serviceNameMap = new Map<string, string>()
+    if (allServiceIds.size > 0) {
+      const objectIds = Array.from(allServiceIds)
+        .filter(sid => ObjectId.isValid(sid))
+        .map(sid => new ObjectId(sid))
+
+      if (objectIds.length > 0) {
+        const svcDocs = await db
+          .collection('turboCleanServices')
+          .find({ _id: { $in: objectIds } }, { projection: { service: 1 } })
+          .toArray()
+        for (const sd of svcDocs) {
+          serviceNameMap.set(sd._id.toString(), sd.service || '')
+        }
+      }
+    }
+
     return {
-      dealers: docs.map(doc => ({
-        id: doc._id.toString(),
-        dealerName: doc.dealer || '',
-        address: doc.address || '',
-        contacts: Array.isArray(doc.contacts) && doc.contacts.length > 0 ? doc.contacts : [{
-          id: nanoid(8),
-          name: 'Primary Contact',
-          designation: '',
-          phones: doc.phone ? [{ id: nanoid(6), number: doc.phone, type: 'mobile' }] : [],
-          emails: doc.email ? [doc.email] : [],
-          preferredContactMethod: 'any'
-        }],
-        status: doc.status || 'Pending',
-        isTaxApplied: doc.isTaxApplied === true || doc.isTaxApplied === 'Y' || doc.isTaxApplied === 'true',
-        taxPercentage: Number(doc.taxPercentage) || 0,
-        services: Array.isArray(doc.services) ? [...doc.services].sort((a, b) => (a.service || '').localeCompare(b.service || '')) : [],
-        createdAt: doc.createdAt?.toISOString() || doc._id.getTimestamp().toISOString(),
-        updatedAt: doc.updatedAt?.toISOString() || doc._id.getTimestamp().toISOString(),
-        notes: doc.notes || ''
-      })),
+      dealers: docs.map(doc => {
+        const enrichedServices = Array.isArray(doc.services)
+          ? doc.services.map((s: any) => ({
+              ...s,
+              serviceName: serviceNameMap.get(s.service) || s.serviceName || ''
+            }))
+          : []
+
+        return {
+          id: doc._id.toString(),
+          dealerName: doc.dealer || '',
+          address: doc.address || '',
+          contacts: Array.isArray(doc.contacts) && doc.contacts.length > 0 ? doc.contacts : [{
+            id: nanoid(8),
+            name: 'Primary Contact',
+            designation: '',
+            phones: doc.phone ? [{ id: nanoid(6), number: doc.phone, type: 'mobile' }] : [],
+            emails: doc.email ? [doc.email] : [],
+            preferredContactMethod: 'any'
+          }],
+          status: doc.status || 'Pending',
+          isTaxApplied: doc.isTaxApplied === true || doc.isTaxApplied === 'Y' || doc.isTaxApplied === 'true',
+          taxPercentage: Number(doc.taxPercentage) || 0,
+          services: [...enrichedServices].sort((a, b) =>
+            (a.serviceName || a.service || '').localeCompare(b.serviceName || b.service || '')
+          ),
+          createdAt: doc.createdAt?.toISOString() || doc._id.getTimestamp().toISOString(),
+          updatedAt: doc.updatedAt?.toISOString() || doc._id.getTimestamp().toISOString(),
+          notes: doc.notes || ''
+        }
+      }),
       meta: {
         totalCount,
         totalDbCount,

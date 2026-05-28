@@ -14,9 +14,22 @@ setHeader({ title: 'Dealers', icon: 'i-lucide-building-2' })
 
 const { dealers, authorised, pending, rejected, inFollowup, updateDealer, patchDealer, deleteDealer, deleteAllDealerServices, fetchDealers, isLoading } = useDealers()
 
-onMounted(() => {
-  fetchDealers()
-})
+// SSR-aware fetch so the dealer list is populated on the very first paint.
+// Previously this ran only in `onMounted`, which meant the first visit always
+// flashed the "No dealers found" empty state until the client-side fetch
+// finished. `useAsyncData` runs during SSR/server-side render and the result
+// is hydrated, so by the time the component mounts on the client the
+// `dealers` useState is already populated.
+const { pending: dealersPending } = await useAsyncData(
+  'dealers-list-bootstrap',
+  async () => {
+    if (dealers.value.length === 0) {
+      await fetchDealers()
+    }
+    return true
+  },
+  { lazy: false }
+)
 const { isActionAllowed, isAdmin } = usePermissions()
 const canAdd = computed(() => isActionAllowed('dealers', 'Add'))
 const canEdit = computed(() => isActionAllowed('dealers', 'Edit'))
@@ -471,7 +484,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
             </div>
 
             <!-- ═══════════════ LOADING SKELETON ═══════════════ -->
-            <div v-if="isLoading && dealers.length === 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div v-if="(isLoading || dealersPending) && dealers.length === 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               <div v-for="i in 6" :key="i" class="rounded-xl border bg-card p-5 space-y-4">
                 <div class="flex items-center gap-3">
                   <Skeleton class="h-11 w-11 rounded-xl" />

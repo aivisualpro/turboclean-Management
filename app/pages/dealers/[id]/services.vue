@@ -30,6 +30,7 @@ async function copyServices() {
       return {
         id: generateObjectId(),
         service: s.service,
+        serviceName: s.serviceName || getServiceName(s.service),
         amount: s.amount,
         tax,
         total: s.amount + tax
@@ -56,6 +57,16 @@ function getServiceName(serviceId: string) {
   const s = services.value.find(s => s.id === serviceId)
   // If serviceId looks like a custom name (not a known ID), show it directly
   return s ? s.service : serviceId || 'Unknown'
+}
+
+/**
+ * Resolve a display name for a dealer-service row. Prefer the
+ * server-denormalized `serviceName`, fall back to looking up by ID in the
+ * client `services` list, and finally fall back to the raw value.
+ */
+function displayServiceName(srv: DealerService) {
+  if (srv.serviceName && srv.serviceName.trim()) return srv.serviceName
+  return getServiceName(srv.service)
 }
 
 function computedTax(amount: number) {
@@ -209,6 +220,9 @@ async function saveService() {
     const newEntry: DealerService = {
       id: editingId.value || generateObjectId(),
       service: formServiceId.value,
+      // Persist the display name so optimistic UI shows the readable name
+      // immediately and the server-side denormalization stays consistent.
+      serviceName: formServiceName.value || getServiceName(formServiceId.value),
       amount: formAmount.value ?? 0,
       tax: formTax.value,
       total: formTotal.value,
@@ -273,8 +287,8 @@ const taxTotal = computed(() =>
 
 const sortedServices = computed(() => {
   return [...(props.dealer.services || [])].sort((a, b) => {
-    const nameA = getServiceName(a.service).toLowerCase()
-    const nameB = getServiceName(b.service).toLowerCase()
+    const nameA = displayServiceName(a).toLowerCase()
+    const nameB = displayServiceName(b).toLowerCase()
     return nameA.localeCompare(nameB)
   })
 })
@@ -366,7 +380,7 @@ const sortedServices = computed(() => {
           :class="{ 'opacity-60': savingTaxId === srv.id || deletingId === srv.id }"
         >
           <TableCell class="text-xs text-muted-foreground tabular-nums">{{ i + 1 }}</TableCell>
-          <TableCell class="text-xs font-medium">{{ getServiceName(srv.service) }}</TableCell>
+          <TableCell class="text-xs font-medium">{{ displayServiceName(srv) }}</TableCell>
           <TableCell class="text-right text-xs tabular-nums text-muted-foreground">{{ fmt(srv.amount) }}</TableCell>
 
           <!-- Interactive tax toggle -->

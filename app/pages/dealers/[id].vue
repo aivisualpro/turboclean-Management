@@ -24,12 +24,29 @@ const { setHeader } = usePageHeader()
 
 const { dealers, fetchDealers, updateDealer, deleteDealer, isLoading: dealersLoading } = useDealers()
 
-// Ensure dealers are loaded (handles direct navigation / page refresh)
-onMounted(() => {
-  fetchDealers()
-})
+// Use useAsyncData to fetch during SSR so <NuxtPage> isn't omitted from the initial render.
+// Omitting <NuxtPage> during SSR causes Nuxt 4 router manifest crashes.
+const { data: fetchedDealer, pending: fetchingById } = useAsyncData(`ensure-dealer-${dealerId}`, async () => {
+  if (dealers.value.find(d => d.id === dealerId)) return null
 
-const dealer = computed(() => dealers.value.find(d => d.id === dealerId))
+  try {
+    await fetchDealers()
+    if (!dealers.value.find(d => d.id === dealerId)) {
+      const res = await $fetch<{ dealer: any }>(`/api/dealers/${dealerId}`)
+      return res?.dealer || null
+    }
+  } catch (e) {
+    console.error('Failed to load dealer', e)
+  }
+  return null
+}, { lazy: false })
+
+const dealer = computed(() =>
+  dealers.value.find(d => d.id === dealerId) || fetchedDealer.value
+)
+
+const isPageLoading = computed(() => dealersLoading.value || fetchingById.value)
+
 
 // Active tab label (computed early so header can use it)
 const activeTabLabel = computed(() => {
@@ -123,7 +140,7 @@ const canDelete = computed(() => isActionAllowed('dealers', 'Delete'))
 <template>
   <div class="absolute inset-0 flex flex-col overflow-hidden">
     <!-- Loading State -->
-    <div v-if="dealersLoading && (!dealers || dealers.length === 0)" class="flex-1 flex flex-col p-4 gap-6">
+    <div v-if="isPageLoading && !dealer" class="flex-1 flex flex-col p-4 gap-6">
       <div class="flex items-center gap-2">
         <Skeleton class="h-8 w-64" />
         <Skeleton class="h-8 w-24" />

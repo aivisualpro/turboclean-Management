@@ -4,6 +4,11 @@ export default defineNuxtConfig({
   spaLoadingTemplate: false,
   devtools: { enabled: false },
 
+  devServer: {
+    port: 1002,
+    host: '0.0.0.0',
+  },
+
   watch: ['~/app.config.ts'],
 
   css: ['~/assets/css/tailwind.css'],
@@ -60,6 +65,19 @@ export default defineNuxtConfig({
     '@nuxt/fonts',
   ],
 
+  // Workaround for a version mismatch between `nuxt@4.2.0` and
+  // `@nuxt/nitro-server@4.4.2`: the newer nitro-server no longer writes a
+  // `matcher` field into the dev app-manifest JSON, but the 4.2 nuxt runtime
+  // still wires up a global `manifest-route-rule` middleware that calls
+  // radix3's `_matchRoutes` on it — which throws
+  // "Cannot read properties of undefined (reading 'entries')" on every
+  // navigation. We don't use `routeRules.redirect` anywhere, so the
+  // middleware is dead weight; disable the experimental flag to skip both
+  // the middleware registration and the manifest fetch.
+  experimental: {
+    appManifest: false,
+  },
+
   shadcn: {
     /**
      * Prefix for all the imported component
@@ -88,11 +106,7 @@ export default defineNuxtConfig({
     },
   },
 
-  // @ts-ignore - Nuxt 4 InputConfig type resolution bug
-  routeRules: {
-    '/components': { redirect: '/components/accordion' },
-    '/settings': { redirect: '/settings/profile' },
-  },
+
 
   imports: {
     dirs: [
