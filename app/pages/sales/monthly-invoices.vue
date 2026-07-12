@@ -1424,8 +1424,8 @@ watch(search, () => {
                 Monthly · Blue
               </Badge>
             </div>
-            <div class="flex-1 overflow-auto p-4">
-              <div class="border rounded-lg overflow-hidden bg-white shadow-lg mx-auto" style="max-width: 720px;">
+            <div class="flex-1 overflow-auto p-4 flex justify-center items-start">
+              <div class="border rounded-lg overflow-hidden bg-white shadow-lg w-[750px] shrink-0" style="transform: scale(0.75); transform-origin: top center; margin-bottom: -225px;">
                 <iframe :srcdoc="autoPreviewHtml" class="w-full border-0 min-h-[900px]" />
               </div>
             </div>
