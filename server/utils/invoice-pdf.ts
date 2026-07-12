@@ -43,8 +43,30 @@ const fmtDate = (d?: string) => d ? new Date(d).toLocaleDateString('en-US', { ti
 export function generateInvoiceHtml(doc: any): string {
   const logoSrc = getLogoUrl()
 
+  // Color scheme per invoice type: Daily = green, Weekly = amber, Monthly = blue
+  const docType = doc.invoiceType || doc.type || 'Weekly'
+  const isMonthly = docType === 'Monthly'
+  const isDaily = docType === 'Daily'
+  const topBarBg = isMonthly
+    ? 'linear-gradient(90deg, #60a5fa 0%, #3b82f6 100%)'
+    : isDaily
+      ? 'linear-gradient(90deg, #34d399 0%, #10b981 100%)'
+      : 'linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%)'
+  const highlightColor = isMonthly ? '#3b82f6' : isDaily ? '#10b981' : '#f59e0b'
+  const thAccentColor = isMonthly ? '#60a5fa' : isDaily ? '#34d399' : '#fbbf24'
+
+  // Monthly invoices use a simplified 4-column table: Service Description | Amount | Tax | Total
   const lineRows = (doc.lineItems || []).map((li: any, i: number) => {
     const bg = i % 2 !== 0 ? '#f3f4f6' : '#ffffff'
+    if (isMonthly) {
+      return `
+    <tr style="background:${bg};border-bottom:1px solid #e2e8f0">
+      <td style="padding:10px 12px;color:#0f172a;font-size:11px;font-family:'Inter',Arial,sans-serif;font-weight:600;text-transform:uppercase">${li.serviceName || li.description || ''}</td>
+      <td style="padding:10px 12px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif;text-align:right">${fmtMoney(li.amount ?? li.unitPrice ?? 0)}</td>
+      <td style="padding:10px 12px;color:#64748b;font-size:11px;font-family:'Inter',Arial,sans-serif;text-align:right">${fmtMoney(li.tax || 0)}</td>
+      <td style="padding:10px 12px;color:#0f172a;font-size:12px;font-family:'Inter',Arial,sans-serif;text-align:right;font-weight:800">${fmtMoney((li.amount ?? li.unitPrice ?? 0) + (li.tax || 0))}</td>
+    </tr>`
+    }
     return `
     <tr style="background:${bg};border-bottom:1px solid #e2e8f0">
       <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif">${fmtDate(li.date || doc.date)}</td>
@@ -57,6 +79,26 @@ export function generateInvoiceHtml(doc: any): string {
       <td style="padding:8px 8px;color:#0f172a;font-size:12px;font-family:'Inter',Arial,sans-serif;text-align:right;font-weight:800">${fmtMoney((li.unitPrice || 0) + (li.tax || 0))}</td>
     </tr>`
   }).join('')
+
+  const tableHead = isMonthly
+    ? `
+              <tr style="background:#0f172a;color:${thAccentColor}">
+                <th style="padding:10px 12px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:55%;letter-spacing:0.5px">SERVICE DESCRIPTION</th>
+                <th style="padding:10px 12px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:15%;letter-spacing:0.5px">AMOUNT</th>
+                <th style="padding:10px 12px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:15%;letter-spacing:0.5px">TAX 6.35%</th>
+                <th style="padding:10px 12px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:15%;letter-spacing:0.5px">TOTAL</th>
+              </tr>`
+    : `
+              <tr style="background:#0f172a;color:${thAccentColor}">
+                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:12%;letter-spacing:0.5px">DATE</th>
+                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:10%;letter-spacing:0.5px">STOCK #</th>
+                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:10%;letter-spacing:0.5px">PO #</th>
+                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:16%;letter-spacing:0.5px">VIN</th>
+                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:20%;letter-spacing:0.5px">CLEAN TYPE</th>
+                <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:11%;letter-spacing:0.5px">AMOUNT</th>
+                <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:10%;letter-spacing:0.5px">TAX 6.35%</th>
+                <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:11%;letter-spacing:0.5px">TOTAL</th>
+              </tr>`
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -75,7 +117,7 @@ export function generateInvoiceHtml(doc: any): string {
   <body style="margin:0;padding:0;font-family:'Inter',Arial,sans-serif;background:#f8fafc;color:#0f172a">
     <div class="print-wrapper" style="max-width:820px;margin:20px auto;background:#fff;border-radius:12px;box-shadow:0 10px 30px -5px rgba(0,0,0,0.05);overflow:hidden;border:1px solid #e2e8f0;box-sizing:border-box">
       <!-- Top Banner Bar -->
-      <div style="height:12px;background:linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%);width:100%"></div>
+      <div style="height:12px;background:${topBarBg};width:100%"></div>
       
       <div class="print-inner" style="padding:40px 40px;box-sizing:border-box">
         <!-- Header Matrix -->
@@ -103,7 +145,12 @@ export function generateInvoiceHtml(doc: any): string {
               <div style="border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05)">
                 <div style="background:#f8fafc;padding:18px 24px;border-bottom:1px solid #e2e8f0">
                   <table style="width:100%;border-collapse:collapse">
-                  ${doc.type === 'Weekly' ? `
+                  ${isMonthly ? `
+                    <tr>
+                      <td style="font-size:12px;color:#64748b;font-weight:600">Month Of</td>
+                      <td style="font-size:12px;color:#0f172a;font-weight:800;text-align:right">${doc.monthLabel || ''}</td>
+                    </tr>
+                  ` : (doc.invoiceType || doc.type) === 'Weekly' ? `
                     <tr>
                       <td style="font-size:12px;color:#64748b;font-weight:600;padding-bottom:10px">Date From</td>
                       <td style="font-size:12px;color:#0f172a;font-weight:800;text-align:right;padding-bottom:10px">${fmtDate(doc.weekStart || doc.date)}</td>
@@ -132,7 +179,7 @@ export function generateInvoiceHtml(doc: any): string {
                     </tr>
                     <tr>
                       <td style="font-size:13px;color:#0f172a;font-weight:700;padding-top:16px;border-top:2px dashed #e2e8f0">Total</td>
-                      <td style="font-size:18px;color:#f59e0b;font-weight:800;text-align:right;padding-top:16px;border-top:2px dashed #e2e8f0">${fmtMoney(doc.total || 0)}</td>
+                      <td style="font-size:18px;color:${highlightColor};font-weight:800;text-align:right;padding-top:16px;border-top:2px dashed #e2e8f0">${fmtMoney(doc.total || 0)}</td>
                     </tr>
                   </table>
                 </div>
@@ -144,17 +191,7 @@ export function generateInvoiceHtml(doc: any): string {
         <!-- Master Grid Container -->
         <div style="border:2px solid #0f172a;border-radius:8px;overflow:hidden;box-shadow:4px 4px 0px 0px rgba(15,23,42,0.06)">
           <table style="width:100%;border-collapse:collapse;table-layout:fixed;background:#fff">
-            <thead>
-              <tr style="background:#0f172a;color:#fbbf24">
-                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:12%;letter-spacing:0.5px">DATE</th>
-                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:10%;letter-spacing:0.5px">STOCK #</th>
-                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:10%;letter-spacing:0.5px">PO #</th>
-                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:16%;letter-spacing:0.5px">VIN</th>
-                <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:20%;letter-spacing:0.5px">CLEAN TYPE</th>
-                <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:11%;letter-spacing:0.5px">AMOUNT</th>
-                <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:10%;letter-spacing:0.5px">TAX 6.35%</th>
-                <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:11%;letter-spacing:0.5px">TOTAL</th>
-              </tr>
+            <thead>${tableHead}
             </thead>
             <tbody>
               ${lineRows}
@@ -192,8 +229,21 @@ export async function generatePdfFromData(data: any): Promise<Buffer> {
   const margin = 40
   const contentWidth = pageWidth - margin * 2
 
+  // ── Color scheme per type: Daily = green, Weekly = amber, Monthly = blue ──
+  const pdfType = data.invoiceType || data.type || 'Weekly'
+  const brandRGB: [number, number, number] = pdfType === 'Monthly'
+    ? [96, 165, 250]  // blue-400
+    : pdfType === 'Daily'
+      ? [52, 211, 153] // emerald-400
+      : [251, 191, 36] // amber-400
+  const accentRGB: [number, number, number] = pdfType === 'Monthly'
+    ? [59, 130, 246]  // blue-500
+    : pdfType === 'Daily'
+      ? [16, 185, 129] // emerald-500
+      : [245, 158, 11] // amber-500
+
   // ── Brand bar at top ──────────────────────────────────────────────────
-  pdf.setFillColor(251, 191, 36) // amber-400
+  pdf.setFillColor(...brandRGB)
   pdf.rect(0, 0, pageWidth, 12, 'F')
 
   let y = 36
@@ -264,7 +314,12 @@ export async function generatePdfFromData(data: any): Promise<Buffer> {
   pdf.setTextColor(100, 116, 139)
   pdf.setFont('helvetica', 'normal')
   
-  if (data.invoiceType === 'Weekly' || data.type === 'Weekly') {
+  if (pdfType === 'Monthly') {
+    pdf.text('Month Of', rX + 15, rdY + 24)
+    pdf.setTextColor(15, 23, 42)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text(data.monthLabel || '', rX + boxWidth - 15, rdY + 24, { align: 'right' })
+  } else if (data.invoiceType === 'Weekly' || data.type === 'Weekly') {
     pdf.text('Date From', rX + 15, rdY + 16)
     pdf.text('Date To', rX + 15, rdY + 30)
     
@@ -306,28 +361,39 @@ export async function generatePdfFromData(data: any): Promise<Buffer> {
   pdf.setFont('helvetica', 'bold')
   pdf.text('Total', rX + 15, dtY + 60)
   pdf.setFontSize(13)
-  pdf.setTextColor(245, 158, 11) // amber
+  pdf.setTextColor(...accentRGB)
   pdf.text(fmtMoney(data.total || 0), rX + boxWidth - 15, dtY + 60, { align: 'right' })
 
   y = rdY + 150
 
   // ── Line Items Table ──────────────────────────────────────────────────
+  // Monthly invoices use a simplified 4-column table: Service Description | Amount | Tax | Total
+  const isMonthlyPdf = pdfType === 'Monthly'
   const items = data.lineItems || []
-  const tableData = items.map((li: any) => [
-    fmtDate(li.date || data.date),
-    (li.stockNumber || '').toUpperCase(),
-    li.poNumber || '',
-    li.vin || '',
-    (li.serviceName || li.description || '').toUpperCase(),
-    fmtMoney(li.unitPrice || li.amount || 0),
-    fmtMoney(li.tax || 0),
-    fmtMoney((li.unitPrice || li.amount || 0) + (li.tax || 0)),
-  ])
+  const tableData = isMonthlyPdf
+    ? items.map((li: any) => [
+        (li.serviceName || li.description || '').toUpperCase(),
+        fmtMoney(li.amount ?? li.unitPrice ?? 0),
+        fmtMoney(li.tax || 0),
+        fmtMoney((li.amount ?? li.unitPrice ?? 0) + (li.tax || 0)),
+      ])
+    : items.map((li: any) => [
+        fmtDate(li.date || data.date),
+        (li.stockNumber || '').toUpperCase(),
+        li.poNumber || '',
+        li.vin || '',
+        (li.serviceName || li.description || '').toUpperCase(),
+        fmtMoney(li.unitPrice || li.amount || 0),
+        fmtMoney(li.tax || 0),
+        fmtMoney((li.unitPrice || li.amount || 0) + (li.tax || 0)),
+      ])
 
   autoTable(pdf, {
     startY: y,
     margin: { left: margin, right: margin },
-    head: [['DATE', 'STOCK #', 'PO #', 'VIN', 'CLEAN TYPE', 'AMOUNT', 'TAX 6.35%', 'TOTAL']],
+    head: isMonthlyPdf
+      ? [['SERVICE DESCRIPTION', 'AMOUNT', 'TAX 6.35%', 'TOTAL']]
+      : [['DATE', 'STOCK #', 'PO #', 'VIN', 'CLEAN TYPE', 'AMOUNT', 'TAX 6.35%', 'TOTAL']],
     body: tableData,
     theme: 'grid',
     styles: {
@@ -340,27 +406,34 @@ export async function generatePdfFromData(data: any): Promise<Buffer> {
     },
     headStyles: {
       fillColor: [15, 23, 42], // slate-900
-      textColor: [251, 191, 36], // amber-400
+      textColor: brandRGB,
       fontStyle: 'bold',
       fontSize: 7.5,
       halign: 'left',
       cellPadding: 8,
     },
-    columnStyles: {
-      0: { cellWidth: 55 }, 
-      1: { cellWidth: 55 }, 
-      2: { cellWidth: 50 }, 
-      3: { cellWidth: 80 }, 
-      4: { cellWidth: 'auto' }, 
-      5: { halign: 'right', cellWidth: 55 }, 
-      6: { halign: 'right', cellWidth: 50 }, 
-      7: { halign: 'right', cellWidth: 55, fontStyle: 'bold', textColor: [15, 23, 42] }, 
-    },
+    columnStyles: isMonthlyPdf
+      ? {
+          0: { cellWidth: 'auto' },
+          1: { halign: 'right', cellWidth: 70 },
+          2: { halign: 'right', cellWidth: 70 },
+          3: { halign: 'right', cellWidth: 70, fontStyle: 'bold', textColor: [15, 23, 42] },
+        }
+      : {
+          0: { cellWidth: 55 },
+          1: { cellWidth: 55 },
+          2: { cellWidth: 50 },
+          3: { cellWidth: 80 },
+          4: { cellWidth: 'auto' },
+          5: { halign: 'right', cellWidth: 55 },
+          6: { halign: 'right', cellWidth: 50 },
+          7: { halign: 'right', cellWidth: 55, fontStyle: 'bold', textColor: [15, 23, 42] },
+        },
     alternateRowStyles: {
       fillColor: [243, 244, 246], // gray-100
     },
     didDrawPage: () => {
-      pdf.setFillColor(251, 191, 36)
+      pdf.setFillColor(...brandRGB)
       pdf.rect(0, 0, pageWidth, 6, 'F')
     },
   })

@@ -23,13 +23,15 @@ export default defineEventHandler(async (event) => {
       else matchQuery.status = { $ne: 'Paid' } 
     }
 
-    // Type filter (Daily / Weekly)
+    // Type filter (Daily / Weekly / Monthly)
     if (query.type && query.type !== 'all') {
       if (query.type === 'weekly') {
         matchQuery.$and = matchQuery.$and || []
         matchQuery.$and.push({
           $or: [{ type: 'Weekly' }, { type: null }, { type: { $exists: false } }]
         })
+      } else if (query.type === 'monthly') {
+        matchQuery.type = 'Monthly'
       } else {
         matchQuery.type = 'Daily'
       }
@@ -102,6 +104,7 @@ export default defineEventHandler(async (event) => {
           number: 1, dealerId: 1, dealerName: 1, dealerEmail: 1,
           dealerPhone: 1, dealerAddress: 1, status: 1, date: 1,
           dueDate: 1, weekNumber: 1, weekYear: 1, weekStart: 1, weekEnd: 1,
+          monthKey: 1, monthLabel: 1, automationId: 1, generatedByAutomation: 1,
           lineItems: 1,
           subtotal: 1, taxTotal: 1, total: 1,
           paidAmount: 1, paymentMethod: 1, notes: 1,
@@ -126,6 +129,10 @@ export default defineEventHandler(async (event) => {
       weekYear: inv.weekYear,
       weekStart: inv.weekStart,
       weekEnd: inv.weekEnd,
+      monthKey: inv.monthKey,
+      monthLabel: inv.monthLabel,
+      automationId: inv.automationId || '',
+      generatedByAutomation: !!inv.generatedByAutomation,
       lineItems: inv.lineItems || [],
       subtotal: inv.subtotal,
       taxTotal: inv.taxTotal,

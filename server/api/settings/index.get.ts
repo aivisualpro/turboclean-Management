@@ -21,6 +21,7 @@ export default defineEventHandler(async (event) => {
             time: '17:00',
             timezone: 'America/New_York'
           }
+          // Note: monthly invoice automations live in the turboCleanMonthlyAutomations collection
         },
         createdAt: new Date(),
         updatedAt: new Date()

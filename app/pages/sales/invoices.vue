@@ -13,7 +13,7 @@ const router = useRouter()
 // ─── Base State (initialized from URL) ───────────────────────────────────
 const search = ref((route.query.search as string) || '')
 const activeTab = ref<'all' | 'unpaid' | 'paid'>((route.query.status as any) || 'all')
-const activeType = ref<'all' | 'daily' | 'weekly'>((route.query.type as any) || 'all')
+const activeType = ref<'all' | 'daily' | 'weekly' | 'monthly'>((route.query.type as any) || 'all')
 
 const globalDatePreset = ref((route.query.date as string) || 'this_month')
 const customStartDate = ref((route.query.from as string) || '')
@@ -660,6 +660,7 @@ function sortIcon(field: string) {
               <button @click="activeType = 'all'"     class="px-2.5 py-1 text-xs font-medium rounded-md transition-all shadow-sm" :class="activeType === 'all' ? 'bg-background text-foreground ring-1 ring-border/50' : 'text-muted-foreground hover:text-foreground'">All Types</button>
               <button @click="activeType = 'daily'"   class="px-2.5 py-1 text-xs font-medium rounded-md transition-all" :class="activeType === 'daily' ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50 text-emerald-600' : 'text-muted-foreground hover:text-foreground'">Daily</button>
               <button @click="activeType = 'weekly'"  class="px-2.5 py-1 text-xs font-medium rounded-md transition-all" :class="activeType === 'weekly' ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50 text-amber-600' : 'text-muted-foreground hover:text-foreground'">Weekly</button>
+              <button @click="activeType = 'monthly'" class="px-2.5 py-1 text-xs font-medium rounded-md transition-all" :class="activeType === 'monthly' ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50 text-blue-600' : 'text-muted-foreground hover:text-foreground'">Monthly</button>
             </div>
 
             <!-- PAYMENT STATUS TABS -->
@@ -710,7 +711,7 @@ function sortIcon(field: string) {
                   </TableCell>
                   <TableCell class="text-xs whitespace-nowrap">{{ fmtDate(inv.date) }}</TableCell>
                   <TableCell>
-                    <Badge variant="outline" class="text-[9px] uppercase tracking-wide" :class="inv.type === 'Weekly' ? 'bg-amber-500/10 text-amber-600 border-amber-500/20' : 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'">
+                    <Badge variant="outline" class="text-[9px] uppercase tracking-wide" :class="inv.type === 'Monthly' ? 'bg-blue-500/10 text-blue-600 border-blue-500/20' : inv.type === 'Weekly' ? 'bg-amber-500/10 text-amber-600 border-amber-500/20' : 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'">
                       {{ inv.type || 'Weekly' }}
                     </Badge>
                   </TableCell>

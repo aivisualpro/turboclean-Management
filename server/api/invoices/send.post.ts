@@ -167,21 +167,21 @@ export default defineEventHandler(async (event) => {
           }
         }
       }
-    } else if (invoiceType === 'Weekly') {
-      // Weekly: Attach only the weekly invoice PDF
+    } else if (invoiceType === 'Weekly' || invoiceType === 'Monthly') {
+      // Weekly/Monthly: Attach only the invoice PDF
       try {
         const pdfBuffer = await htmlToPdfBuffer(pdfHtml, invoiceData)
         attachments.push({
-          filename: `${invoiceNumber || 'Weekly-Invoice'}.pdf`,
+          filename: `${invoiceNumber || `${invoiceType}-Invoice`}.pdf`,
           content: pdfBuffer,
           contentType: 'application/pdf',
         })
       } catch (err: any) {
-        console.error('[Invoice Email] Weekly PDF generation failed:', err.message, err.stack)
+        console.error(`[Invoice Email] ${invoiceType} PDF generation failed:`, err.message, err.stack)
       }
     }
 
-    const fromName = invoiceType === 'Daily' ? 'ZRZ Daily' : 'ZRZ Weekly'
+    const fromName = invoiceType === 'Daily' ? 'ZRZ Daily' : invoiceType === 'Monthly' ? 'ZRZ Monthly' : 'ZRZ Weekly'
     const fromAddress = `${fromName} <billing@zrzops.com>`
 
     // ── Send Email ──────────────────────────────────────────────────

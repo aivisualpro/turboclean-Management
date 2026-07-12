@@ -151,12 +151,27 @@ export function generatePDF(doc: any, docType: 'Work Order' | 'Invoice' | 'Order
     const formattedDate = (d?: string) => d ? new Date(d).toLocaleDateString('en-US', { timeZone: 'UTC', month: 'numeric', day: 'numeric', year: 'numeric' }) : ''
     
     const isWeekly = doc.type === 'Weekly'
-    const topBarBg = isWeekly ? 'linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%)' : 'linear-gradient(90deg, #34d399 0%, #10b981 100%)'
-    const highlightColor = isWeekly ? '#f59e0b' : '#10b981'
-    const thAccentColor = isWeekly ? '#fbbf24' : '#34d399'
+    const isMonthly = doc.type === 'Monthly'
+    const topBarBg = isMonthly
+      ? 'linear-gradient(90deg, #60a5fa 0%, #3b82f6 100%)'
+      : isWeekly
+        ? 'linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%)'
+        : 'linear-gradient(90deg, #34d399 0%, #10b981 100%)'
+    const highlightColor = isMonthly ? '#3b82f6' : isWeekly ? '#f59e0b' : '#10b981'
+    const thAccentColor = isMonthly ? '#60a5fa' : isWeekly ? '#fbbf24' : '#34d399'
     
+    // Monthly invoices use a simplified 4-column table: Service Description | Amount | Tax | Total
     const lineRows = (doc.lineItems || []).map((li: any, i: number) => {
       const bg = i % 2 !== 0 ? '#f3f4f6' : '#ffffff'
+      if (isMonthly) {
+        return `
+      <tr style="background:${bg};border-bottom:1px solid #e2e8f0">
+        <td style="padding:10px 12px;color:#0f172a;font-size:11px;font-family:'Inter',Arial,sans-serif;font-weight:600;text-transform:uppercase;word-break:break-word">${li.serviceName || li.description || ''}</td>
+        <td style="padding:10px 12px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif;text-align:right">${fmtMoney(li.unitPrice ?? li.amount ?? 0)}</td>
+        <td style="padding:10px 12px;color:#64748b;font-size:11px;font-family:'Inter',Arial,sans-serif;text-align:right">${fmtMoney(li.tax || 0)}</td>
+        <td style="padding:10px 12px;color:#0f172a;font-size:12px;font-family:'Inter',Arial,sans-serif;text-align:right;font-weight:800">${fmtMoney((li.unitPrice ?? li.amount ?? 0) + (li.tax || 0))}</td>
+      </tr>`
+      }
       return `
       <tr style="background:${bg};border-bottom:1px solid #e2e8f0">
         <td style="padding:8px 8px;color:#334155;font-size:11px;font-family:'Inter',Arial,sans-serif">${formattedDate(li.date || doc.date)}</td>
@@ -169,6 +184,26 @@ export function generatePDF(doc: any, docType: 'Work Order' | 'Invoice' | 'Order
         <td style="padding:8px 8px;color:#0f172a;font-size:12px;font-family:'Inter',Arial,sans-serif;text-align:right;font-weight:800">${fmtMoney((li.unitPrice || 0) + (li.tax || 0))}</td>
       </tr>`
     }).join('')
+
+    const tableHead = isMonthly
+      ? `
+                <tr style="background:#0f172a;color:${thAccentColor}">
+                  <th style="padding:10px 12px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:55%;letter-spacing:0.5px">SERVICE DESCRIPTION</th>
+                  <th style="padding:10px 12px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:15%;letter-spacing:0.5px">AMOUNT</th>
+                  <th style="padding:10px 12px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:15%;letter-spacing:0.5px">TAX 6.35%</th>
+                  <th style="padding:10px 12px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:15%;letter-spacing:0.5px">TOTAL</th>
+                </tr>`
+      : `
+                <tr style="background:#0f172a;color:${thAccentColor}">
+                  <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:12%;letter-spacing:0.5px">DATE</th>
+                  <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:10%;letter-spacing:0.5px">STOCK #</th>
+                  <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:10%;letter-spacing:0.5px">PO #</th>
+                  <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:16%;letter-spacing:0.5px">VIN</th>
+                  <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:20%;letter-spacing:0.5px">SERVICE</th>
+                  <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:11%;letter-spacing:0.5px">AMOUNT</th>
+                  <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:10%;letter-spacing:0.5px">TAX</th>
+                  <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:11%;letter-spacing:0.5px">TOTAL</th>
+                </tr>`
 
     return `<!DOCTYPE html><html><head><meta charset="utf-8">
       <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -215,7 +250,12 @@ export function generatePDF(doc: any, docType: 'Work Order' | 'Invoice' | 'Order
                 <div style="border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05)">
                   <div style="background:#f8fafc;padding:18px 24px;border-bottom:1px solid #e2e8f0">
                     <table style="width:100%;border-collapse:collapse">
-                    ${doc.type === 'Weekly' ? `
+                    ${isMonthly ? `
+                      <tr>
+                        <td style="font-size:12px;color:#64748b;font-weight:600">Month Of</td>
+                        <td style="font-size:12px;color:#0f172a;font-weight:800;text-align:right">${doc.monthLabel || ''}</td>
+                      </tr>
+                    ` : doc.type === 'Weekly' ? `
                       <tr>
                         <td style="font-size:12px;color:#64748b;font-weight:600;padding-bottom:10px">Date From</td>
                         <td style="font-size:12px;color:#0f172a;font-weight:800;text-align:right;padding-bottom:10px">${formattedDate(doc.weekStart || doc.date)}</td>
@@ -256,17 +296,7 @@ export function generatePDF(doc: any, docType: 'Work Order' | 'Invoice' | 'Order
           <!-- Master Grid Container -->
           <div style="border:2px solid #0f172a;border-radius:8px;overflow:hidden;box-shadow:4px 4px 0px 0px rgba(15,23,42,0.06)">
             <table style="width:100%;border-collapse:collapse;table-layout:fixed;background:#fff">
-              <thead>
-                <tr style="background:#0f172a;color:${thAccentColor}">
-                  <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:12%;letter-spacing:0.5px">DATE</th>
-                  <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:10%;letter-spacing:0.5px">STOCK #</th>
-                  <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:10%;letter-spacing:0.5px">PO #</th>
-                  <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:16%;letter-spacing:0.5px">VIN</th>
-                  <th style="padding:10px 8px;text-align:left;font-size:10px;font-family:'Inter',sans-serif;width:20%;letter-spacing:0.5px">SERVICE</th>
-                  <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:11%;letter-spacing:0.5px">AMOUNT</th>
-                  <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:10%;letter-spacing:0.5px">TAX</th>
-                  <th style="padding:10px 8px;text-align:right;font-size:10px;font-family:'Inter',sans-serif;white-space:nowrap;width:11%;letter-spacing:0.5px">TOTAL</th>
-                </tr>
+              <thead>${tableHead}
               </thead>
               <tbody>
                 ${lineRows}

@@ -35,6 +35,11 @@ export const navMenu: NavMenu[] = [
         link: '/sales/invoices',
       },
       {
+        title: 'Monthly Invoices',
+        icon: 'i-lucide-calendar-range',
+        link: '/sales/monthly-invoices',
+      },
+      {
         title: 'Commissions',
         icon: 'i-lucide-percent',
         link: '/sales/commissions',
