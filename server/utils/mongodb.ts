@@ -56,6 +56,47 @@ export async function connectToDatabase() {
     } catch (e) {
       console.warn('[MongoDB] Index creation skipped:', e)
     }
+
+    // Unique emails for app users (case-insensitive, ignores blank/missing emails).
+    // This is the DB-level backstop; the API handlers also check and return a 409.
+    try {
+      await db.collection('turboCleanAppUsers').createIndex(
+        { email: 1 },
+        {
+          name: 'uniq_email_ci',
+          unique: true,
+          collation: { locale: 'en', strength: 2 },
+          partialFilterExpression: { email: { $gt: '' } },
+        },
+      )
+    } catch (e: any) {
+      console.warn('[MongoDB] Could not create unique email index — most likely the App Users collection already contains duplicate emails. Clean them up and restart. Details:', e?.message)
+    }
+
+    // Indexes for the AppSheet sync outbox (see server/utils/appsheet-sync.ts).
+    // Done entries auto-expire after 7 days; superseded/dead after 30 days.
+    try {
+      const outbox = db.collection('turboCleanSyncOutbox')
+      await Promise.all([
+        outbox.createIndex({ status: 1, nextAttemptAt: 1 }),
+        outbox.createIndex({ table: 1, rowKey: 1, createdAt: -1 }),
+        outbox.createIndex({ doneAt: 1 }, { expireAfterSeconds: 7 * 24 * 3600 }),
+        outbox.createIndex(
+          { createdAt: 1 },
+          {
+            name: 'ttl_finished_entries',
+            expireAfterSeconds: 30 * 24 * 3600,
+            partialFilterExpression: { status: { $eq: 'dead' } },
+          },
+        ),
+        outbox.createIndex(
+          { supersededAt: 1 },
+          { expireAfterSeconds: 24 * 3600 },
+        ),
+      ])
+    } catch (e: any) {
+      console.warn('[MongoDB] Sync outbox index creation skipped:', e?.message)
+    }
   }
 
   return { db, client: resolvedClient }

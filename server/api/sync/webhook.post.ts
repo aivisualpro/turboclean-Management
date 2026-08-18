@@ -291,6 +291,15 @@ async function handleDealerServiceSync(db: any, action: string, row: any, rowId:
   const dealersCollection = db.collection('turboCleanDealers')
   const dealerId = row.dealer
 
+  // AppSheet column names are capitalized (Amount/Tax/Total) but some webhook
+  // bot templates send them lowercase — accept both so values never land as 0.
+  // Also tolerate currency-formatted strings like "$1,234.00".
+  const parseMoney = (v: any) => typeof v === 'number' ? v : (parseFloat(String(v ?? '').replace(/[^\d.-]/g, '')) || 0)
+  const amount = parseMoney(row.amount ?? row.Amount)
+  const tax = parseMoney(row.tax ?? row.Tax)
+  const total = parseMoney(row.total ?? row.Total)
+  const service = row.service ?? row.Service ?? ''
+
   switch (action.toLowerCase()) {
     case 'add': {
       if (!dealerId) {
@@ -299,10 +308,10 @@ async function handleDealerServiceSync(db: any, action: string, row: any, rowId:
 
       const serviceEntry = {
         id: rowId || new ObjectId().toString(),
-        service: row.service || '',
-        amount: Number(row.amount) || 0,
-        tax: Number(row.tax) || 0,
-        total: Number(row.total) || 0,
+        service,
+        amount,
+        tax,
+        total,
       }
 
       let filter: any
@@ -313,9 +322,20 @@ async function handleDealerServiceSync(db: any, action: string, row: any, rowId:
         filter = { _id: dealerId }
       }
 
+      // Dedupe: if this service id already exists on the dealer (e.g. AppSheet
+      // echoing back a row the web app just created), don't push a duplicate.
+      const existingDealer = await dealersCollection.findOne(
+        { ...filter, 'services.id': serviceEntry.id },
+        { projection: { _id: 1 } },
+      )
+      if (existingDealer) {
+        console.log(`[Webhook] DealerService ${serviceEntry.id} already exists on dealer ${dealerId} — skipping duplicate add (echo)`)
+        return { success: true, action: 'added-dealer-service', dealerId, serviceId: serviceEntry.id, isEcho: true }
+      }
+
       await dealersCollection.updateOne(filter, {
         $push: { services: serviceEntry } as any,
-        $set: { updatedAt: new Date() },
+        $set: { updatedAt: new Date(), lastUpdatedBy: 'appsheet-webhook' },
       })
 
       return { success: true, action: 'added-dealer-service', dealerId, serviceId: serviceEntry.id }
@@ -334,13 +354,77 @@ async function handleDealerServiceSync(db: any, action: string, row: any, rowId:
         filter = { _id: dealerId, 'services.id': rowId }
       }
 
+      // Echo prevention: if the incoming values match what MongoDB already has,
+      // or the web app rewrote THIS exact row seconds ago, this is AppSheet
+      // echoing our own change back — skip the write so rapid consecutive
+      // edits can't be reverted. (Row-scoped: edits to OTHER services on the
+      // same dealer are never suppressed.)
+      const dealerDoc = await dealersCollection.findOne(filter, { projection: { services: 1, updatedAt: 1, lastUpdatedBy: 1, lastWebServiceWrite: 1 } })
+      if (!dealerDoc) {
+        let dealerFilter: any
+        try {
+          dealerFilter = { _id: new ObjectId(dealerId) }
+        }
+        catch {
+          dealerFilter = { _id: dealerId }
+        }
+
+        // Don't resurrect a row the web app just deleted (delete may still be
+        // in flight to AppSheet, producing a late edit webhook for it).
+        const recentDelete = await db.collection('turboCleanSyncOutbox').findOne({
+          table: 'DealerServices',
+          action: 'Delete',
+          rowKey: rowId,
+          createdAt: { $gte: new Date(Date.now() - 10 * 60_000) },
+        }, { projection: { _id: 1 } }).catch(() => null)
+        if (recentDelete) {
+          console.log(`[Webhook] DealerService ${rowId} was deleted from the web app recently — ignoring late AppSheet edit`)
+          return { success: true, action: 'edited-dealer-service', dealerId, serviceId: rowId, isEcho: true }
+        }
+
+        // Legacy rows are keyed by `_id` instead of `id` — don't create a duplicate
+        const legacyMatch = await dealersCollection.findOne(
+          { ...dealerFilter, 'services._id': rowId },
+          { projection: { _id: 1 } },
+        )
+        if (legacyMatch) {
+          console.log(`[Webhook] DealerService ${rowId} exists under legacy _id key — skipping to avoid duplicate`)
+          return { success: true, action: 'edited-dealer-service', dealerId, serviceId: rowId, matched: 1 }
+        }
+
+        // Service row genuinely missing locally — self-heal by adding it
+        // instead of silently dropping the AppSheet edit.
+        const healResult = await dealersCollection.updateOne(dealerFilter, {
+          $push: { services: { id: rowId, service, amount, tax, total } } as any,
+          $set: { updatedAt: new Date(), lastUpdatedBy: 'appsheet-webhook' },
+        })
+        console.log(`[Webhook] DealerService ${rowId} not found locally on edit — ${healResult.matchedCount ? 'added it (self-heal)' : `dealer ${dealerId} not found either, skipped`}`)
+        return { success: true, action: 'edited-dealer-service', dealerId, serviceId: rowId, matched: healResult.matchedCount }
+      }
+      else {
+        const current = (dealerDoc.services || []).find((s: any) => s.id === rowId)
+        const valuesMatch = current
+          && (current.service || '') === service
+          && Number(current.amount || 0) === amount
+          && Number(current.tax || 0) === tax
+          && Number(current.total || 0) === total
+        const lastWeb = dealerDoc.lastWebServiceWrite
+        const recentWebWriteSameRow = lastWeb && lastWeb.id === rowId && lastWeb.at
+          && (Date.now() - new Date(lastWeb.at).getTime()) < 30000
+        if (valuesMatch || recentWebWriteSameRow) {
+          console.log(`[Webhook] ECHO detected for DealerServices/${rowId} — skipping MongoDB write (${valuesMatch ? 'values identical' : 'web-ui rewrote this row <30s ago'})`)
+          return { success: true, action: 'edited-dealer-service', dealerId, serviceId: rowId, isEcho: true }
+        }
+      }
+
       await dealersCollection.updateOne(filter, {
         $set: {
-          'services.$.service': row.service || '',
-          'services.$.amount': Number(row.amount) || 0,
-          'services.$.tax': Number(row.tax) || 0,
-          'services.$.total': Number(row.total) || 0,
+          'services.$.service': service,
+          'services.$.amount': amount,
+          'services.$.tax': tax,
+          'services.$.total': total,
           updatedAt: new Date(),
+          lastUpdatedBy: 'appsheet-webhook',
         },
       })
 
@@ -362,7 +446,7 @@ async function handleDealerServiceSync(db: any, action: string, row: any, rowId:
 
       await dealersCollection.updateOne(filter, {
         $pull: { services: { id: rowId } } as any,
-        $set: { updatedAt: new Date() },
+        $set: { updatedAt: new Date(), lastUpdatedBy: 'appsheet-webhook' },
       })
 
       return { success: true, action: 'deleted-dealer-service', dealerId, serviceId: rowId }

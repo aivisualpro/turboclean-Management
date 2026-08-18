@@ -51,11 +51,32 @@ export default defineEventHandler(async () => {
       }
     }
 
+    // ── Outbox health: pending = will be retried automatically, dead = gave up ──
+    let outbox: Record<string, any> = { pending: 0, dead: 0, recentFailures: [] }
+    try {
+      const outboxCol = db.collection('turboCleanSyncOutbox')
+      const [pending, dead, recentFailures] = await Promise.all([
+        outboxCol.countDocuments({ status: 'pending' }),
+        outboxCol.countDocuments({ status: 'dead' }),
+        outboxCol
+          .find({ status: { $in: ['pending', 'dead'] } })
+          .sort({ createdAt: -1 })
+          .limit(5)
+          .project({ table: 1, action: 1, status: 1, attempts: 1, lastError: 1, createdAt: 1 })
+          .toArray(),
+      ])
+      outbox = { pending, dead, recentFailures }
+    }
+    catch (err) {
+      console.error('[SyncStatus] Outbox check failed:', err)
+    }
+
     return {
       success: true,
       appId: '7dc0e030-a298-4b45-a6ca-7ca25702b8d3',
       timestamp: new Date().toISOString(),
       tables: status,
+      outbox,
     }
   }
   catch (error: any) {

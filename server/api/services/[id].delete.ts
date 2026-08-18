@@ -1,6 +1,6 @@
 import { connectToDatabase } from '../../utils/mongodb'
 import { ObjectId } from 'mongodb'
-import { appSheetDelete } from '../../utils/appsheet'
+import { syncToAppSheet } from '../../utils/appsheet-sync'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -11,13 +11,12 @@ export default defineEventHandler(async (event) => {
     const { db } = await connectToDatabase()
     await db.collection('turboCleanServices').deleteOne({ _id: new ObjectId(id) })
 
-    // ── Sync to AppSheet ──
-    await appSheetDelete('Services', [{ _id: id }]).catch(err =>
-      console.error('[Sync] Failed to delete service from AppSheet:', err)
-    )
+    // ── Sync to AppSheet (outbox-backed: auto-retried in the background on failure) ──
+    const appSheet = await syncToAppSheet(db, 'Services', 'Delete', [{ _id: id }])
 
-    return { success: true }
+    return { success: true, appSheet }
   } catch (error: any) {
+    if (error?.statusCode) throw error
     throw createError({ statusCode: 500, statusMessage: error.message })
   }
 })

@@ -12,9 +12,22 @@ const { setHeader } = usePageHeader()
 setHeader({ title: isNew ? 'Add User' : 'Edit User', icon: 'i-lucide-user' })
 
 const { dealers, fetchDealers } = useDealers()
-if (import.meta.client && dealers.value.length === 0) fetchDealers()
+// Always refresh on the client so dealer names resolve even after stale/partial loads
+if (import.meta.client) fetchDealers()
 
 const { data: users, pending } = useFetch<any[]>('/api/users', { lazy: true })
+
+const currentUser = computed(() => users.value?.find(u => u.id === userId))
+
+// Names resolved server-side by /api/users (registerDealersInfo) — works even
+// when the dealers list hasn't loaded or the viewer can't see every dealer.
+const serverDealerNames = computed(() => {
+  const map = new Map<string, string>()
+  for (const info of (currentUser.value?.registerDealersInfo || [])) {
+    if (info?.id && info?.name) map.set(info.id, info.name)
+  }
+  return map
+})
 const { data: workspacesRes } = useFetch<any>('/api/workspaces', { lazy: true })
 
 const formData = reactive({
@@ -78,7 +91,14 @@ function toggleAllDealers() {
 }
 
 function getDealerName(id: string): string {
-  return dealers.value.find((d: any) => d.id === id)?.dealerName || id
+  const fromList = dealers.value.find((d: any) => d.id === id)?.dealerName
+  if (fromList) return fromList
+  const fromServer = serverDealerNames.value.get(id)
+  if (fromServer) return fromServer
+  // Users created from AppSheet can store dealer NAMES instead of ids — show those as-is
+  if (!/^[0-9a-f]{24}$/i.test(id)) return id
+  // Dealer no longer exists (or hasn't loaded) — never show a raw ID
+  return `Unknown dealer (…${id.slice(-6)})`
 }
 
 const showPassword = ref(false)
@@ -93,14 +113,47 @@ function generatePassword() {
 const isSaving = ref(false)
 const showDeleteDialog = ref(false)
 
+/** Pull the real server error message out of a $fetch error */
+function apiErrorMessage(err: any, fallback: string): string {
+  return err?.data?.statusMessage || err?.data?.message || err?.statusMessage || err?.message || fallback
+}
+
+function notifySaveOutcome(res: any, successMsg: string) {
+  if (res?.appSheet && res.appSheet.ok === false) {
+    if (res.appSheet.queued) {
+      toast.warning(`${successMsg} — AppSheet is unreachable, sync queued and will retry automatically`)
+    } else {
+      toast.error(`${successMsg}, but AppSheet sync failed: ${res.appSheet.error || 'unknown error'}`)
+    }
+  } else {
+    toast.success(successMsg)
+  }
+}
+
 async function handleSave() {
-  if (!formData.name) {
+  if (!formData.name.trim()) {
     toast.error('Name is required')
     return
   }
 
+  const email = formData.email.trim()
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    toast.error('Please enter a valid email address')
+    return
+  }
+  // Instant duplicate check against the loaded users list (server enforces it too)
+  if (email) {
+    const dup = (users.value || []).find(u =>
+      u.id !== userId && (u.email || '').trim().toLowerCase() === email.toLowerCase()
+    )
+    if (dup) {
+      toast.error(`This email is already used by "${dup.name || dup.email}" — emails must be unique`)
+      return
+    }
+  }
+
   isSaving.value = true
-  const snapshot = { ...formData }
+  const snapshot = { ...formData, name: formData.name.trim(), email }
   if (snapshot.workspaceId === 'none') {
     snapshot.workspaceId = ''
   }
@@ -108,18 +161,18 @@ async function handleSave() {
   if (isNew) {
     try {
       const res: any = await $fetch('/api/users', { method: 'POST', body: snapshot })
-      toast.success('User created successfully')
+      notifySaveOutcome(res, 'User created successfully')
       navigateTo('/users')
     } catch (err: any) {
-      toast.error(err.message || 'Failed to create user')
+      toast.error(apiErrorMessage(err, 'Failed to create user'))
     }
   } else {
     try {
-      await $fetch(`/api/users/${userId}`, { method: 'PUT', body: snapshot })
-      toast.success('User updated successfully')
+      const res: any = await $fetch(`/api/users/${userId}`, { method: 'PUT', body: snapshot })
+      notifySaveOutcome(res, 'User updated successfully')
       navigateTo('/users')
     } catch (err: any) {
-      toast.error(err.message || 'Failed to update user')
+      toast.error(apiErrorMessage(err, 'Failed to update user'))
     }
   }
   isSaving.value = false
@@ -129,11 +182,11 @@ async function handleDelete() {
   if (isNew) return
   isSaving.value = true
   try {
-    await $fetch(`/api/users/${userId}`, { method: 'DELETE' })
-    toast.success('User deleted successfully')
+    const res: any = await $fetch(`/api/users/${userId}`, { method: 'DELETE' })
+    notifySaveOutcome(res, 'User deleted successfully')
     navigateTo('/users')
   } catch (err: any) {
-    toast.error(err.message || 'Failed to delete user')
+    toast.error(apiErrorMessage(err, 'Failed to delete user'))
   } finally {
     isSaving.value = false
     showDeleteDialog.value = false

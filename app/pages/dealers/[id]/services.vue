@@ -36,8 +36,8 @@ async function copyServices() {
         total: s.amount + tax
       }
     })
-    await patchDealer(props.dealer.id, { services: finalServices })
-    toast.success(`Copied ${finalServices.length} services successfully`)
+    const res = await patchDealer(props.dealer.id, { services: finalServices })
+    notifySyncOutcome(res, `Copied ${finalServices.length} services successfully`)
     copyFromDealerId.value = ''
   } catch (err: any) {
     toast.error(`Copy failed: ${err.message || err}`)
@@ -52,6 +52,19 @@ onMounted(() => { if (!services.value.length) fetchServices() })
 // ─── Helpers ─────────────────────────────────────────────────────
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0)
+
+/** Toast the right message depending on whether AppSheet sync landed */
+function notifySyncOutcome(res: any, successMsg: string) {
+  if (res?.appSheet && res.appSheet.ok === false) {
+    if (res.appSheet.queued) {
+      toast.warning(`${successMsg} — AppSheet is unreachable, sync queued and will retry automatically`)
+    } else {
+      toast.error(`${successMsg} locally, but AppSheet sync failed: ${res.appSheet.error || 'unknown error'}`)
+    }
+  } else {
+    toast.success(successMsg)
+  }
+}
 
 function getServiceName(serviceId: string) {
   const s = services.value.find(s => s.id === serviceId)
@@ -228,13 +241,11 @@ async function saveService() {
       total: formTotal.value,
     }
 
-    const currentServices = props.dealer.services || []
-    const updated: DealerService[] = editingId.value
-      ? currentServices.map(s => s.id === editingId.value ? newEntry : { ...s })
-      : [...currentServices, newEntry]
-
-    await patchDealer(props.dealer.id, { services: updated })
-    toast.success(editingId.value ? 'Service updated' : 'Service added')
+    // Send ONLY the changed row (not the whole array) so a stale local list
+    // can never wipe services added elsewhere (e.g. from AppSheet).
+    const wasEditing = editingId.value !== null
+    const res = await patchDealer(props.dealer.id, { updatedService: newEntry })
+    notifySyncOutcome(res, wasEditing ? 'Service updated' : 'Service added')
     showForm.value = false
   } catch (err: any) {
     toast.error(`Save failed: ${err?.message || err}`)
@@ -247,9 +258,8 @@ async function deleteService(srvId?: string) {
   if (!srvId) return
   deletingId.value = srvId
   try {
-    const updated = props.dealer.services!.filter(s => s.id !== srvId)
-    await patchDealer(props.dealer.id, { services: updated, deletedServiceId: srvId })
-    toast.success('Service removed')
+    const res = await patchDealer(props.dealer.id, { deletedServiceId: srvId })
+    notifySyncOutcome(res, 'Service removed')
   } catch (err: any) {
     toast.error(`Delete failed: ${err?.message || err}`)
   } finally {
@@ -264,12 +274,14 @@ async function toggleServiceTax(srv: DealerService, enableTax: boolean) {
   if (!srv.id) return
   savingTaxId.value = srv.id
   try {
-    const updated = props.dealer.services!.map(s => {
-      if (s.id !== srv.id) return { ...s }
-      const tax = enableTax ? computedTax(s.amount) : 0
-      return { ...s, tax, total: s.amount + tax }
+    const tax = enableTax ? computedTax(srv.amount) : 0
+    // Targeted single-row update — never sends the whole (possibly stale) list
+    const res = await patchDealer(props.dealer.id, {
+      updatedService: { ...srv, tax, total: srv.amount + tax },
     })
-    await patchDealer(props.dealer.id, { services: updated })
+    if (res?.appSheet && res.appSheet.ok === false) {
+      notifySyncOutcome(res, 'Tax updated')
+    }
   } catch (err: any) {
     toast.error(`Failed: ${err?.message || err}`)
   } finally {

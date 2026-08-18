@@ -116,8 +116,18 @@ export function useDealers() {
 
   const patchLocks = new Map<string, Promise<void>>()
 
-  /** Patch a dealer field and sync to backend + AppSheet */
-  async function patchDealer(id: string, updates: Record<string, any>) {
+  /** Patch a dealer field and sync to backend + AppSheet.
+   *
+   * Special update keys understood by the API (and handled optimistically here):
+   * - `updatedService`: upsert of a SINGLE service row — preferred over sending
+   *   the whole `services` array, so a stale local list can never wipe services
+   *   added elsewhere (e.g. from AppSheet) since the page loaded.
+   * - `deletedServiceId`: targeted removal of a single service row.
+   *
+   * Returns the API response (including `appSheet` sync status) so callers can
+   * tell the user when a change was saved but AppSheet sync is still pending.
+   */
+  async function patchDealer(id: string, updates: Record<string, any>): Promise<any> {
     console.log('[patchDealer] called with id=', id, 'updates=', JSON.stringify(updates))
     // Optimistic: update UI immediately (if dealer is in local state)
     const idx = dealers.value.findIndex(d => d.id === id)
@@ -125,8 +135,19 @@ export function useDealers() {
 
     if (idx !== -1) {
       snapshot = { ...dealers.value[idx]! }
+      const { updatedService, deletedServiceId, ...plainFields } = updates
       // Use splice to guarantee Vue reactivity triggers consistently in Nuxt useState arrays
-      const newSnapshot = { ...snapshot, ...updates, updatedAt: new Date().toISOString() }
+      const newSnapshot: any = { ...snapshot, ...plainFields, updatedAt: new Date().toISOString() }
+      if (updatedService && typeof updatedService === 'object') {
+        const list = Array.isArray(newSnapshot.services) ? [...newSnapshot.services] : []
+        const sIdx = list.findIndex((s: any) => s.id === updatedService.id)
+        if (sIdx >= 0) list.splice(sIdx, 1, { ...updatedService })
+        else list.push({ ...updatedService })
+        newSnapshot.services = list
+      }
+      if (deletedServiceId) {
+        newSnapshot.services = (newSnapshot.services || []).filter((s: any) => s.id !== deletedServiceId)
+      }
       dealers.value.splice(idx, 1, newSnapshot)
       console.log('[patchDealer] optimistic update done, isTaxApplied=', dealers.value[idx]!.isTaxApplied)
     } else {
@@ -175,6 +196,8 @@ export function useDealers() {
         console.log('[patchDealer] dealers state was empty, fetching fresh data...')
         await fetchDealers()
       }
+
+      return result
     } catch (err) {
       // Rollback on failure (only if we had a snapshot)
       console.error('[patchDealer] API failed:', err)

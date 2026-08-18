@@ -52,6 +52,7 @@ export const DealersMapper = {
       notes: mongoDoc.notes || '',
       isTaxApplied: mongoDoc.isTaxApplied === true ? 'Y' : 'N',
       taxPercentage: Number(mongoDoc.taxPercentage) || 0,
+      DuplicateStock: mongoDoc.DuplicateStock === true ? 'Y' : 'N',
       status: mongoDoc.status || 'Pending',
     }
   },
@@ -77,6 +78,11 @@ export const DealersMapper = {
     if (appSheetRow.taxPercentage !== undefined && appSheetRow.taxPercentage !== null && appSheetRow.taxPercentage !== '') {
       doc.taxPercentage = Number(appSheetRow.taxPercentage)
       console.log(`[Mapper] Mapped taxPercentage: raw="${appSheetRow.taxPercentage}" -> ${doc.taxPercentage}`)
+    }
+
+    if (appSheetRow.DuplicateStock !== undefined && appSheetRow.DuplicateStock !== null && appSheetRow.DuplicateStock !== '') {
+      const v = appSheetRow.DuplicateStock
+      doc.DuplicateStock = v === true || v === 1 || v === '1' || (typeof v === 'string' && ['true', 'yes', 'y'].includes(v.toLowerCase()))
     }
 
     return doc
