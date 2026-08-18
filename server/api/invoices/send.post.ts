@@ -193,6 +193,12 @@ export default defineEventHandler(async (event) => {
       ...(attachments.length > 0 ? { attachments } : {}),
     })
 
+    // Resend resolves with { data, error } instead of throwing on API failures
+    if ((data as any)?.error) {
+      const err = (data as any).error
+      throw createError({ statusCode: 502, statusMessage: `Email provider rejected the send: ${err.message || err.name || 'unknown error'}` })
+    }
+
     // ── Log the email ───────────────────────────────────────────────
     if (dealerId) {
       const { db } = await connectToDatabase()

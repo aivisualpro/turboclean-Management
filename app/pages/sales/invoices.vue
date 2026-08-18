@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { toast } from 'vue-sonner'
 import { generatePDF, downloadPDF, calcLineTotal } from '~/composables/useSalesDocument'
-import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, Loader2, Download, Search, FileText, FileSpreadsheet, Eye, Mail, ThumbsUp, CheckCircle, Send, RefreshCw } from 'lucide-vue-next'
+import { ChevronRight, ChevronDown, Folder, CalendarDays, Calendar as CalendarIcon, CalendarClock, Loader2, Download, Search, FileText, FileSpreadsheet, Eye, Mail, ThumbsUp, CheckCircle, Send, RefreshCw, Zap, Plus } from 'lucide-vue-next'
 
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Invoices', icon: 'i-lucide-receipt' })
@@ -14,6 +14,10 @@ const router = useRouter()
 const search = ref((route.query.search as string) || '')
 const activeTab = ref<'all' | 'unpaid' | 'paid'>((route.query.status as any) || 'all')
 const activeType = ref<'all' | 'daily' | 'weekly' | 'monthly'>((route.query.type as any) || 'all')
+
+// ─── View: Invoices vs Automations ───────────────────────────────────────
+const activeView = ref<'invoices' | 'automations'>(route.query.view === 'automations' ? 'automations' : 'invoices')
+const automationsViewRef = ref<any>(null)
 
 const globalDatePreset = ref((route.query.date as string) || 'this_month')
 const customStartDate = ref((route.query.from as string) || '')
@@ -444,7 +448,7 @@ watch([search, activeTab, activeType, computedDates], () => {
 // ─── Sync State → URL ────────────────────────────────────────────────────
 let urlSyncTimeout: any
 watch(
-  [search, activeTab, activeType, globalDatePreset, customStartDate, customEndDate, sortBy, sortDir],
+  [search, activeTab, activeType, globalDatePreset, customStartDate, customEndDate, sortBy, sortDir, activeView],
   () => {
     clearTimeout(urlSyncTimeout)
     urlSyncTimeout = setTimeout(() => {
@@ -459,6 +463,7 @@ watch(
       }
       if (sortBy.value !== 'date') q.sortBy = sortBy.value
       if (sortDir.value !== -1) q.sortDir = String(sortDir.value)
+      if (activeView.value !== 'invoices') q.view = activeView.value
       router.replace({ query: q })
     }, 300)
   }
@@ -520,39 +525,60 @@ function sortIcon(field: string) {
     <ClientOnly>
       <Teleport to="#page-header-actions">
         <div class="flex items-center gap-2">
-          
-          <Select v-model="globalDatePreset">
-            <SelectTrigger class="w-[140px] h-8 text-sm font-medium bg-background shadow-sm">
-              <SelectValue placeholder="Date Range" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="yesterday">Yesterday</SelectItem>
-              <SelectItem value="this_month">This Month</SelectItem>
-              <SelectItem value="last_month">Last Month</SelectItem>
-              <SelectItem value="this_year">This Year</SelectItem>
-              <SelectItem value="last_year">Last Year</SelectItem>
-              <SelectItem value="all_time">All Time</SelectItem>
-              <SelectItem value="custom">Custom Date...</SelectItem>
-            </SelectContent>
-          </Select>
 
-          <div v-if="globalDatePreset === 'custom'" class="flex items-center gap-1.5 animate-in fade-in zoom-in-95">
-            <Input type="date" v-model="customStartDate" class="h-8 text-xs w-[125px] flex-1 bg-background shadow-sm" />
-            <span class="text-muted-foreground text-xs font-medium">to</span>
-            <Input type="date" v-model="customEndDate" class="h-8 text-xs w-[125px] flex-1 bg-background shadow-sm" />
+          <!-- View switcher: Invoices ↔ Automations -->
+          <div class="flex bg-muted/60 p-1 rounded-lg border border-border/50">
+            <button class="px-3 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1.5" :class="activeView === 'invoices' ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50' : 'text-muted-foreground hover:text-foreground'" @click="activeView = 'invoices'">
+              <FileSpreadsheet class="size-3.5" /> Invoices
+            </button>
+            <button class="px-3 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1.5" :class="activeView === 'automations' ? 'bg-background text-blue-600 shadow-sm ring-1 ring-border/50' : 'text-muted-foreground hover:text-foreground'" @click="activeView = 'automations'">
+              <Zap class="size-3.5" /> Automations
+            </button>
           </div>
 
-          <div class="relative hidden sm:block">
-            <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-            <Input v-model="search" placeholder="Search invoices..." class="pl-8 w-44 h-8 text-sm bg-background shadow-sm" />
-          </div>
+          <template v-if="activeView === 'invoices'">
+            <Select v-model="globalDatePreset">
+              <SelectTrigger class="w-[140px] h-8 text-sm font-medium bg-background shadow-sm">
+                <SelectValue placeholder="Date Range" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="yesterday">Yesterday</SelectItem>
+                <SelectItem value="this_month">This Month</SelectItem>
+                <SelectItem value="last_month">Last Month</SelectItem>
+                <SelectItem value="this_year">This Year</SelectItem>
+                <SelectItem value="last_year">Last Year</SelectItem>
+                <SelectItem value="all_time">All Time</SelectItem>
+                <SelectItem value="custom">Custom Date...</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <div v-if="globalDatePreset === 'custom'" class="flex items-center gap-1.5 animate-in fade-in zoom-in-95">
+              <Input type="date" v-model="customStartDate" class="h-8 text-xs w-[125px] flex-1 bg-background shadow-sm" />
+              <span class="text-muted-foreground text-xs font-medium">to</span>
+              <Input type="date" v-model="customEndDate" class="h-8 text-xs w-[125px] flex-1 bg-background shadow-sm" />
+            </div>
+
+            <div class="relative hidden sm:block">
+              <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Input v-model="search" placeholder="Search invoices..." class="pl-8 w-44 h-8 text-sm bg-background shadow-sm" />
+            </div>
+          </template>
+
+          <Button v-else size="sm" class="h-8 gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shadow-sm" @click="automationsViewRef?.openCreate()">
+            <Plus class="size-3.5" /> New Automation
+          </Button>
         </div>
       </Teleport>
     </ClientOnly>
 
+    <!-- ═══════════════ AUTOMATIONS VIEW ═══════════════ -->
+    <div v-if="activeView === 'automations'" class="flex-1 min-h-0 flex flex-col p-4 w-full">
+      <SalesInvoiceAutomations ref="automationsViewRef" />
+    </div>
+
     <!-- Main Layout Grid -->
-    <div class="flex-1 min-h-0 flex flex-col md:flex-row gap-4 p-4 w-full">
+    <div v-else class="flex-1 min-h-0 flex flex-col md:flex-row gap-4 p-4 w-full">
       
       <!-- ─── Sidebar Tree ──────────────────────────────────────────────────────── -->
       <aside class="w-full md:w-96 shrink-0 flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm">

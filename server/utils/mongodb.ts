@@ -73,6 +73,36 @@ export async function connectToDatabase() {
       console.warn('[MongoDB] Could not create unique email index — most likely the App Users collection already contains duplicate emails. Clean them up and restart. Details:', e?.message)
     }
 
+    // Indexes for invoice automations + their run history (run docs expire after 90 days)
+    try {
+      const runs = db.collection('turboCleanAutomationRuns')
+      await Promise.all([
+        db.collection('turboCleanInvoiceAutomations').createIndex({ enabled: 1 }),
+        runs.createIndex({ automationId: 1, startedAt: -1 }),
+        runs.createIndex({ startedAt: 1 }, { expireAfterSeconds: 90 * 24 * 3600 }),
+        db.collection('turboCleanInvoices').createIndex({ type: 1, status: 1, date: -1 }),
+        db.collection('turboCleanWorkOrders').createIndex({ isInvoiced: 1, dealer: 1 }),
+      ])
+      // At most ONE open (not yet weekly-billed) Draft daily invoice per dealer
+      // per date — the merge target for late work orders. Must mirror the merge
+      // lookup in invoice-generation.ts exactly (incl. isWeeklyBilled), or
+      // rolled-up drafts would wedge supplemental inserts with E11000.
+      await db.collection('turboCleanInvoices').createIndex(
+        { type: 1, dealerId: 1, date: 1 },
+        {
+          name: 'uniq_open_daily_draft',
+          unique: true,
+          partialFilterExpression: {
+            type: { $eq: 'Daily' },
+            status: { $eq: 'Draft' },
+            isWeeklyBilled: { $eq: false },
+          },
+        },
+      ).catch((e: any) => console.warn('[MongoDB] uniq_open_daily_draft index skipped (existing duplicate Draft dailies?):', e?.message))
+    } catch (e: any) {
+      console.warn('[MongoDB] Automation index creation skipped:', e?.message)
+    }
+
     // Indexes for the AppSheet sync outbox (see server/utils/appsheet-sync.ts).
     // Done entries auto-expire after 7 days; superseded/dead after 30 days.
     try {

@@ -248,13 +248,18 @@ export async function runMonthlyAutomation(db: any, automation: any, opts: { for
 
   for (const toEmail of targetEmails) {
     try {
-      await resend.emails.send({
+      const sendResult: any = await resend.emails.send({
         from: 'ZRZ Monthly <billing@zrzops.com>',
         to: toEmail,
         subject,
         html: emailHtml,
         ...(attachments.length > 0 ? { attachments } : {}),
       })
+
+      // Resend resolves with { data, error } instead of throwing on API failures
+      if (sendResult?.error) {
+        throw new Error(sendResult.error.message || sendResult.error.name || 'Resend rejected the email')
+      }
 
       await emailLogsCol.insertOne({
         dealerId: invoice.dealerId,
