@@ -4,10 +4,12 @@
 //   env OLD_URI='...' NEW_URI='...' node db-migration/migrate-cluster.mjs copy     (refuses if target DB not empty)
 //   env OLD_URI='...' NEW_URI='...' node db-migration/migrate-cluster.mjs copy --replace   (drops target DBs first; for the final re-sync)
 //   env OLD_URI='...' NEW_URI='...' node db-migration/migrate-cluster.mjs verify
+//   env OLD_URI='...' NEW_URI='...' node db-migration/migrate-cluster.mjs catchup  (after cutover: inserts docs that exist
+//        only in OLD; never overwrites anything in NEW; lists docs that differ so they can be reviewed)
 // Copies every database (except admin/local/config): collections with their options
 // (validators, collation, TTL, capped...), all documents with exact BSON types, all
 // indexes, views and Atlas Search indexes. Never writes to OLD_URI.
-import { MongoClient } from 'mongodb'
+import { MongoClient, BSON } from 'mongodb'
 import crypto from 'node:crypto'
 
 const OLD = process.env.OLD_URI, NEW = process.env.NEW_URI
@@ -142,11 +144,40 @@ async function verify() {
   if (bad) process.exitCode = 3
 }
 
+async function catchup() {
+  let inserted = 0, differing = 0
+  for (const d of await dbList(src)) {
+    const sdb = src.db(d.name), tdb = dst.db(d.name)
+    for (const c of await colls(sdb)) {
+      if (c.type === 'view') continue
+      const scoll = sdb.collection(c.name), tcoll = tdb.collection(c.name)
+      const newIds = new Set()
+      const newHash = new Map()
+      for await (const raw of tcoll.find({}, { raw: true })) {
+        const id = BSON.EJSON.stringify(BSON.deserialize(raw, { promoteValues: false })._id, { relaxed: false })
+        newIds.add(id); newHash.set(id, crypto.createHash('sha1').update(raw).digest('hex'))
+      }
+      const missing = [], diff = []
+      for await (const raw of scoll.find({}, { raw: true })) {
+        const doc = BSON.deserialize(raw, KEEP_TYPES)
+        const id = BSON.EJSON.stringify(doc._id, { relaxed: false })
+        if (!newIds.has(id)) missing.push(doc)
+        else if (newHash.get(id) !== crypto.createHash('sha1').update(raw).digest('hex')) diff.push(id)
+      }
+      if (missing.length) await tcoll.insertMany(missing, { ordered: false, bypassDocumentValidation: true })
+      inserted += missing.length; differing += diff.length
+      if (missing.length || diff.length) log(`  ${d.name}.${c.name}: inserted ${missing.length} new-in-OLD doc(s); ${diff.length} doc(s) differ (NOT overwritten)${diff.length ? ': ' + diff.slice(0, 10).join(' ') : ''}`)
+    }
+  }
+  log(`CATCHUP DONE: inserted ${inserted}, differing (left as-is in NEW) ${differing}`)
+}
+
 try {
   await src.connect(); await dst.connect()
   if (mode === 'inspect') await inspect()
   else if (mode === 'copy') await copy()
   else if (mode === 'verify') await verify()
-  else console.error('mode must be inspect | copy | verify')
+  else if (mode === 'catchup') await catchup()
+  else console.error('mode must be inspect | copy | verify | catchup')
 } catch (e) { console.error('ERROR:', e.message); process.exitCode = 1 }
 finally { await src.close(); await dst.close() }

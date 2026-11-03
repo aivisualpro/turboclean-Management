@@ -1,7 +1,7 @@
 const { MongoClient } = require('mongodb');
 
 async function fix() {
-  const uri = 'mongodb+srv://admin_db_user:w3wD0fC2k0T9XjuU@cluster0.xjohmmi.mongodb.net/';
+  const uri = 'mongodb+srv://shamsturboclean_db_user:hbgsYPMDLe8p@cluster0.xoavnc.mongodb.net/';
   const client = new MongoClient(uri);
   try {
     await client.connect();

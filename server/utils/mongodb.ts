@@ -8,7 +8,8 @@ declare global {
   var _mongoClientPromise: Promise<MongoClient> | undefined
 }
 
-const uri = process.env.MONGODB_URI || 'mongodb+srv://admin_db_user:w3wD0fC2k0T9XjuU@cluster0.xjohmmi.mongodb.net/'
+// Dedicated M10 cluster (AWS us-east-1, same region as Vercel's default iad1).
+const uri = process.env.MONGODB_URI || 'mongodb+srv://shamsturboclean_db_user:hbgsYPMDLe8p@cluster0.xoavnc.mongodb.net/'
 
 const options = {
   serverApi: {
@@ -19,6 +20,14 @@ const options = {
   // Serverless-friendly timeouts
   serverSelectionTimeoutMS: 10000,
   connectTimeoutMS: 10000,
+  // Dedicated cluster: identify the app in Atlas metrics/profiler, retry transient
+  // failover blips (e.g. Atlas maintenance on M10), compress traffic on the wire.
+  appName: 'zrz-turboclean',
+  retryWrites: true,
+  retryReads: true,
+  compressors: ['zlib' as const],
+  // Close idle sockets so frozen serverless instances don't hold connections open
+  maxIdleTimeMS: 60000,
 }
 
 function getClientPromise(): Promise<MongoClient> {

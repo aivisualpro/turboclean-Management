@@ -17,18 +17,20 @@ const activeTeam = ref(props.teams[0])
 <template>
   <SidebarMenu>
     <SidebarMenuItem>
-      <SidebarMenuButton size="lg" class="hover:bg-transparent hover:text-sidebar-foreground cursor-default">
-        <div class="aspect-square size-8 flex items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground overflow-hidden">
-          <img src="/logo.png" alt="Turbo Clean Logo" class="size-8 object-cover" />
+      <SidebarMenuButton size="lg" class="h-11 py-0 hover:bg-transparent hover:text-sidebar-foreground cursor-default">
+        <div class="aspect-square size-8 flex items-center justify-center">
+          <img src="/logo.png" alt="ZRZ OPS logo" class="size-8 object-contain" />
         </div>
         <div class="grid flex-1 text-left text-sm leading-tight">
-          <span class="truncate font-semibold grow capitalize text-lg tracking-tight">
-            Turbo Clean
+          <span class="truncate font-semibold grow text-lg tracking-tight">
+            ZRZ OPS
           </span>
         </div>
       </SidebarMenuButton>
     </SidebarMenuItem>
   </SidebarMenu>
+  <!-- Same height as the main header (44px); the line lines up with the header's bottom edge -->
+  <hr class="-mt-2 h-0.5 border-0 rounded-full bg-primary">
 </template>
 
 <style scoped>
