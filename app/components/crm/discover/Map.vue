@@ -18,7 +18,9 @@ const props = withDefaults(defineProps<{
   scanning?: boolean
   showLegend?: boolean
   counts?: { new: number, in_crm: number, dismissed: number } | null
-}>(), { points: () => [], selected: () => new Set<string>(), focusedId: null, draggableOrigin: false, scanning: false, showLegend: true, counts: null })
+  /** false = the mouse wheel scrolls the page instead of zooming (use +/− or double-click). */
+  wheelZoom?: boolean
+}>(), { points: () => [], selected: () => new Set<string>(), focusedId: null, draggableOrigin: false, scanning: false, showLegend: true, counts: null, wheelZoom: true })
 
 const emit = defineEmits<{
   (e: 'select', id: string, additive: boolean): void
@@ -156,7 +158,7 @@ onMounted(async () => {
   await import('leaflet/dist/leaflet.css')
   if (!el.value) return
   // Set a view first: Leaflet only attaches layers once the map has a centre and zoom.
-  map = L.map(el.value, { zoomControl: false, attributionControl: true, worldCopyJump: true, scrollWheelZoom: true })
+  map = L.map(el.value, { zoomControl: false, attributionControl: true, worldCopyJump: true, scrollWheelZoom: props.wheelZoom })
     .setView([props.origin.lat, props.origin.lng], 8)
   L.control.zoom({ position: 'bottomright' }).addTo(map)
   renderer = L.canvas({ padding: 0.5 })

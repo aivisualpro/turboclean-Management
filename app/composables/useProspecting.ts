@@ -17,10 +17,10 @@ export interface ProspectingConfig {
 }
 export interface ProspectingConfigResponse { config: ProspectingConfig, apiKeyConfigured: boolean, pricing: { pricePer1000: number, freeMonthlyCalls: number } }
 
-export type ScanStatus = 'running' | 'completed' | 'cancelled' | 'failed' | 'budget'
+export type ProspectScanStatus = 'running' | 'completed' | 'cancelled' | 'failed' | 'budget'
 export interface ScanSummary {
   id: string
-  status: ScanStatus
+  status: ProspectScanStatus
   params: Omit<ProspectingConfig, 'defaultStage'>
   cellsDone: number
   cellsQueued: number

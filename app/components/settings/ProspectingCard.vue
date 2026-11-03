@@ -196,6 +196,7 @@ function resetDefaults() { form.value = structuredClone(DEFAULTS) }
             :origin="{ lat: Number(form.origin.lat), lng: Number(form.origin.lng) }"
             :radius-miles="Number(form.radiusMiles) || 1"
             :show-legend="false"
+            :wheel-zoom="false"
             draggable-origin
             @update:origin="v => { form.origin.lat = v.lat; form.origin.lng = v.lng }"
           />

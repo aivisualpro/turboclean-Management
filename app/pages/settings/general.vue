@@ -104,7 +104,7 @@ async function saveSettings() {
       <Loader2 class="size-6 animate-spin text-primary" />
     </div>
 
-    <div v-else-if="tab === 'automations'" class="space-y-2 animate-in fade-in duration-300">
+    <div v-else-if="tab === 'automations'" class="shrink-0 space-y-2 animate-in fade-in duration-300">
       <!-- Automations Card -->
       <div class="rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden">
         <div class="border-b bg-muted/30 p-5 flex items-center gap-3">
@@ -259,7 +259,8 @@ async function saveSettings() {
     </div>
 
     <!-- Prospecting search area (used by "Search Web" on /crm/dealership) -->
-    <SettingsProspectingCard v-if="visited.has('prospecting')" v-show="tab === 'prospecting'" class="animate-in fade-in duration-300" />
+    <!-- shrink-0: a flex child with overflow-hidden would otherwise shrink to the viewport and clip instead of scrolling -->
+    <SettingsProspectingCard v-if="visited.has('prospecting')" v-show="tab === 'prospecting'" class="shrink-0 animate-in fade-in duration-300" />
    </div>
   </div>
 </template>

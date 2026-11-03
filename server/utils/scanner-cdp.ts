@@ -142,6 +142,9 @@ export async function openBrowser(): Promise<BrowserHandle> {
     binary = sl.binary
     args = [
       ...sl.args,
+      // Serverless functions (Vercel / Lambda) have no /dev/shm — Chromium must use /tmp for shared memory.
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
       '--remote-debugging-pipe',
       `--user-data-dir=${profile}`,
       '--no-first-run', '--disable-background-networking', '--disable-sync', '--disable-extensions', '--disable-component-update',
@@ -164,6 +167,8 @@ export async function openBrowser(): Promise<BrowserHandle> {
     '--enable-experimental-web-platform-features', // Shape Detection API (TextDetector) for reading "Photos coming soon" banners
     // Containers running as root can't use Chrome's sandbox.
     process.platform === 'linux' && process.getuid?.() === 0 ? '--no-sandbox' : '',
+    // Docker / small Linux servers often have a tiny or missing /dev/shm.
+    process.platform === 'linux' ? '--disable-dev-shm-usage' : '',
     '--mute-audio', '--hide-scrollbars', '--force-color-profile=srgb', '--lang=en-US',
     `--window-size=${SCANNER_VIEWPORT.width},${SCANNER_VIEWPORT.height}`,
     'about:blank',

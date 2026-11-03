@@ -406,7 +406,7 @@ export type ProspectResult = ReturnType<typeof enrich>
 // ─────────────────────────────────────────── Scans ───────────────────────────────────────────
 
 export type ScanParams = Pick<ProspectingConfig, 'origin' | 'radiusMiles' | 'queries' | 'includedType' | 'strictType' | 'excludeKeywords' | 'minReviews' | 'maxApiCalls'>
-export type ScanStatus = 'running' | 'completed' | 'cancelled' | 'failed' | 'budget'
+export type ProspectScanStatus = 'running' | 'completed' | 'cancelled' | 'failed' | 'budget'
 
 let _indexes = false
 export async function ensureProspectIndexes(db: Db) {
@@ -426,7 +426,7 @@ function summarize(scan: any) {
   const done = scan.cellsDone || 0
   return {
     id: scan._id.toString(),
-    status: scan.status as ScanStatus,
+    status: scan.status as ProspectScanStatus,
     params: scan.params as ScanParams,
     cellsDone: done,
     cellsQueued: remaining,
@@ -455,7 +455,7 @@ export async function startScan(db: Db, overrides: Partial<ScanParams>, actor: S
   const queue = planGrid(params.origin, params.radiusMiles, params.queries)
   const now = new Date().toISOString()
   const doc = {
-    status: 'running' as ScanStatus,
+    status: 'running' as ProspectScanStatus,
     params: { origin: params.origin, radiusMiles: params.radiusMiles, queries: params.queries, includedType: params.includedType, strictType: params.strictType, excludeKeywords: params.excludeKeywords, minReviews: params.minReviews, maxApiCalls: params.maxApiCalls },
     queue,
     cellsDone: 0,
@@ -526,7 +526,7 @@ export async function stepScan(db: Db, scanId: string) {
   const fresh: ProspectPlace[] = []
   const log: { at: string, msg: string }[] = []
   let apiCalls = scan.apiCalls || 0, cellsDone = scan.cellsDone || 0, excluded = scan.excluded || 0, splits = scan.splits || 0
-  let status: ScanStatus = 'running', error = '', skippedAreas = 0, lastError = ''
+  let status: ProspectScanStatus = 'running', error = '', skippedAreas = 0, lastError = ''
   const started = Date.now()
 
   while (queue.length && Date.now() - started < STEP_BUDGET_MS) {
