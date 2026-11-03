@@ -61,6 +61,7 @@ export const AUTOMATIONS: AutomationDef[] = [
   { key: 'next_action', n: 13, title: 'Suggest the next action', group: 'respond', kind: 'scheduled', everyMinutes: 6 * 60, does: 'Works out the single most useful next step for each dealership.' },
   { key: 'strategy', n: 14, title: 'What produces contracts', group: 'learn', kind: 'scheduled', everyMinutes: 7 * 24 * 60, does: 'Every week, compares templates, channels, markets and contacts to show what actually wins dealerships.' },
   { key: 'crm_feed', n: 15, title: 'Feed results back into the CRM', group: 'learn', kind: 'always', does: 'Every email, reply, stage move, next action and score an automation produces is written to the CRM automatically.' },
+  { key: 'brain', n: 16, title: 'Learn & improve (Brain)', group: 'learn', kind: 'scheduled', everyMinutes: 24 * 60, does: 'Studies every approval, edit, skip, reply correction and result, and updates the playbook every AI suggestion follows.' },
 ]
 export const automationDef = (key: string) => AUTOMATIONS.find(a => a.key === key)
 
@@ -228,6 +229,7 @@ async function loadJob(key: string): Promise<JobFn | null> {
     case 'priority': return (await import('./automation-scoring')).priorityJob
     case 'next_action': return (await import('./automation-scoring')).nextActionJob
     case 'strategy': return (await import('./automation-insights')).strategyJob
+    case 'brain': return (await import('./brain')).reflectJob as any
     default: return null
   }
 }
@@ -284,7 +286,7 @@ export async function logEventRun(db: Db, key: string, summary: string, stats: R
 }
 
 /** Called by the scheduler every minute. Order matters a little: replies before follow-ups, scoring after research. */
-const TICK_ORDER = ['classify_replies', 'send_approved', 'research_summaries', 'missing_photos', 'schedule_followups', 'draft_emails', 'priority', 'next_action', 'strategy']
+const TICK_ORDER = ['classify_replies', 'send_approved', 'research_summaries', 'missing_photos', 'schedule_followups', 'draft_emails', 'priority', 'next_action', 'strategy', 'brain']
 export async function runDueAutomations(db: Db) {
   const ran: any[] = []
   for (const key of TICK_ORDER) {

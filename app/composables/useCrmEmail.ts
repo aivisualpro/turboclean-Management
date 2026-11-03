@@ -85,7 +85,7 @@ export interface EmailStatsRow {
   conversation: number, meeting: number, opportunity: number, proposal: number, won: number, dealershipsReached: number
 }
 export interface EmailStats { rows: EmailStatsRow[], unclassifiedReplies: number, unmatchedReplies: number, attributionDays: number }
-export interface EmailConfig { fromEmail: string, fromBrand: string, replyTracking: 'reply-address' | 'sender-match', webhookSigned: boolean, canSend: boolean, minSample: number }
+export interface EmailConfig { fromEmail: string, fromBrand: string, replyTracking: 'reply-address' | 'sender-match', webhookSigned: boolean, canSend: boolean, minSample: number, aiConfigured?: boolean, aiModel?: string }
 
 export interface SendEmailInput {
   contactId?: string | null
@@ -155,5 +155,6 @@ export function useCrmEmail() {
     return res.campaign
   }
 
-  return { templates, campaigns, config, loadLibrary, sendEmail, listEmails, getEmail, updateEmail, getStats, getExperiments, previewEmail, getSenderProfile, saveSenderProfile, uploadImage, saveTemplate, saveCampaign }
+  const getDeliverability = () => $fetch<{ domain: string, from: string, score: number, items: { key: string, label: string, status: 'ok' | 'warn' | 'fail', detail: string, fix?: string }[], checkedAt: string }>('/api/crm/email/deliverability')
+  return { getDeliverability, templates, campaigns, config, loadLibrary, sendEmail, listEmails, getEmail, updateEmail, getStats, getExperiments, previewEmail, getSenderProfile, saveSenderProfile, uploadImage, saveTemplate, saveCampaign }
 }

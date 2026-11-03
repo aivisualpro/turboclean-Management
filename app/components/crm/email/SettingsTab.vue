@@ -1,10 +1,18 @@
 <script setup lang="ts">
 import type { SenderProfile } from '~/composables/useCrmEmail'
-import { Loader2, UserRound, Server, CheckCircle2, AlertTriangle } from 'lucide-vue-next'
+import { Loader2, UserRound, Server, CheckCircle2, AlertTriangle, XCircle, MailCheck, RefreshCw } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 /** Your sender profile (the signature block templates use) + a read-only view of the sending setup. */
-const { getSenderProfile, saveSenderProfile, config, loadLibrary } = useCrmEmail()
+const { getSenderProfile, saveSenderProfile, config, loadLibrary, getDeliverability } = useCrmEmail()
+// Inbox placement: SPF / DKIM / DMARC / bounces / complaints / volume
+const dl = ref<Awaited<ReturnType<typeof getDeliverability>> | null>(null)
+const checking = ref(false)
+async function check() {
+  checking.value = true
+  try { dl.value = await getDeliverability() } catch { toast.error('Could not check the sending domain') } finally { checking.value = false }
+}
+onMounted(check)
 const form = ref<SenderProfile>({ displayName: '', title: '', company: '', phone: '', email: '', tagline: '', region: '' })
 const loading = ref(true)
 const saving = ref(false)
@@ -40,6 +48,7 @@ const FIELDS: { key: keyof SenderProfile, label: string, ph: string, merge: stri
       </form>
     </section>
 
+    <div class="space-y-5">
     <section class="rounded-xl border bg-card h-fit">
       <header class="px-5 py-3.5 border-b"><h3 class="font-semibold text-sm flex items-center gap-2"><Server class="size-4 text-muted-foreground" /> Sending setup</h3></header>
       <ul v-if="config" class="p-5 space-y-3 text-sm">
@@ -49,5 +58,29 @@ const FIELDS: { key: keyof SenderProfile, label: string, ph: string, merge: stri
         <li class="flex items-start gap-2"><component :is="config.webhookSigned ? CheckCircle2 : AlertTriangle" class="size-4 mt-0.5 shrink-0" :class="config.webhookSigned ? 'text-emerald-600' : 'text-amber-600'" /><span>{{ config.webhookSigned ? 'Webhook signatures verified' : 'Webhook not verified — set RESEND_WEBHOOK_SECRET' }}</span></li>
       </ul>
     </section>
+
+    <section class="rounded-xl border bg-card h-fit">
+      <header class="px-5 py-3.5 border-b flex items-center gap-2">
+        <h3 class="font-semibold text-sm flex items-center gap-2"><MailCheck class="size-4 text-muted-foreground" /> Inbox placement</h3>
+        <Button variant="ghost" size="sm" class="h-7 ml-auto gap-1 text-xs" :disabled="checking" @click="check"><RefreshCw class="size-3.5" :class="checking && 'animate-spin'" /> Check</Button>
+      </header>
+      <div v-if="!dl" class="p-8 flex justify-center"><Loader2 class="size-5 animate-spin text-muted-foreground" /></div>
+      <div v-else class="p-5 space-y-4">
+        <div class="flex items-center gap-3">
+          <div class="relative size-14 shrink-0">
+            <svg viewBox="0 0 36 36" class="size-14 -rotate-90"><circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" class="text-muted" stroke-width="3" /><circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" :class="dl.score >= 85 ? 'text-emerald-500' : dl.score >= 65 ? 'text-amber-500' : 'text-rose-500'" stroke-width="3" stroke-linecap="round" :stroke-dasharray="`${(dl.score / 100) * 97.4} 97.4`" /></svg>
+            <span class="absolute inset-0 flex items-center justify-center text-sm font-bold tabular-nums">{{ dl.score }}</span>
+          </div>
+          <div class="min-w-0"><p class="text-sm font-semibold">{{ dl.score >= 85 ? 'Ready for the inbox' : dl.score >= 65 ? 'Almost there' : 'Fix these before sending' }}</p><p class="text-[11px] text-muted-foreground truncate">{{ dl.domain }} · checked just now</p></div>
+        </div>
+        <ul class="space-y-2.5">
+          <li v-for="i in dl.items" :key="i.key" class="flex gap-2 text-xs">
+            <CheckCircle2 v-if="i.status === 'ok'" class="size-4 shrink-0 text-emerald-600" /><AlertTriangle v-else-if="i.status === 'warn'" class="size-4 shrink-0 text-amber-600" /><XCircle v-else class="size-4 shrink-0 text-rose-600" />
+            <div class="min-w-0"><p class="font-medium">{{ i.label }}</p><p class="text-muted-foreground break-words">{{ i.detail }}</p><p v-if="i.fix" class="mt-0.5 text-foreground/80">→ {{ i.fix }}</p></div>
+          </li>
+        </ul>
+      </div>
+    </section>
+    </div>
   </div>
 </template>

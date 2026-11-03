@@ -54,16 +54,21 @@ function setTiles() {
   if (!L || !map) return
   const dark = colorMode.value === 'dark'
   tiles?.remove()
-  tiles = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? 'dark_all' : 'light_all'}/{z}/{x}/{y}{r}.png`, {
-    subdomains: 'abcd',
+  // OpenStreetMap tiles (no key). Toned down in light mode, inverted for dark mode via CSS (.zrz-map-dark).
+  tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   }).addTo(map)
+  el.value?.classList.toggle('zrz-map-dark', dark)
 }
 
+/** Bounds of the range circle — computed from the centre, so it works before the circle is drawn. */
+function rangeBounds() {
+  return L!.latLng(props.origin.lat, props.origin.lng).toBounds(props.radiusMiles * METERS_PER_MILE * 2)
+}
 function radarSizePx() {
-  if (!map || !circle) return 0
-  const b = circle.getBounds()
+  if (!map || !L) return 0
+  const b = rangeBounds()
   const a = map.latLngToLayerPoint(b.getNorthWest()), c = map.latLngToLayerPoint(b.getSouthEast())
   return Math.max(40, Math.round(Math.abs(c.x - a.x)))
 }
@@ -141,8 +146,8 @@ function drawPoints() {
 function escapeHtml(s: string) { return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' }[c]!)) }
 
 function fitRadius(animate = false) {
-  if (!map || !circle) return
-  map.fitBounds(circle.getBounds(), { padding: [16, 16], animate })
+  if (!map || !L) return
+  map.fitBounds(rangeBounds(), { padding: [16, 16], animate })
 }
 
 onMounted(async () => {
@@ -150,7 +155,9 @@ onMounted(async () => {
   L = (mod.default ?? mod) as typeof Leaflet
   await import('leaflet/dist/leaflet.css')
   if (!el.value) return
+  // Set a view first: Leaflet only attaches layers once the map has a centre and zoom.
   map = L.map(el.value, { zoomControl: false, attributionControl: true, worldCopyJump: true, scrollWheelZoom: true })
+    .setView([props.origin.lat, props.origin.lng], 8)
   L.control.zoom({ position: 'bottomright' }).addTo(map)
   renderer = L.canvas({ padding: 0.5 })
   layer = L.layerGroup().addTo(map)
@@ -239,6 +246,8 @@ defineExpose({ flyTo, fitRadius })
 .zrz-tip { display: flex; flex-direction: column; gap: 1px; font-size: 12px; line-height: 1.3; }
 .zrz-tip span { color: #71717a; font-size: 11px; }
 .leaflet-container { font-family: inherit; background: transparent; }
+.leaflet-tile-pane { filter: saturate(.55) contrast(.95) brightness(1.03); }
+.zrz-map-dark .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) saturate(.35) brightness(.85) contrast(.9); }
 .leaflet-control-attribution { font-size: 10px; }
 @media (prefers-reduced-motion: reduce) { .zrz-radar-sweep, .zrz-base-ring { animation: none; } }
 </style>

@@ -81,6 +81,8 @@ interface DraftContent { subjectTemplate: string, body: string, format: 'html' |
 async function aiFirstTouch(d: any, contact: any, baseText: string, subject: string) {
   const s = d.researchSummary
   const res = await askClaudeJson<{ body: string }>({
+    purpose: 'draft.first_touch',
+    brain: 'writing',
     system: 'You write short, plain, human cold emails from a vehicle reconditioning / merchandising company to car dealership managers. No hype, no emojis, no exclamation marks. Never invent numbers, names, prices or facts — use only what you are given. Do not add a greeting name you were not given. Do not add a signature (it is added for you).',
     prompt: `Rewrite this email so it reads as written personally for this dealership. Keep every number exactly as given and keep the same call to action. Max 120 words.\n\nRecipient: ${contact.firstName || ''} ${contact.lastName || ''}, ${contact.jobTitle || contact.role || ''}\nDealership: ${d.name}${d.city ? `, ${d.city}` : ''}${d.state ? ` ${d.state}` : ''}\nResearch: ${s?.facts || ''}\n${s?.angle ? `Angle: ${s.angle}\n` : ''}Subject: ${subject}\n\nOriginal email:\n${baseText}\n\nReturn {"body": "..."}.`,
     maxTokens: 700,
@@ -91,6 +93,8 @@ async function aiFirstTouch(d: any, contact: any, baseText: string, subject: str
 
 async function aiFollowUp(d: any, contact: any, previous: any, n: number) {
   const res = await askClaudeJson<{ body: string }>({
+    purpose: 'draft.follow_up',
+    brain: 'writing',
     system: 'You write very short, polite follow-up emails (2–4 sentences) from a vehicle reconditioning / merchandising company to a car dealership manager who has not replied. No guilt-tripping, no emojis. Never invent facts. No signature (it is added for you).',
     prompt: `This is follow-up #${n} to ${contact.firstName || 'the manager'} (${contact.jobTitle || contact.role || ''}) at ${d.name}. ${n >= 3 ? 'This is the last one — close the loop politely.' : 'Add one new, useful reason to reply.'}\nResearch: ${d.researchSummary?.facts || ''}\n\nPrevious email (subject “${previous.subject}”):\n${String(previous.bodyText || '').slice(0, 1500)}\n\nReturn {"body": "..."}.`,
     maxTokens: 400,
@@ -346,6 +350,15 @@ export async function updateDraft(db: Db, id: string, body: any, actor: SessionA
   }
   const merged = { ...d, ...$set }
   Object.assign($set, await renderPreview(db, dealership, merged.contactId, merged), { edited: true, editedAt: $set.updatedAt, editedBy: who(actor) })
+  // Brain: what the person changed is the most valuable writing lesson there is.
+  if ((typeof body?.body === 'string' && body.body.trim() !== String(d.body || '').trim()) || (typeof body?.subject === 'string' && body.subject.trim() !== String(d.subjectTemplate || '').trim())) {
+    const { recordSignal } = await import('./brain')
+    const before = d.body ? String(d.body) : htmlToText(String(d.previewHtml || ''))
+    await recordSignal(db, 'draft.edited', 'writing', {
+      beforeSubject: d.subjectTemplate, afterSubject: merged.subjectTemplate, before: before.slice(0, 3000), after: String(merged.body || '').slice(0, 3000),
+      kind: d.kind, writtenBy: d.writtenBy, templateName: d.templateName || '', templateVersionLabel: d.templateVersionLabel || '',
+    }, { actor, dealershipId: d.dealershipId, refId: d._id.toString() })
+  }
   if (d.status === 'failed') { $set.status = 'pending'; $set.error = null }
   await drafts.updateOne({ _id: d._id }, { $set })
   return serializeDraft(await drafts.findOne({ _id: d._id }))
@@ -358,6 +371,10 @@ export async function rejectDraft(db: Db, id: string, reason: string, actor: Ses
   if (!['pending', 'approved', 'failed'].includes(d.status)) throw createError({ statusCode: 409, statusMessage: `This draft is already ${d.status}` })
   const now = new Date().toISOString()
   await drafts.updateOne({ _id: d._id }, { $set: { status: 'rejected', rejectedAt: now, rejectedBy: who(actor), rejectReason: str(reason, 300) || 'Skipped', updatedAt: now } })
+  {
+    const { recordSignal } = await import('./brain')
+    await recordSignal(db, 'draft.rejected', 'writing', { reason: str(reason, 300) || 'Skipped', subject: d.subject || d.subjectTemplate, body: String(d.body || htmlToText(String(d.previewHtml || ''))).slice(0, 1500), kind: d.kind, writtenBy: d.writtenBy, templateName: d.templateName || '' }, { actor, dealershipId: d.dealershipId, refId: d._id.toString() })
+  }
   await logAutomation(db, d.dealershipId, `${d.kind === 'follow_up' ? `Follow-up #${d.followUpNumber}` : 'First-email'} draft skipped by ${actor?.name || 'someone'}${reason ? ` — ${str(reason, 300)}` : ''}`)
   return serializeDraft(await drafts.findOne({ _id: d._id }))
 }
@@ -372,6 +389,10 @@ export async function approveDraft(db: Db, id: string, actor: SessionActor | nul
   const s = await getSettings(db)
   const now = new Date().toISOString()
   await drafts.updateOne({ _id: d._id }, { $set: { status: 'approved', approvedAt: d.approvedAt || now, approvedBy: d.approvedBy || who(actor), error: null, updatedAt: now } })
+  if (d.status === 'pending' && !d.edited) {
+    const { recordSignal } = await import('./brain')
+    await recordSignal(db, 'draft.approved', 'writing', { subject: d.subject || d.subjectTemplate, writtenBy: d.writtenBy, kind: d.kind, templateName: d.templateName || '', templateVersionLabel: d.templateVersionLabel || '' }, { actor, dealershipId: d.dealershipId, refId: d._id.toString() })
+  }
   const sentToday = await sentTodayCount(db)
   const canSend = sentToday < s.dailySendLimit && (opts.sendNow || inSendWindow(s))
   if (!canSend) {

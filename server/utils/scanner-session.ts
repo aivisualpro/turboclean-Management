@@ -572,7 +572,12 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
     ...sum.counts,
     source: 'automated',
     inventoryUrl: pages[0] || doc.startUrl,
-    examples: without.filter(v => v.url).slice(0, 25).map(v => ({ url: v.url, label: `${v.title}${v.stock ? ` #${v.stock}` : ''} — ${VERDICT_LABEL[finalVerdict(v, cmap)]}` })),
+    // Used cars first, then "No photo" before stock images — the strongest evidence leads.
+    examples: without.filter(v => v.url)
+      .sort((a, b) => (Number(a.condition === 'new') - Number(b.condition === 'new')) || (Number(finalVerdict(a, cmap) === 'stock') - Number(finalVerdict(b, cmap) === 'stock')))
+      .slice(0, 25)
+      .map((v) => { const f = finalVerdict(v, cmap); return { url: v.url, label: `${v.title}${v.stock ? ` #${v.stock}` : ''} — ${VERDICT_LABEL[f]}`, title: v.title, stock: v.stock, price: v.price, condition: v.condition, verdict: f } }),
+    photoBreakdown: { real: sum.by.real, placeholder: sum.by.placeholder, missing: sum.by.missing, stock: sum.by.stock, countStockAsMissing: doc.countStockAsMissing },
     merchandisingIssues: [
       ...(sum.by.missing + sum.by.placeholder ? ['Vehicles listed with no photos (placeholder / “photos unavailable”)'] : []),
       ...(sum.by.stock ? ['Stock images instead of real photos'] : []),

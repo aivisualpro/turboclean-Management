@@ -20,7 +20,9 @@
  *   replied → conversation → meeting → (opportunity) → proposal → won
  * Reaching a later stage implies the earlier ones (a meeting implies a conversation happened).
  */
+import { createHmac as createHmacNode } from 'node:crypto'
 import { ObjectId } from 'mongodb'
+import { auditBreakdown, auditEvidence, newInventoryNote, RAW_HTML_FIELDS, usedPhotoBar } from './crm-email-blocks'
 import type { Db } from 'mongodb'
 import { Resend } from 'resend'
 import { CRM_COLLECTIONS, OPEN_STAGE_ORDER, logActivity, str } from './crm'
@@ -90,9 +92,12 @@ export function serializeEmail(doc: any, opts: { withBody?: boolean } = {}) {
  */
 export const MERGE_FIELDS = [
   'firstName', 'lastName', 'fullName', 'contactTitle', 'dealership', 'dealerGroup', 'city', 'state', 'website',
-  'senderName', 'senderFirstName', 'senderTitle', 'senderCompany', 'senderPhone', 'senderEmail', 'senderTagline', 'senderRegion',
+  'senderName', 'senderFirstName', 'senderInitials', 'senderTitle', 'senderCompany', 'senderPhone', 'senderEmail', 'senderTagline', 'senderRegion',
   'auditDate', 'auditDateUpper', 'usedTotal', 'usedMissingPhotos', 'usedMissingPhotoPct', 'newTotal', 'newMissingPhotos', 'newMissingPhotoPct',
   'totalVehicles', 'totalMissingPhotos', 'missingPhotoPct', 'inventoryUrl', 'auditScreenshot', 'replyMailto',
+  // Inventory Scanner detail + ready-made HTML blocks (see crm-email-blocks.ts)
+  'usedWithPhotos', 'placeholderImages', 'noImageCount', 'stockImages',
+  'auditEvidence', 'auditBreakdown', 'usedPhotoBar', 'newInventoryNote',
 ] as const
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 export interface SenderProfile { displayName: string, title: string, company: string, phone: string, email: string, tagline: string, region: string }
@@ -114,6 +119,7 @@ export function mergeVars(dealership: any, contact: any, sender: Partial<SenderP
     website: (dealership?.website || '').replace(/^https?:\/\//, '').replace(/\/$/, ''),
     senderName,
     senderFirstName: senderName.split(/\s+/)[0] || '',
+    senderInitials: senderName.split(/\s+/).filter(Boolean).slice(0, 2).map((w: string) => w[0]!.toUpperCase()).join(''),
     senderTitle: sender?.title || '',
     senderCompany: sender?.company || FROM_BRAND(),
     senderPhone: sender?.phone || '',
@@ -127,6 +133,14 @@ export function mergeVars(dealership: any, contact: any, sender: Partial<SenderP
     totalVehicles: n(audit?.totalVehicles), totalMissingPhotos: n(audit?.totalMissingPhotos), missingPhotoPct: p(audit?.missingPhotoPct),
     inventoryUrl: audit?.inventoryUrl || '',
     auditScreenshot: audit?.screenshotFileId ? '__AUDIT_SCREENSHOT__' : '',
+    usedWithPhotos: audit?.usedTotal != null && audit?.usedMissingPhotos != null ? String(Math.max(0, audit.usedTotal - audit.usedMissingPhotos)) : '',
+    placeholderImages: n(audit?.photoBreakdown?.placeholder),
+    noImageCount: n(audit?.photoBreakdown?.missing),
+    stockImages: n(audit?.photoBreakdown?.stock),
+    auditEvidence: audit ? auditEvidence({ ...audit, auditDateUpper: d ? `${MONTHS[d.getUTCMonth()]!.toUpperCase()} ${String(d.getUTCDate()).padStart(2, '0')}, ${d.getUTCFullYear()}` : '' }, { screenshot: audit?.screenshotFileId ? '__AUDIT_SCREENSHOT__' : '' }) : '',
+    auditBreakdown: audit ? auditBreakdown(audit) : '',
+    usedPhotoBar: audit ? usedPhotoBar(audit) : '',
+    newInventoryNote: audit ? newInventoryNote(audit) : '',
     replyMailto: extra.replyTo ? `mailto:${extra.replyTo}?subject=${encodeURIComponent(`Re: ${extra.subject || ''}`)}` : '',
   } as Record<string, string>
 }
@@ -135,7 +149,7 @@ export function renderMerge(text: string, vars: Record<string, string>, opts: { 
   const missing = new Set<string>()
   const out = String(text || '').replace(/\{\{\s*(\w+)\s*(?:\|\s*([^}]*))?\}\}/g, (_m, key: string, fallback?: string) => {
     const v = vars[key]
-    if (v) return opts.html && key !== 'auditScreenshot' ? esc(v) : v
+    if (v) return RAW_HTML_FIELDS.has(key) ? (opts.html ? v : htmlToText(v).trim()) : opts.html ? esc(v) : v
     if (fallback !== undefined) return opts.html ? esc(fallback.trim()) : fallback.trim()
     missing.add(key)
     return ''
@@ -152,12 +166,23 @@ export function textToHtml(text: string) {
 /** HTML → readable plain-text part (for the text/plain alternative and history notes). */
 export function htmlToText(html: string) {
   return String(html || '')
+    .replace(/<!--\[if mso\]>[\s\S]*?<!\[endif\]-->/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<(style|script|head)[\s\S]*?<\/\1>/gi, '')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|h[1-6]|tr|li|table)>/gi, '\n')
-    .replace(/<a [^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href, label) => `${label.replace(/<[^>]+>/g, '').trim()} (${href})`)
+    .replace(/<a [^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href: string, label: string) => {
+      const l = label.replace(/<[^>]+>/g, '').trim()
+      // tel:/mailto: links whose text already shows the number/address: keep just the text.
+      if (/^(tel|mailto):/i.test(href) && href.replace(/^(tel|mailto):/i, '').split('?')[0]!.replace(/\D/g, '') === l.replace(/\D/g, '')) return l
+      if (/^mailto:/i.test(href) && l.includes('@')) return l
+      return `${l} (${href})`
+    })
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&rarr;/g, '→').replace(/&mdash;/g, '—').replace(/&middot;/g, '·')
+    .replace(/&rsquo;|&lsquo;/g, "'").replace(/&ldquo;|&rdquo;/g, '"').replace(/&ndash;/g, '–').replace(/&hellip;/g, '…').replace(/&[a-z]+;/gi, ' ')
+    .replace(/&#(\d+);/g, (_m, c) => String.fromCodePoint(Number(c)))
+    .replace(/[\u2007\uFEFF\u034F\u200C]+/g, '')
     .replace(/[ \t]+\n/g, '\n').replace(/\n[ \t]+/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
@@ -549,7 +574,12 @@ export async function sendCrmEmail(db: Db, dealership: any, input: SendInput, ac
     html: bodyHtml,
     replyTo,
     ...(attachments.length ? { attachments } : {}),
-    ...(refs.length ? { headers: { 'In-Reply-To': refs.at(-1)!, 'References': refs.join(' ') } } : {}),
+    // Deliverability: one-click unsubscribe (RFC 8058, required by Gmail/Yahoo for bulk senders) + threading.
+    headers: {
+      'List-Unsubscribe': `<${unsubscribeUrl(id)}>, <mailto:${replyTo}?subject=unsubscribe>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+      ...(refs.length ? { 'In-Reply-To': refs.at(-1)!, 'References': refs.join(' ') } : {}),
+    },
     tags: [{ name: 'crm_email_id', value: id }, { name: 'source', value: 'crm' }],
   }
   const result: any = await resend.emails.send(payload).catch((e: any) => ({ error: { message: e?.message || String(e) } }))
@@ -602,6 +632,47 @@ export async function previewCrmEmail(db: Db, dealership: any, input: SendInput,
   return { subject: subj.text, html: textToHtml(b.text.replace(/__AUDIT_SCREENSHOT__/g, '')), format: 'text', missing: [...new Set([...subj.missing, ...b.missing])], auditDate: audit?.auditedAt || null }
 }
 
+/**
+ * Everything a template preview needs to render exactly like a real send, in the browser:
+ * the merge values (incl. the ready-made HTML blocks) for a real dealership — its latest audit and
+ * best contact — or for a realistic sample dealership. The sender is always the signed-in user's
+ * profile (sample values fill any blanks). The client fills {{fields}} itself, so previews update
+ * instantly while typing or while Template Studio is writing.
+ */
+export async function templatePreviewContext(db: Db, input: any, actor: SessionActor | null) {
+  const { SAMPLE_AUDIT, SAMPLE_CONTACT, SAMPLE_DEALERSHIP, SAMPLE_SENDER } = await import('./crm-email-blocks')
+  const replyTo = REPLY_DOMAIN() ? `reply+preview@${REPLY_DOMAIN()}` : (process.env.CRM_REPLY_TO || actor?.email || FROM_EMAIL())
+  const subject = str(input?.subject, 300)
+  let vars: Record<string, string>, audit: any, sender: SenderProfile
+  let source: 'sample' | 'dealership' = 'sample'
+  let to = { name: `${SAMPLE_CONTACT.firstName} ${SAMPLE_CONTACT.lastName}`, email: SAMPLE_CONTACT.email }
+  let dealershipName = SAMPLE_DEALERSHIP.name
+  if (input?.dealershipId && ObjectId.isValid(String(input.dealershipId))) {
+    const dealership = await db.collection(CRM_COLLECTIONS.dealerships).findOne({ _id: new ObjectId(String(input.dealershipId)) })
+    if (!dealership) throw createError({ statusCode: 404, statusMessage: 'Dealership not found' })
+    const contacts = await db.collection(CRM_COLLECTIONS.contacts).find({ dealershipId: dealership._id.toString() }).toArray()
+    const { pickEmailContact } = await import('./automation-research')
+    const contact = pickEmailContact(contacts) || contacts[0] || null
+    const ctx = await mergeContext(db, dealership, contact, actor, { replyTo, subject })
+    vars = ctx.vars; audit = ctx.audit; sender = ctx.sender; source = 'dealership'
+    to = { name: contact ? `${contact.firstName || ''} ${contact.lastName || ''}`.trim() : '', email: contact?.email || '' }
+    dealershipName = dealership.name || ''
+  }
+  else {
+    const mine = await getSenderProfile(db, actor)
+    sender = { ...SAMPLE_SENDER, ...Object.fromEntries(Object.entries(mine).filter(([, v]) => v)) } as SenderProfile
+    audit = SAMPLE_AUDIT
+    vars = mergeVars(SAMPLE_DEALERSHIP, SAMPLE_CONTACT, sender, SAMPLE_AUDIT, { replyTo, subject })
+  }
+  return {
+    source, dealershipName, vars, rawFields: [...RAW_HTML_FIELDS],
+    screenshotHtml: audit?.screenshotFileId ? `<img src="/api/crm/files/${audit.screenshotFileId}" alt="Inventory page screenshot" style="display:block;width:100%;max-width:600px;height:auto;border:0" />` : '',
+    hasAudit: !!audit, auditDate: audit?.auditedAt || null,
+    from: { name: sender.displayName ? `${sender.displayName} | ${sender.company || FROM_BRAND()}` : FROM_BRAND(), email: FROM_EMAIL() },
+    to,
+  }
+}
+
 /** Move a live, unconverted dealership forward to `target` (never backwards, never out of Lost/Won). */
 async function advanceStage(db: Db, dealership: any, target: string, actor: SessionActor | null, note: string) {
   const fresh = await db.collection(CRM_COLLECTIONS.dealerships).findOne({ _id: dealership._id })
@@ -610,6 +681,97 @@ async function advanceStage(db: Db, dealership: any, target: string, actor: Sess
   if (cur === -1 || to === -1 || to <= cur) return
   const { moveStage } = await import('./crm-stage')
   await moveStage(db, fresh, target, actor, 'email' as any, note)
+}
+
+// ───────────────────────── Unsubscribe (deliverability) ─────────────────────────
+const createHmacSync = (key: string, data: string) => createHmacNode('sha256', key).update(data).digest('hex')
+const PUBLIC_URL = () => (process.env.CRM_PUBLIC_URL || process.env.NUXT_PUBLIC_SITE_URL || 'https://zrzops.com').replace(/\/$/, '')
+function unsubscribeSecret() {
+  return process.env.CRM_UNSUBSCRIBE_SECRET || process.env.RESEND_WEBHOOK_SECRET || process.env.RESEND_API_KEY || 'zrz-unsubscribe'
+}
+export function unsubscribeToken(emailId: string) {
+  return createHmacSync(unsubscribeSecret(), `unsub:${emailId}`).slice(0, 32)
+}
+export function unsubscribeUrl(emailId: string) {
+  return `${PUBLIC_URL()}/api/crm/email/unsubscribe/${emailId}?t=${unsubscribeToken(emailId)}`
+}
+/** Mark the recipient of an email as "do not email" (one-click unsubscribe link / button). */
+export async function unsubscribeByEmail(db: Db, emailId: string, token: string) {
+  if (!ObjectId.isValid(emailId) || token !== unsubscribeToken(emailId)) throw createError({ statusCode: 400, statusMessage: 'This unsubscribe link is not valid' })
+  const { emails } = await emailDb(db)
+  const e = await emails.findOne({ _id: new ObjectId(emailId) })
+  if (!e) throw createError({ statusCode: 404, statusMessage: 'Email not found' })
+  const now = new Date().toISOString()
+  const contacts = db.collection(CRM_COLLECTIONS.contacts)
+  const filter: any = e.contactId && ObjectId.isValid(e.contactId) ? { _id: new ObjectId(e.contactId) } : { email: e.toEmail }
+  const r = await contacts.updateMany({ ...filter, doNotEmail: { $ne: true } }, { $set: { doNotEmail: true, doNotEmailAt: now, doNotEmailReason: 'Unsubscribed (email link)', updatedAt: now } })
+  await emails.updateOne({ _id: e._id }, { $set: { unsubscribedAt: now }, $push: { events: { type: 'unsubscribed', at: now } } as any })
+  if (r.modifiedCount && e.dealershipId) {
+    try {
+      const { cancelDrafts } = await import('./automation-outreach')
+      await cancelDrafts(db, { dealershipId: e.dealershipId }, 'Recipient unsubscribed')
+      await logActivity(db, { dealershipId: e.dealershipId, contactId: e.contactId || null, type: 'contact.updated', message: `${e.toEmail} unsubscribed from emails (one-click link) — marked “do not email”`, actor: { id: 'system', name: 'Email', email: '' } } as any)
+    } catch {}
+  }
+  return { email: e.toEmail, changed: r.modifiedCount > 0 }
+}
+
+// ───────────────────────── Deliverability check ─────────────────────────
+/**
+ * Inbox-placement health of the sending setup: SPF, DKIM, DMARC and bounce (return-path) records of
+ * the From domain, the reply domain, one-click unsubscribe, sending volume. Each item says how to fix it.
+ */
+export async function deliverabilityReport(db: Db) {
+  const dns = await import('node:dns/promises')
+  const from = FROM_EMAIL()
+  const domain = from.split('@')[1] || ''
+  const txt = async (host: string) => { try { return (await dns.resolveTxt(host)).map(r => r.join('')) } catch { return [] as string[] } }
+  const mx = async (host: string) => { try { return (await dns.resolveMx(host)).map(r => r.exchange) } catch { return [] as string[] } }
+  const [rootTxt, sendTxt, dkim, dmarc, sendMx] = await Promise.all([txt(domain), txt(`send.${domain}`), txt(`resend._domainkey.${domain}`), txt(`_dmarc.${domain}`), mx(`send.${domain}`)])
+  const items: { key: string, label: string, status: 'ok' | 'warn' | 'fail', detail: string, fix?: string }[] = []
+  const spf = [...sendTxt, ...rootTxt].find(t => /^v=spf1/i.test(t))
+  items.push(spf
+    ? { key: 'spf', label: 'SPF', status: /amazonses|resend/i.test(spf) || sendTxt.length ? 'ok' : 'warn', detail: spf }
+    : { key: 'spf', label: 'SPF', status: 'fail', detail: `No SPF record on ${domain} or send.${domain}`, fix: 'In Resend → Domains, copy the SPF (TXT) record for the "send" subdomain into your DNS.' })
+  items.push(dkim.some(t => /p=/.test(t))
+    ? { key: 'dkim', label: 'DKIM signature', status: 'ok', detail: `resend._domainkey.${domain} found` }
+    : { key: 'dkim', label: 'DKIM signature', status: 'fail', detail: `No DKIM key at resend._domainkey.${domain}`, fix: 'In Resend → Domains, add the DKIM (TXT) record and press Verify.' })
+  const dm = dmarc.find(t => /^v=DMARC1/i.test(t))
+  const policy = dm?.match(/;\s*p=(\w+)/i)?.[1]?.toLowerCase()
+  items.push(!dm
+    ? { key: 'dmarc', label: 'DMARC', status: 'fail', detail: `No DMARC record at _dmarc.${domain}`, fix: 'Add TXT _dmarc → "v=DMARC1; p=none; rua=mailto:dmarc@' + domain + '". Gmail and Yahoo require DMARC for senders.' }
+    : { key: 'dmarc', label: 'DMARC', status: 'ok', detail: `Policy p=${policy || 'none'}${policy === 'none' ? ' (fine to start; move to quarantine once reports look clean)' : ''}` })
+  items.push(sendMx.length
+    ? { key: 'returnpath', label: 'Bounce handling (return-path)', status: 'ok', detail: `MX on send.${domain}` }
+    : { key: 'returnpath', label: 'Bounce handling (return-path)', status: 'warn', detail: `No MX record on send.${domain}`, fix: 'Add the MX record Resend shows for the "send" subdomain so bounces are handled and SPF aligns.' })
+  const rd = REPLY_DOMAIN()
+  if (rd) {
+    const rmx = await mx(rd)
+    items.push(rmx.length ? { key: 'reply', label: 'Reply tracking domain', status: 'ok', detail: `${rd} receives mail (${rmx[0]})` } : { key: 'reply', label: 'Reply tracking domain', status: 'fail', detail: `${rd} has no MX record`, fix: 'Point the reply domain MX at Resend inbound, or replies will bounce.' })
+  }
+  items.push({ key: 'unsubscribe', label: 'One-click unsubscribe', status: 'ok', detail: 'List-Unsubscribe + List-Unsubscribe-Post headers on every email; an opt-out line in the template footer.' })
+  items.push({ key: 'text', label: 'Plain-text version', status: 'ok', detail: 'Every HTML email also carries a readable text/plain part.' })
+  try {
+    const { getSettings } = await import('./automation')
+    const st = await getSettings(db)
+    items.push(st.dailySendLimit > 60
+      ? { key: 'volume', label: 'Sending volume', status: 'warn', detail: `Daily limit is ${st.dailySendLimit}`, fix: 'For a new domain, start around 20–40 cold emails a day and raise it slowly over 3–4 weeks.' }
+      : { key: 'volume', label: 'Sending volume', status: 'ok', detail: `Daily limit ${st.dailySendLimit} — a safe pace for cold outreach` })
+  } catch {}
+  const { emails } = await emailDb(db)
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString()
+  const [sent, bounced, complained] = await Promise.all([
+    emails.countDocuments({ direction: 'outbound', sentAt: { $gte: since }, status: { $ne: 'failed' } }),
+    emails.countDocuments({ direction: 'outbound', sentAt: { $gte: since }, bouncedAt: { $ne: null } }),
+    emails.countDocuments({ direction: 'outbound', sentAt: { $gte: since }, complainedAt: { $ne: null } }),
+  ])
+  if (sent) {
+    const br = Math.round((bounced / sent) * 1000) / 10, cr = Math.round((complained / sent) * 1000) / 10
+    items.push({ key: 'bounces', label: 'Bounce rate (30 days)', status: br > 5 ? 'fail' : br > 2 ? 'warn' : 'ok', detail: `${br}% of ${sent}`, ...(br > 2 ? { fix: 'Verify addresses before sending; remove contacts that bounced.' } : {}) })
+    items.push({ key: 'complaints', label: 'Spam complaints (30 days)', status: cr >= 0.3 ? 'fail' : cr >= 0.1 ? 'warn' : 'ok', detail: `${cr}%`, ...(cr >= 0.1 ? { fix: 'Keep complaints under 0.1% (Gmail’s limit is 0.3%): tighter targeting, fewer follow-ups, clearer opt-out.' } : {}) })
+  }
+  const score = Math.round(100 * items.reduce((a, i) => a + (i.status === 'ok' ? 1 : i.status === 'warn' ? 0.5 : 0), 0) / items.length)
+  return { domain, from, score, items, checkedAt: new Date().toISOString() }
 }
 
 // ───────────────────────── Resend webhooks ─────────────────────────
@@ -1098,6 +1260,10 @@ export async function templateExperiments(db: Db, q: { from?: string, to?: strin
 
 // ───────────────────────── Seed: the "Missing Photos" HTML template ─────────────────────────
 export async function seedDefaultTemplates(db: Db) {
+  await seedMissingPhotosV1(db)
+  await seedMissingPhotosV2(db)
+}
+async function seedMissingPhotosV1(db: Db) {
   const counters = db.collection(CRM_COLLECTIONS.counters)
   const flag = await counters.findOne({ _id: 'crmEmailSeedV1' as any })
   if (flag?.done) return
@@ -1114,4 +1280,44 @@ export async function seedDefaultTemplates(db: Db) {
     }, null)
   }
   await counters.updateOne({ _id: 'crmEmailSeedV1' as any }, { $set: { done: true, finishedAt: new Date().toISOString() } })
+}
+
+/**
+ * V2 of "Missing Photos": the premium report built for Inventory Scanner audits (clickable listing
+ * evidence instead of a screenshot). Added once; it replaces V1 in rotation (V1 stays in the
+ * history and can be re-activated from the Templates tab). Also adds subject line S2 as an A/B test.
+ */
+async function seedMissingPhotosV2(db: Db) {
+  const counters = db.collection(CRM_COLLECTIONS.counters)
+  const flag = await counters.findOne({ _id: 'crmEmailSeedV2' as any })
+  if (flag?.done) return
+  const claim = await counters.updateOne({ _id: 'crmEmailSeedV2' as any, startedAt: { $exists: false } }, { $set: { startedAt: new Date().toISOString() } }, { upsert: true }).catch(() => null)
+  if (!claim || (!claim.upsertedCount && !claim.modifiedCount)) return
+  try {
+    const { templates } = await emailDb(db)
+    const { MISSING_PHOTOS_HTML_V2 } = await import('./crm-email-seed')
+    const note = 'Premium report — scanner evidence list, KPI cards, photo bar (no screenshot needed)'
+    const existing = await templates.findOne({ name: 'Missing Photos' })
+    if (!existing) {
+      await createTemplate(db, {
+        name: 'Missing Photos', category: 'First touch',
+        description: 'Inventory report from the latest audit: pre-owned vehicles without real photos, clickable listing evidence, recon / merchandise / monitor pitch, 10-minute review CTA.',
+        subject: '{{usedMissingPhotos}} vehicles at {{dealership}} are missing photos',
+        format: 'html', html: MISSING_PHOTOS_HTML_V2, label: 'V2', note,
+      }, null)
+    }
+    else if (!normalizeTemplate(existing).versions.some((v: any) => v.note === note)) {
+      await updateTemplate(db, existing._id.toString(), {
+        newVersion: { format: 'html', html: MISSING_PHOTOS_HTML_V2, label: `V${Math.max(0, ...normalizeTemplate(existing).versions.map((v: any) => Number(v.version) || 0)) + 1}`, note, retireOthers: true },
+        description: 'Inventory report from the latest audit: pre-owned vehicles without real photos, clickable listing evidence, recon / merchandise / monitor pitch, 10-minute review CTA.',
+        addSubject: { text: '{{dealership}}: {{usedMissingPhotos}} pre-owned listings without real photos', retireOthers: false },
+      }, null)
+    }
+    await counters.updateOne({ _id: 'crmEmailSeedV2' as any }, { $set: { done: true, finishedAt: new Date().toISOString() } })
+  }
+  catch (e: any) {
+    // Let it retry next time.
+    await counters.deleteOne({ _id: 'crmEmailSeedV2' as any }).catch(() => {})
+    throw e
+  }
 }

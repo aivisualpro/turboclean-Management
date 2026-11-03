@@ -93,6 +93,8 @@ export async function buildInsights(db: Db) {
   let aiSummary: { doMore: string[], doLess: string[], model: string } | null = null
   if (aiConfigured() && findings.length) {
     const res = await askClaudeJson<{ doMore: string[], doLess: string[] }>({
+      purpose: 'insights.summary',
+      brain: 'strategy',
       system: 'You are a sales-operations analyst. Using ONLY the numbers provided, say what this team should do more of and less of to win more dealership contracts. Short, concrete, no invented numbers. If a sample is small, say so.',
       prompt: `Findings:\n${findings.map(f => `- [${f.kind}] ${f.title}: ${f.detail}`).join('\n')}\n\nStanding questions:\n${allTime.insights.map((i: any) => `- ${i.question} → ${i.answer}${i.enough ? '' : ' (small sample)'}`).join('\n')}\n\nReturn {"doMore": up to 3 strings, "doLess": up to 3 strings}.`,
       maxTokens: 500,

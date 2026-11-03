@@ -124,6 +124,11 @@ export const navMenu: NavMenu[] = [
         icon: 'i-lucide-lightbulb',
         link: '/automations/insights',
       },
+      {
+        title: 'Brain',
+        icon: 'i-lucide-brain',
+        link: '/automations/brain',
+      },
     ],
   },
 ]

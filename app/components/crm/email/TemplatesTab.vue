@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { EmailTemplate, EmailTemplateVersion, ExperimentRow } from '~/composables/useCrmEmail'
-import { Plus, Loader2, Archive, ArchiveRestore, FileText, Code2, Type, Eye, FlaskConical, Pause, Play, Copy, Braces, ChevronRight } from 'lucide-vue-next'
+import { Plus, Loader2, Archive, ArchiveRestore, FileText, Code2, Type, Eye, FlaskConical, Pause, Play, Copy, Braces, ChevronRight, Sparkles, Wand2, Store } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { format } from 'date-fns'
-import { EMAIL_HTML_ONLY_FIELDS, EMAIL_MERGE_FIELDS, EMAIL_TEMPLATE_CATEGORIES, renderMergePreview } from '~/constants/crm'
+import { EMAIL_HTML_ONLY_FIELDS, EMAIL_MERGE_FIELDS, EMAIL_TEMPLATE_CATEGORIES } from '~/constants/crm'
 
 /**
  * Template library built for experiments.
@@ -28,24 +28,23 @@ const vStat = (id: string, v: number) => versionStats.value.find(r => r.template
 const sStat = (id: string, k: string) => subjectStats.value.find(r => r.templateId === id && r.subjectVariant === k)
 const fmtRate = (v: number | null | undefined) => v == null ? '—' : `${v}%`
 
-// ─── Sample data for previews ───
-const SAMPLE: Record<string, string> = {
-  firstName: 'Mike', lastName: 'Rivera', fullName: 'Mike Rivera', contactTitle: 'General Manager', dealership: 'Bleakley Kia', dealerGroup: 'Bleakley Auto Group',
-  city: 'Hartford', state: 'CT', website: 'bleakleykia.com', senderName: 'Shams Zia', senderFirstName: 'Shams', senderTitle: 'Owner', senderCompany: 'ZRZ OPS LLC',
-  senderPhone: '(203) 535-7655', senderEmail: 'szia@turbocleanusa.com', senderTagline: '', senderRegion: '',
-  auditDate: 'Oct 9, 2026', auditDateUpper: 'OCT 09, 2026', usedTotal: '171', usedMissingPhotos: '35', usedMissingPhotoPct: '20.5%', newTotal: '334', newMissingPhotos: '12', newMissingPhotoPct: '3.6%',
-  totalVehicles: '505', totalMissingPhotos: '47', missingPhotoPct: '9.3%', inventoryUrl: 'https://bleakleykia.com/used-inventory', auditScreenshot: '__SHOT__', replyMailto: 'mailto:reply@example.com',
+// ─── Previews (rendered exactly like a real send; sample data or a real dealership) ───
+const pv = useTemplatePreview()
+const tags = (keys: string[]) => keys.map(k => `{` + `{${k}}` + `}`).join(', ')
+const activeVersion = (t: EmailTemplate) => t.versions.find(v => v.version === t.currentVersion) || t.versions.find(v => v.status === 'active') || t.versions[t.versions.length - 1] || null
+const activeSubject = (t: EmailTemplate) => t.subjects.find(s => s.status === 'active')?.text || t.subjects[0]?.text || ''
+const thumbHtml = (t: EmailTemplate) => { const v = activeVersion(t); return v ? pv.render(v, activeSubject(t)).html : '' }
+
+// ─── Template Studio (AI) ───
+const showStudio = ref(false)
+const studioFor = ref<EmailTemplate | null>(null)
+const studioHtml = ref('')
+function openStudio(t: EmailTemplate | null = null, v: EmailTemplateVersion | null = null) {
+  studioFor.value = t
+  studioHtml.value = v?.format === 'html' ? (v.html || '') : ''
+  showStudio.value = true
 }
-const SHOT = '<div style="height:180px;background:repeating-linear-gradient(45deg,#e5efe8,#e5efe8 10px,#f1f7f3 10px,#f1f7f3 20px);display:flex;align-items:center;justify-content:center;color:#4b5563;font:12px Arial">Audit screenshot appears here</div>'
-function renderSample(v: { format: string, html?: string, body?: string }) {
-  if (v.format === 'html') {
-    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    const vars = Object.fromEntries(Object.entries(SAMPLE).map(([k, x]) => [k, k === 'auditScreenshot' ? x : esc(x)]))
-    return renderMergePreview(v.html || '', vars).text.replace(/__SHOT__/g, SHOT)
-  }
-  const t = renderMergePreview(v.body || '', SAMPLE).text.replace(/__SHOT__/g, '')
-  return `<!doctype html><html><body style="margin:16px;font:14px/1.55 Arial;color:#111;white-space:pre-wrap">${t.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</body></html>`
-}
+function studioSaved(t: EmailTemplate) { loadStats(); openDetail(t) }
 
 // ─── New template ───
 const showNew = ref(false)
@@ -80,6 +79,15 @@ async function patch(body: Record<string, any>, ok?: string) {
   try { await saveTemplate(detail.value.id, body); if (ok) toast.success(ok); loadStats() } catch (e: any) { toast.error(e?.data?.statusMessage || 'Could not update') }
 }
 const saveMeta = () => patch({ ...meta.value }, 'Template updated')
+// Big preview in the detail sheet
+const dpv = useTemplatePreview()
+const device = ref<'desktop' | 'mobile'>('desktop')
+const shownVersion = ref<number | null>(null)
+const shownSubject = ref<string>('')
+watch(detailId, () => { shownVersion.value = null; shownSubject.value = '' })
+const detailVersion = computed(() => detail.value ? (detail.value.versions.find(v => v.version === shownVersion.value) || activeVersion(detail.value)) : null)
+const detailSubject = computed(() => detail.value ? (detail.value.subjects.find(x => x.key === shownSubject.value)?.text || activeSubject(detail.value)) : '')
+const detailRendered = computed(() => detailVersion.value ? dpv.render(detailVersion.value, detailSubject.value) : null)
 
 // Version editor
 const showVersion = ref(false)
@@ -110,7 +118,6 @@ async function addSubject() {
   await patch({ addSubject: { text: newSubject.value.trim(), retireOthers: !subjectAB.value } }, subjectAB.value ? 'Subject line added — rotating with the others' : 'Subject line replaced')
   newSubject.value = ''
 }
-const previewVersion = ref<EmailTemplateVersion | null>(null)
 async function copyHtml(v: EmailTemplateVersion) { try { await navigator.clipboard.writeText(v.html || v.body); toast.success('Copied') } catch {} }
 </script>
 
@@ -119,17 +126,23 @@ async function copyHtml(v: EmailTemplateVersion) { try { await navigator.clipboa
     <div class="flex flex-wrap items-center gap-3">
       <p class="text-xs text-muted-foreground max-w-2xl">Body versions and subject lines are tracked separately. Run several at once to A/B test — new emails rotate between active ones, fewest sends first.</p>
       <label class="ml-auto inline-flex items-center gap-2 text-xs text-muted-foreground cursor-pointer"><Switch v-model="showArchived" /> Show archived</label>
-      <Button size="sm" class="gap-2" @click="openNew"><Plus class="size-4" /> New template</Button>
+      <Button size="sm" variant="outline" class="gap-2" @click="openNew"><Plus class="size-4" /> New template</Button>
+      <Button size="sm" class="gap-2 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white shadow-sm shadow-emerald-600/25" @click="openStudio()"><Sparkles class="size-4" /> Design with AI</Button>
     </div>
 
     <div v-if="!list.length" class="rounded-xl border-2 border-dashed py-12 flex flex-col items-center text-center">
       <FileText class="size-8 text-muted-foreground/50" />
       <p class="mt-2 font-semibold text-sm">No templates yet</p>
-      <Button size="sm" class="mt-4 gap-2" @click="openNew"><Plus class="size-4" /> New template</Button>
+      <div class="mt-4 flex gap-2"><Button size="sm" variant="outline" class="gap-2" @click="openNew"><Plus class="size-4" /> New template</Button><Button size="sm" class="gap-2" @click="openStudio()"><Sparkles class="size-4" /> Design with AI</Button></div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-      <button v-for="t in list" :key="t.id" type="button" class="text-left rounded-xl border bg-card p-4 flex flex-col gap-2 hover:border-primary/40 transition-colors" :class="t.archivedAt && 'opacity-60'" @click="openDetail(t)">
+    <div class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
+      <button v-for="t in list" :key="t.id" type="button" class="group text-left rounded-xl border bg-card overflow-hidden flex flex-col hover:border-primary/40 hover:shadow-md transition-all" :class="t.archivedAt && 'opacity-60'" @click="openDetail(t)">
+        <div class="relative border-b">
+          <CrmEmailTemplateThumb :html="thumbHtml(t)" :format="activeVersion(t)?.format || 'text'" />
+          <span class="absolute top-2 right-2 inline-flex items-center gap-1 rounded-full bg-background/90 backdrop-blur px-2 py-0.5 text-[10px] font-medium shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"><Eye class="size-3" /> Open preview</span>
+        </div>
+        <div class="p-4 flex flex-col gap-2 flex-1">
         <div class="flex items-start gap-2">
           <div class="min-w-0 flex-1">
             <p class="font-semibold text-sm truncate">{{ t.name }}</p>
@@ -149,6 +162,7 @@ async function copyHtml(v: EmailTemplateVersion) { try { await navigator.clipboa
           <div><p class="text-muted-foreground">Positive</p><p class="font-semibold tabular-nums">{{ fmtRate(tStat(t.id)?.positiveRate) }}</p></div>
           <div><p class="text-muted-foreground">Meetings</p><p class="font-semibold tabular-nums">{{ tStat(t.id)?.meetings ?? 0 }}</p></div>
           <div><p class="text-muted-foreground">Won</p><p class="font-semibold tabular-nums">{{ tStat(t.id)?.won ?? 0 }}</p></div>
+        </div>
         </div>
       </button>
     </div>
@@ -181,9 +195,11 @@ async function copyHtml(v: EmailTemplateVersion) { try { await navigator.clipboa
             </div>
             <div class="space-y-1.5"><Label>Description <span class="text-muted-foreground font-normal">(optional)</span></Label><Input v-model="newForm.description" placeholder="When to use it" /></div>
           </div>
-          <div class="space-y-1.5">
-            <Label class="flex items-center gap-1.5"><Eye class="size-3.5" /> Preview with sample data</Label>
-            <iframe :srcdoc="renderSample(newForm)" sandbox="" title="Template preview" class="w-full h-[620px] rounded-lg border bg-white" />
+          <div class="space-y-1.5 min-w-0">
+            <div class="rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 text-xs flex items-center gap-2"><Sparkles class="size-4 text-emerald-600 shrink-0" /><span class="flex-1">Want it designed for you? Describe it and Claude builds the HTML in your house style.</span><Button size="sm" variant="outline" class="h-7 text-xs gap-1" @click="showNew = false; openStudio()"><Wand2 class="size-3.5" /> Template Studio</Button></div>
+            <CrmEmailPreview :html="pv.render(newForm, newForm.subject).html" :subject="pv.render(newForm, newForm.subject).subject" :preheader="pv.render(newForm, newForm.subject).preheader" :from="pv.ctx.value?.from" :to="pv.ctx.value?.to" :loading="pv.loading.value" max-height="560px">
+              <template #toolbar><CrmEmailInboxCheck :rendered="pv.render(newForm, newForm.subject)" :source="newForm" /></template>
+            </CrmEmailPreview>
           </div>
         </div>
         <DialogFooter><Button variant="ghost" @click="showNew = false">Cancel</Button><Button :disabled="saving" class="min-w-28" @click="createNew"><Loader2 v-if="saving" class="size-4 animate-spin" /><span v-else>Create template</span></Button></DialogFooter>
@@ -192,13 +208,33 @@ async function copyHtml(v: EmailTemplateVersion) { try { await navigator.clipboa
 
     <!-- ═══ Template detail ═══ -->
     <Sheet :open="!!detail" @update:open="(o: boolean) => { if (!o) detailId = null }">
-      <SheetContent side="right" class="w-full sm:max-w-3xl p-0 flex flex-col gap-0">
+      <SheetContent side="right" class="w-full sm:max-w-[min(1440px,97vw)] p-0 flex flex-col gap-0">
         <template v-if="detail">
           <SheetHeader class="px-6 pt-6 pb-4 border-b">
             <SheetTitle class="text-base flex items-center gap-2">{{ detail.name }} <Badge v-if="detail.archivedAt" variant="outline" class="text-[10px]">Archived</Badge></SheetTitle>
             <SheetDescription class="text-xs">{{ detail.category }} · created {{ format(new Date(detail.createdAt), 'MMM d, yyyy') }}</SheetDescription>
           </SheetHeader>
-          <div class="flex-1 overflow-y-auto px-6 py-5 space-y-7">
+          <div class="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_540px]">
+          <!-- Live preview -->
+          <section class="min-h-0 flex flex-col p-4 gap-3 border-r bg-muted/10">
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="inline-flex flex-wrap rounded-lg border bg-muted/40 p-0.5" role="tablist" aria-label="Body version">
+                <button v-for="v in [...detail.versions].filter(x => x.status === 'active' || x.version === detailVersion?.version).reverse()" :key="v.version" type="button" role="tab" :aria-selected="detailVersion?.version === v.version" class="rounded-md px-2.5 py-1 text-xs font-medium inline-flex items-center gap-1" :class="detailVersion?.version === v.version ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'" @click="shownVersion = v.version"><component :is="v.format === 'html' ? Code2 : Type" class="size-3" />{{ v.label || `V${v.version}` }}<span v-if="v.status !== 'active'" class="text-[9px] text-muted-foreground">retired</span></button>
+              </div>
+              <Select v-if="detail.subjects.length > 1" v-model="shownSubject"><SelectTrigger class="h-8 w-56 text-xs"><SelectValue :placeholder="`Subject: ${activeSubject(detail)}`" /></SelectTrigger><SelectContent><SelectItem v-for="x in detail.subjects" :key="x.key" :value="x.key">{{ x.key }} · {{ x.text }}</SelectItem></SelectContent></Select>
+              <div class="w-60"><CrmDealershipPicker v-model="dpv.dealershipId.value" placeholder="Preview with a real dealership…" /></div>
+              <span class="text-[11px] text-muted-foreground inline-flex items-center gap-1"><Store class="size-3.5" />{{ dpv.ctx.value?.source === 'dealership' ? `${dpv.ctx.value.dealershipName}${dpv.ctx.value.hasAudit ? '' : ' · no audit yet'}` : 'Sample: Bleakley Kia' }}</span>
+              <Button v-if="detailVersion?.format === 'html'" size="sm" class="h-8 gap-1.5 ml-auto bg-gradient-to-r from-emerald-600 to-emerald-700 text-white" @click="openStudio(detail, detailVersion)"><Sparkles class="size-3.5" /> Refine with AI</Button>
+            </div>
+            <CrmEmailPreview v-if="detailRendered" v-model:device="device" class="flex-1 min-h-[420px]" :html="detailRendered.html" :subject="detailRendered.subject" :preheader="detailRendered.preheader" :from="dpv.ctx.value?.from" :to="dpv.ctx.value?.to" :loading="dpv.loading.value">
+              <template #toolbar>
+                <CrmEmailInboxCheck :rendered="detailRendered" :source="detailVersion || {}" />
+                <Button v-if="detailVersion" variant="ghost" size="sm" class="h-7 text-xs gap-1" @click="copyHtml(detailVersion)"><Copy class="size-3.5" /> Copy {{ detailVersion.format === 'html' ? 'HTML' : 'text' }}</Button>
+              </template>
+            </CrmEmailPreview>
+            <p v-if="detailRendered?.missing.length" class="text-[11px] text-amber-700 dark:text-amber-300">No data for {{ tags(detailRendered.missing) }} — these show blank for this dealership.</p>
+          </section>
+          <div class="min-h-0 overflow-y-auto px-6 py-5 space-y-7">
             <!-- Body versions -->
             <section class="space-y-3">
               <div class="flex items-center justify-between">
@@ -214,7 +250,7 @@ async function copyHtml(v: EmailTemplateVersion) { try { await navigator.clipboa
                     <tr v-for="v in [...detail.versions].reverse()" :key="v.version" :class="v.status !== 'active' && 'opacity-60'">
                       <td class="px-3 py-2">
                         <p class="font-medium flex items-center gap-1.5"><component :is="v.format === 'html' ? Code2 : Type" class="size-3.5 text-muted-foreground" />{{ v.label || `V${v.version}` }}<Badge variant="outline" class="text-[9px]" :class="v.status === 'active' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/25' : ''">{{ v.status }}</Badge></p>
-                        <p class="text-[10px] text-muted-foreground">{{ format(new Date(v.createdAt), 'MMM d, yyyy') }}<span v-if="v.note"> · {{ v.note }}</span></p>
+                        <p class="text-[10px] text-muted-foreground line-clamp-2 max-w-56" :title="v.note">{{ format(new Date(v.createdAt), 'MMM d, yyyy') }}<span v-if="v.note"> · {{ v.note }}</span></p>
                       </td>
                       <td class="px-2 py-2 text-right tabular-nums">{{ vStat(detail.id, v.version)?.units ?? detail.usage.versions[v.version] ?? 0 }}</td>
                       <td class="px-2 py-2 text-right tabular-nums text-xs">{{ fmtRate(vStat(detail.id, v.version)?.deliveryRate) }}</td>
@@ -223,7 +259,8 @@ async function copyHtml(v: EmailTemplateVersion) { try { await navigator.clipboa
                       <td class="px-2 py-2 text-right tabular-nums text-xs">{{ vStat(detail.id, v.version)?.meetings ?? 0 }}</td>
                       <td class="px-2 py-2 text-right tabular-nums text-xs font-semibold">{{ vStat(detail.id, v.version)?.won ?? 0 }}</td>
                       <td class="px-2 py-2 text-right whitespace-nowrap">
-                        <Button variant="ghost" size="icon" class="size-7" title="Preview" @click="previewVersion = v"><Eye class="size-3.5" /></Button>
+                        <Button variant="ghost" size="icon" class="size-7" title="Show in preview" @click="shownVersion = v.version"><Eye class="size-3.5" /></Button>
+                        <Button v-if="v.format === 'html'" variant="ghost" size="icon" class="size-7" title="Refine with AI (Template Studio)" @click="openStudio(detail, v)"><Sparkles class="size-3.5" /></Button>
                         <Button variant="ghost" size="icon" class="size-7" title="New version from this" @click="newVersionFrom(v)"><Copy class="size-3.5" /></Button>
                         <Button variant="ghost" size="icon" class="size-7" :title="v.status === 'active' ? 'Retire (stop sending)' : 'Activate (add to rotation)'" @click="patch({ versionStatus: { version: v.version, status: v.status === 'active' ? 'retired' : 'active' } })"><component :is="v.status === 'active' ? Pause : Play" class="size-3.5" /></Button>
                       </td>
@@ -276,6 +313,7 @@ async function copyHtml(v: EmailTemplateVersion) { try { await navigator.clipboa
               </div>
             </section>
           </div>
+          </div>
         </template>
       </SheetContent>
     </Sheet>
@@ -305,24 +343,16 @@ async function copyHtml(v: EmailTemplateVersion) { try { await navigator.clipboa
               <Switch v-model="vForm.retireOthers" />
             </label>
           </div>
-          <div class="space-y-1.5">
-            <Label class="flex items-center gap-1.5"><Eye class="size-3.5" /> Preview with sample data</Label>
-            <iframe :srcdoc="renderSample(vForm)" sandbox="" title="Version preview" class="w-full h-[620px] rounded-lg border bg-white" />
+          <div class="space-y-1.5 min-w-0">
+            <CrmEmailPreview :html="pv.render(vForm, detail ? activeSubject(detail) : '').html" :subject="pv.render(vForm, detail ? activeSubject(detail) : '').subject" :preheader="pv.render(vForm, detail ? activeSubject(detail) : '').preheader" :from="pv.ctx.value?.from" :to="pv.ctx.value?.to" :loading="pv.loading.value" max-height="600px">
+              <template #toolbar><CrmEmailInboxCheck :rendered="pv.render(vForm, detail ? activeSubject(detail) : '')" :source="vForm" /></template>
+            </CrmEmailPreview>
           </div>
         </div>
         <DialogFooter><Button variant="ghost" @click="showVersion = false">Cancel</Button><Button :disabled="saving" class="min-w-28" @click="saveVersion"><Loader2 v-if="saving" class="size-4 animate-spin" /><span v-else>Save {{ vForm.label }}</span></Button></DialogFooter>
       </DialogContent>
     </Dialog>
 
-    <!-- Version preview -->
-    <Dialog :open="!!previewVersion" @update:open="(o: boolean) => { if (!o) previewVersion = null }">
-      <DialogContent class="sm:max-w-3xl max-h-[94vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{{ detail?.name }} — {{ previewVersion?.label || `V${previewVersion?.version}` }}</DialogTitle>
-          <DialogDescription class="text-xs flex items-center gap-2">Sample data shown. <button v-if="previewVersion" type="button" class="text-primary hover:underline" @click="copyHtml(previewVersion)">Copy {{ previewVersion.format === 'html' ? 'HTML' : 'text' }}</button></DialogDescription>
-        </DialogHeader>
-        <iframe v-if="previewVersion" :srcdoc="renderSample(previewVersion)" sandbox="" title="Version preview" class="w-full h-[70vh] rounded-lg border bg-white" />
-      </DialogContent>
-    </Dialog>
+    <CrmEmailTemplateStudio v-model:open="showStudio" :template="studioFor" :start-html="studioHtml" :start-subject="studioFor ? activeSubject(studioFor) : ''" :start-name="studioFor?.name || ''" @saved="studioSaved" />
   </div>
 </template>

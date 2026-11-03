@@ -146,6 +146,8 @@ export function factsSummary(d: any, audits: any[], contacts: any[], ix: any[], 
 async function aiAngle(d: any, facts: string, audits: any[]) {
   const a = audits[0]
   const res = await askClaudeJson<{ angle: string, talkingPoints: string[] }>({
+    purpose: 'research.angle',
+    brain: 'research',
     system: 'You help a reconditioning / vehicle merchandising company (car photos, detailing) prepare outreach to car dealerships. Be concrete and brief. Only use facts you are given — never invent numbers, names or events.',
     prompt: `Dealership: ${d.name}\nFacts: ${facts}\n${a?.notes ? `Audit notes: ${String(a.notes).slice(0, 800)}\n` : ''}\nReturn {"angle": one sentence on the strongest reason this dealership should talk to us, "talkingPoints": up to 3 short bullet strings}.`,
     maxTokens: 400,

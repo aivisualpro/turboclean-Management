@@ -1,10 +1,29 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { toast } from 'vue-sonner'
-import { Sparkles, CalendarClock, Clock, Globe, BellRing, Save, Loader2, Play } from 'lucide-vue-next'
+import { Sparkles, CalendarClock, Clock, Globe, BellRing, Save, Loader2, Play, Receipt, Binoculars } from 'lucide-vue-next'
 
 const { setHeader } = usePageHeader()
-setHeader({ title: 'General Settings', icon: 'i-lucide-settings-2' })
+const applyHeader = () => setHeader({ title: 'General Settings', icon: 'i-lucide-settings-2' })
+applyHeader()
+
+// ─── Tabs (kept in ?tab= like the dealership record page) ───
+const route = useRoute()
+const router = useRouter()
+const TABS = [
+  { key: 'automations', label: 'Invoice Automations', icon: Receipt },
+  { key: 'prospecting', label: 'Prospecting', icon: Binoculars },
+] as const
+type TabKey = typeof TABS[number]['key']
+const tab = ref<TabKey>(TABS.some(t => t.key === route.query.tab) ? route.query.tab as TabKey : 'automations')
+// Mount a tab the first time it's opened, then keep it alive so unsaved edits survive switching.
+const visited = ref(new Set<TabKey>([tab.value]))
+watch(tab, async (v) => {
+  visited.value = new Set([...visited.value, v])
+  await router.replace({ query: { ...route.query, tab: v === 'automations' ? undefined : v } })
+  // The global clear-header middleware runs on query changes too, so re-apply the header.
+  applyHeader()
+})
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 const timezones = ref<string[]>([])
@@ -68,19 +87,24 @@ async function saveSettings() {
 </script>
 
 <template>
-  <div class="h-full flex flex-col p-2 sm:max-w-6xl mx-auto w-full">
-    <div v-if="loading" class="flex-1 flex items-center justify-center">
+  <div class="absolute inset-0 flex flex-col overflow-hidden">
+   <div class="flex-1 min-h-0 overflow-auto p-2 flex flex-col gap-2">
+    <!-- Sections -->
+    <nav class="shrink-0 flex w-full overflow-x-auto rounded-lg border bg-muted/40 p-0.5 gap-0.5" role="tablist" aria-label="Settings sections">
+      <button
+        v-for="t in TABS" :key="t.key" type="button" role="tab" :aria-selected="tab === t.key"
+        class="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-sm whitespace-nowrap transition-colors"
+        :class="tab === t.key ? 'bg-background shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'" @click="tab = t.key"
+      >
+        <component :is="t.icon" class="size-4" />{{ t.label }}
+      </button>
+    </nav>
+
+    <div v-if="loading && tab === 'automations'" class="flex-1 flex items-center justify-center">
       <Loader2 class="size-6 animate-spin text-primary" />
     </div>
 
-    <div v-else class="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
-      
-      <!-- Headers -->
-      <div>
-        <h2 class="text-xl font-semibold tracking-tight">Platform Configurations</h2>
-        <p class="text-sm text-muted-foreground mt-1">Manage global platform behaviors, automation triggers, and communications.</p>
-      </div>
-
+    <div v-else-if="tab === 'automations'" class="space-y-2 animate-in fade-in duration-300">
       <!-- Automations Card -->
       <div class="rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden">
         <div class="border-b bg-muted/30 p-5 flex items-center gap-3">
@@ -232,9 +256,10 @@ async function saveSettings() {
         </div>
       </div>
 
-      <!-- Prospecting search area (used by "Search Web" on /crm/dealership) -->
-      <SettingsProspectingCard />
-
     </div>
+
+    <!-- Prospecting search area (used by "Search Web" on /crm/dealership) -->
+    <SettingsProspectingCard v-if="visited.has('prospecting')" v-show="tab === 'prospecting'" class="animate-in fade-in duration-300" />
+   </div>
   </div>
 </template>

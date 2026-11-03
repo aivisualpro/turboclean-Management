@@ -115,7 +115,12 @@ export function useAutomations() {
   const confirmReply = (id: string, category: string) => $fetch<{ effects: string[] }>(`/api/automations/replies/${id}/confirm`, { method: 'POST', body: { category } })
   const loadPriorities = (tier = 'all', owner = '') => $fetch<{ rows: PriorityRow[], totals: Record<string, number>, learning: any[] }>('/api/automations/priorities', { query: { tier, owner: owner || undefined } })
   const loadInsights = (refresh = false) => $fetch<{ report: any, liveAutomation: any }>('/api/automations/insights', { query: refresh ? { refresh: 1 } : {} })
-  return { overview, loading, loadOverview, setEnabled, runNow, saveSettings, loadRuns, loadDrafts, updateDraft, approveDraft, rejectDraft, bulkDrafts, loadReplies, confirmReply, loadPriorities, loadInsights }
+  const loadBrain = () => $fetch<any>('/api/automations/brain')
+  const teachLesson = (body: { text: string, area: string, pinned?: boolean }) => $fetch<{ lesson: any }>('/api/automations/brain/lessons', { method: 'POST', body })
+  const updateLesson = (id: string, body: Record<string, any>) => $fetch<{ lesson: any }>(`/api/automations/brain/lessons/${id}`, { method: 'PATCH', body })
+  const reflectBrain = () => $fetch<{ version: number, summary: string, signals: number, added: number, updated: number, retired: number, model: string | null }>('/api/automations/brain/reflect', { method: 'POST' })
+  const brainContext = (area: string) => $fetch<{ area: string, text: string }>('/api/automations/brain/context', { query: { area } })
+  return { loadBrain, teachLesson, updateLesson, reflectBrain, brainContext, overview, loading, loadOverview, setEnabled, runNow, saveSettings, loadRuns, loadDrafts, updateDraft, approveDraft, rejectDraft, bulkDrafts, loadReplies, confirmReply, loadPriorities, loadInsights }
 }
 
 export const AUTOMATION_GROUPS = [

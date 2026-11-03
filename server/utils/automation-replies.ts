@@ -50,6 +50,8 @@ export function classifyByRules(text: string): { category: ReplyCategory, reason
 
 async function classifyWithAi(reply: any, parent: any) {
   const res = await askClaudeJson<{ category: string, summary: string, nextAction: string, returnDate: string | null, referralName: string | null, referralEmail: string | null, confidence: number }>({
+    purpose: 'reply.classify',
+    brain: 'replies',
     system: 'You triage replies to cold sales emails sent by a vehicle reconditioning / merchandising company to car dealerships. Classify precisely and summarize in one short sentence. Never invent names or emails that are not in the text.',
     prompt: `Our email (subject “${parent?.subject || reply.subject}”):\n${String(parent?.bodyText || '').slice(0, 1200)}\n\nTheir reply from ${reply.fromName || ''} <${reply.fromEmail}>:\n${String(reply.snippet || stripQuoted(reply.bodyText || '')).slice(0, 2500)}\n\nCategories: ${CATS.join(', ')}.\nReturn {"category": one category, "summary": "...", "nextAction": "what we should do next, imperative, max 12 words", "returnDate": "YYYY-MM-DD" if out of office and a return date is given else null, "referralName": name if they referred us else null, "referralEmail": email if given else null, "confidence": 0-1}.`,
     maxTokens: 400,
@@ -132,6 +134,12 @@ export async function confirmReply(db: Db, id: string, body: any, actor: Session
     category, label: REPLY_CATEGORIES[category].label, sentiment, confirmedAt: now, confirmedBy: { id: actor.id, name: actor.name },
     suggested: msg.aiSuggestion?.category || null, suggestedBy: msg.aiSuggestion?.by || null, agreed: msg.aiSuggestion ? msg.aiSuggestion.category === category : null,
   } } })
+
+  if (msg.aiSuggestion?.category) {
+    const { recordSignal } = await import('./brain')
+    const agreed = msg.aiSuggestion.category === category
+    await recordSignal(db, agreed ? 'reply.confirmed' : 'reply.corrected', 'replies', { suggested: msg.aiSuggestion.category, confirmed: category, by: msg.aiSuggestion.by || null, text: String(msg.snippet || msg.bodyText || '').slice(0, 1200), nextAction: str(body?.nextAction, 160) || null }, { actor, dealershipId: msg.dealershipId || null, refId: id })
+  }
 
   const effects: string[] = []
   if (msg.dealershipId && ObjectId.isValid(msg.dealershipId)) {

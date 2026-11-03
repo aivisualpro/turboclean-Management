@@ -7,7 +7,6 @@ export const LEAD_SOURCES = [
   'Existing client introduction',
   'Dealer group relationship',
   'Website/inbound',
-  'Web discovery',
   'Other',
 ] as const
 
@@ -76,7 +75,6 @@ export const LEAD_SOURCE_STYLE: Record<string, { dot: string, badge: string }> =
   'Existing client introduction': { dot: 'bg-lime-500', badge: 'bg-lime-500/10 text-lime-700 dark:text-lime-300 border-lime-500/20' },
   'Dealer group relationship': { dot: 'bg-amber-500', badge: 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20' },
   'Website/inbound': { dot: 'bg-violet-500', badge: 'bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/20' },
-  'Web discovery': { dot: 'bg-cyan-500', badge: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-500/20' },
   'Other': { dot: 'bg-zinc-400', badge: 'bg-zinc-500/10 text-zinc-700 dark:text-zinc-300 border-zinc-500/20' },
 }
 
@@ -199,7 +197,9 @@ export const EMAIL_MERGE_FIELDS: { key: string, label: string }[] = [
 /** Extra fields only meaningful in HTML templates. */
 export const EMAIL_HTML_ONLY_FIELDS: { key: string, label: string }[] = [
   { key: 'auditDateUpper', label: 'Audit date (CAPS)' }, { key: 'auditScreenshot', label: 'Audit screenshot (image)' }, { key: 'replyMailto', label: 'Reply link (mailto:)' },
-  { key: 'senderTagline', label: 'Your tagline' }, { key: 'senderRegion', label: 'Your region' }, { key: 'inventoryUrl', label: 'Inventory URL' },
+  { key: 'senderTagline', label: 'Your tagline' }, { key: 'senderRegion', label: 'Your region' }, { key: 'senderInitials', label: 'Your initials' }, { key: 'inventoryUrl', label: 'Inventory URL' },
+  { key: 'usedWithPhotos', label: 'Used with real photos' }, { key: 'placeholderImages', label: 'Placeholder images' }, { key: 'noImageCount', label: 'No image at all' }, { key: 'stockImages', label: 'Stock images' },
+  { key: 'auditEvidence', label: '▣ Evidence list (block)' }, { key: 'usedPhotoBar', label: '▣ Photo bar (block)' }, { key: 'auditBreakdown', label: '▣ What we found (block)' }, { key: 'newInventoryNote', label: '▣ New-car note (block)' },
 ]
 export const EMAIL_TEMPLATE_CATEGORIES = ['First touch', 'Follow-up', 'Meeting', 'Proposal', 'Re-engage', 'Other'] as const
 /** The success funnel, in order. Opens/clicks are deliberately not part of it. */
