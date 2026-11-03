@@ -9,6 +9,8 @@ import type { ScannerProgress } from '~/composables/useInventoryScanner'
  */
 export type ItemStatus = 'queued' | 'running' | 'done' | 'stopped' | 'failed' | 'skipped' | 'cancelled'
 export interface BatchItem {
+  /** Continue a paused scan instead of starting over (set by the server when a stopped item is queued again). */
+  resumeFrom?: string | null
   dealershipId: string, name: string, website: string, urls: string[], status: ItemStatus, scanId: string | null, auditId: string | null
   summary: { total: number, withoutReal: number, withoutRealPct: number | null, by?: Record<string, number> } | null
   error: string | null, claimedAt: string | null, finishedAt: string | null
@@ -32,6 +34,9 @@ export function useBatchScan() {
   let stopRequested = false
   let aborts: AbortController[] = []
   let refreshTimer: ReturnType<typeof setInterval> | null = null
+  /** Called when every worker has stopped (batch finished, paused or cancelled). */
+  let onFinished: ((b: Batch | null, reason: 'finished' | 'paused') => void) | null = null
+  const whenFinished = (fn: typeof onFinished) => { onFinished = fn }
 
   const say = (dealershipId: string, name: string, text: string, kind: 'info' | 'ok' | 'warn' | 'err' = 'info') => { feed.value = [...feed.value.slice(-299), { at: Date.now(), dealershipId, name, text, kind }] }
 
@@ -59,7 +64,8 @@ export function useBatchScan() {
     say(item.dealershipId, item.name, `Starting — ${item.urls.length} page${item.urls.length === 1 ? '' : 's'}`)
     const touch = () => { run.lastEvent = Date.now(); live.value = { ...live.value } }
     try {
-      const r = await streamScanRun({ dealershipId: item.dealershipId, urls: item.urls, allPages: true, batchId: b.id, autoSave: b.autoSave !== false }, (name, data) => {
+      if (item.resumeFrom) say(item.dealershipId, item.name, 'Continuing the paused scan — keeping what it found', 'info')
+      const r = await streamScanRun({ dealershipId: item.dealershipId, urls: item.urls, allPages: true, batchId: b.id, autoSave: b.autoSave !== false, appendTo: item.resumeFrom || undefined }, (name, data) => {
         if (name === 'scan') run.scanId = data.id
         else if (name === 'progress') run.progress = data
         else if (name === 'log') { run.log = [...run.log.slice(-60), data]; say(item.dealershipId, item.name, data.text) }
@@ -111,7 +117,19 @@ export function useBatchScan() {
       refreshTimer = null
       driving.value = false
       if (batch.value) await load(batch.value.id).catch(() => {})
+      onFinished?.(batch.value, stopRequested ? 'paused' : 'finished')
     }
+  }
+  /** Queue every paused (stopped) dealership again so Resume continues where it left off. */
+  async function resumeStopped() {
+    if (!batch.value) return 0
+    const id = batch.value.id
+    const stopped = batch.value.items.filter(i => i.status === 'stopped')
+    for (const i of stopped) {
+      const r = await $fetch<{ batch: Batch }>(`/api/scanner/batches/${id}/requeue`, { method: 'POST', body: { dealershipId: i.dealershipId } }).catch(() => null)
+      if (r) batch.value = r.batch
+    }
+    return stopped.length
   }
 
   /** Pause: stop claiming; running scans are asked to stop and keep what they found. */
@@ -158,5 +176,5 @@ export function useBatchScan() {
   }
 
   onBeforeUnmount(dispose)
-  return { batch, live, driving, concurrency, error, feed, create, load, list, drive, pause, cancel, requeue, dispose, emailDealers, loadEmailContext, send }
+  return { batch, live, driving, concurrency, error, feed, create, load, list, drive, pause, cancel, requeue, resumeStopped, whenFinished, dispose, emailDealers, loadEmailContext, send }
 }

@@ -4,7 +4,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { VERDICT_META } from '~/composables/useInventoryScanner'
 import {
   ScanSearch, X, ArrowLeft, ArrowRight, RotateCw, Lock, Globe, ChevronDown, Loader2, Square, MonitorPlay, LayoutGrid, CheckCircle2,
-  AlertTriangle, Car, Images, ScanLine, Save, PlusSquare, ExternalLink, Cloud, FileStack, Sparkles, History, Eye, CircleSlash, MousePointerClick, List, Search,
+  AlertTriangle, Car, Images, ScanLine, Save, PlusSquare, ExternalLink, Cloud, FileStack, Sparkles, History, Eye, CircleSlash, MousePointerClick, List, Search, Bookmark, BookmarkCheck,
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
@@ -25,6 +25,23 @@ const phase = ref<'checking' | 'unavailable' | 'ready' | 'failed'>('checking')
 const failMsg = ref('')
 const engine = ref<string>('')
 const address = ref('')
+/** Bookmark the page on screen as one of the dealership's scan pages (what batch scans use). */
+const { dealerships: crmDealerships, updateDealership } = useCrmDealerships()
+const savedPages = computed(() => crmDealerships.value.find(d => d.id === props.dealership.id)?.scanPages || [])
+const pageSaved = computed(() => { const u = (preview.value?.url || '').replace(/\/$/, ''); return !!u && savedPages.value.some(p => p.url.replace(/\/$/, '') === u) })
+const savingPage = ref(false)
+async function savePage() {
+  const url = preview.value?.url
+  if (!url || pageSaved.value || savingPage.value) return
+  savingPage.value = true
+  try {
+    const label = (preview.value?.navLinks || []).find(l => l.href === url)?.label || (preview.value?.title || '').split(/[|\-–]/)[0]!.trim().slice(0, 60)
+    await updateDealership(props.dealership.id, { scanPages: [...savedPages.value, { url, label }] } as any)
+    toast.success('Saved as a scan page', { description: 'Batch scans will read this page for ' + props.dealership.name })
+  }
+  catch (e: any) { toast.error(e?.data?.statusMessage || 'Could not save the page') }
+  finally { savingPage.value = false }
+}
 const editingAddress = ref(false)
 const ranHere = ref(false)
 const elapsed = ref(0)
@@ -207,6 +224,10 @@ const engineLabel = computed(() => engine.value === 'serverless' ? 'Cloud Chrome
               <div v-if="previewing" class="absolute left-3 right-3 bottom-0 h-0.5 overflow-hidden rounded-full"><div class="h-full w-1/3 bg-primary animate-[scanner-load_1.1s_ease-in-out_infinite]" /></div>
             </div>
           </form>
+          <Button variant="outline" size="sm" class="h-8 gap-1.5 text-xs shrink-0" :class="pageSaved && 'border-emerald-500/40 text-emerald-700 dark:text-emerald-300'" :disabled="!preview?.url || previewing || scanning || savingPage || pageSaved" :title="pageSaved ? 'This page is one of the dealership\'s scan pages' : 'Save this page as a scan page — batch scans read the saved pages'" @click="savePage">
+            <Loader2 v-if="savingPage" class="size-3.5 animate-spin" /><BookmarkCheck v-else-if="pageSaved" class="size-3.5" /><Bookmark v-else class="size-3.5" />
+            <span class="hidden lg:inline">{{ pageSaved ? 'Scan page' : 'Save as scan page' }}</span>
+          </Button>
           <div class="hidden xl:flex items-center gap-1 max-w-[30%] overflow-hidden">
             <button v-for="l in preview?.navLinks || []" :key="l.href" type="button" class="shrink-0 rounded-full border bg-background px-2.5 h-7 text-[11px] font-medium inline-flex items-center gap-1 hover:bg-muted disabled:opacity-50" :class="preview?.url === l.href && 'border-primary text-primary'" :disabled="scanning || previewing" :title="l.href" @click="show(l.href)"><component :is="kindIcon(l.kind)" class="size-3" /> {{ l.label }}</button>
           </div>

@@ -362,8 +362,8 @@ function exportCsv(onlySelected = false) {
 }
 
 // ─── Scan pages & batch scanning (Mission Control) ───
-/** Pages the batch scanner will visit for a dealership: its saved scan pages, else the website itself. */
-function scanPageCount(d: CrmDealership) { return d.scanPages?.length || (d.website ? 1 : 0) }
+/** Pages the batch scanner will visit for a dealership — only picked / detected pages, never a bare website. */
+function scanPageCount(d: CrmDealership) { return d.scanPages?.length || 0 }
 const showPages = ref(false)
 const pagesFor = ref<CrmDealership | null>(null)
 function editPages(d: CrmDealership) { pagesFor.value = d; showPages.value = true }
@@ -375,7 +375,6 @@ const selectedScannable = computed(() => [...selected.value].filter(id => { cons
 function startBatch() {
   const ids = [...selected.value]
   if (!ids.length) return
-  if (!selectedScannable.value) return toast.error('None of the selected dealerships has a website or scan pages yet')
   batchResumeId.value = null
   batchIds.value = ids
   showBatch.value = true
@@ -605,7 +604,7 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
           <Button variant="outline" size="sm" class="h-7 gap-1.5 text-xs bg-background" @click="exportCsv(true)"><Download class="size-3.5" /> Export selected</Button>
           <Button
             v-if="canEdit" size="sm" class="h-7 gap-1.5 text-xs bg-rose-600 text-white shadow-sm hover:bg-rose-700 dark:bg-rose-600 dark:hover:bg-rose-500"
-            :disabled="bulkBusy" :title="selectedScannable < selected.size ? `${selected.size - selectedScannable} of the selected dealerships have no website or scan pages and will be skipped` : 'Scrape the selected dealerships in one go, then email them — Mission Control'"
+            :disabled="bulkBusy" :title="selectedScannable < selected.size ? `${selected.size - selectedScannable} of the selected have no scan pages yet — Mission Control can detect them before starting` : 'Scrape the selected dealerships in one go, then email them — Mission Control'"
             @click="startBatch"
           >
             <ScanSearch class="size-3.5" /> Scrape &amp; email
@@ -726,14 +725,14 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
               <td v-else-if="c.key === 'scanPages'" class="px-3 border-b border-border/60 whitespace-nowrap text-right tabular-nums" :class="rowPad" @click.stop>
                 <button
                   type="button" class="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium transition-colors"
-                  :class="d.scanPages?.length ? 'border-rose-500/30 bg-rose-500/5 text-rose-700 hover:bg-rose-500/10 dark:text-rose-300' : d.website ? 'border-border/70 text-muted-foreground hover:bg-accent hover:text-foreground' : 'border-dashed border-border/70 text-muted-foreground/60 hover:text-foreground'"
-                  :title="d.scanPages?.length ? (d.scanPages.map(p => p.label || p.url).join('\n')) : d.website ? 'No pages picked yet — the scanner will start at the website and find inventory pages itself. Click to pick exact pages.' : 'No website — add one on the dealership first'"
+                  :class="d.scanPages?.length ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300' : d.website ? 'border-amber-500/40 bg-amber-500/5 text-amber-700 hover:bg-amber-500/10 dark:text-amber-300' : 'border-dashed border-border/70 text-muted-foreground/60 hover:text-foreground'"
+                  :title="d.scanPages?.length ? (d.scanPages.map(p => p.label || p.url).join('\n')) : d.website ? 'No scan pages yet — this dealership is skipped by scans. Click to detect or pick its inventory pages.' : 'No website — add one on the dealership first'"
                   :disabled="!canEdit && !d.scanPages?.length"
                   @click="editPages(d)"
                 >
                   <Layers class="size-3" />
                   <template v-if="d.scanPages?.length">{{ d.scanPages.length }} page{{ d.scanPages.length === 1 ? '' : 's' }}</template>
-                  <template v-else-if="d.website">Auto</template>
+                  <template v-else-if="d.website">Pick pages</template>
                   <template v-else>—</template>
                 </button>
               </td>

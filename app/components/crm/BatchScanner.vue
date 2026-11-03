@@ -7,7 +7,7 @@ import { loadPreviewContext, renderEmail } from '~/composables/useTemplatePrevie
 import type { PreviewContext } from '~/composables/useTemplatePreview'
 import {
   X, Radar, Play, Pause, Square, Loader2, CheckCircle2, AlertTriangle, CircleDashed, Car, ImageOff, Clock, Mail, Send, Eye, ChevronRight, ListChecks,
-  RotateCcw, Globe, Sparkles, Inbox, ExternalLink, Users, Check, Ban, Zap, Archive, Pencil,
+  RotateCcw, Globe, Sparkles, Inbox, ExternalLink, Users, Check, Ban, Zap, Archive, Pencil, Wand2, DoorOpen,
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { formatDistanceToNow } from 'date-fns'
@@ -35,26 +35,57 @@ const STEPS: { key: Step, n: number, label: string }[] = [{ key: 'setup', n: 1, 
 const stepIndex = computed(() => STEPS.findIndex(s => s.key === step.value))
 
 // ─── Setup ───
-const setupRows = ref<{ id: string, name: string, website: string, pages: string[] }[]>([])
+interface SetupRow { id: string, name: string, website: string, pages: string[], detecting: boolean, detectNote: string }
+const setupRows = ref<SetupRow[]>([])
 const editing = ref<CrmDealership | null>(null)
 const showPages = ref(false)
 function buildSetup() {
   const ids = props.dealershipIds || []
   setupRows.value = ids.map((id) => {
     const d = dealerships.value.find(x => x.id === id)
-    const saved = (d?.scanPages || []).map(p => p.url)
-    return { id, name: d?.name || id, website: d?.website || '', pages: saved.length ? saved : d?.website ? [d.website] : [] }
+    // Only picked / verified pages count — a bare website is never scanned blind any more.
+    return { id, name: d?.name || id, website: d?.website || '', pages: (d?.scanPages || []).map(p => p.url), detecting: false, detectNote: '' }
   })
 }
 function editPages(row: { id: string }) { editing.value = dealerships.value.find(x => x.id === row.id) || null; showPages.value = !!editing.value }
 function pagesSaved(pages: { url: string, label: string }[]) {
   const row = setupRows.value.find(r => r.id === editing.value?.id)
-  if (row) row.pages = pages.length ? pages.map(p => p.url) : row.website ? [row.website] : []
+  if (row) row.pages = pages.map(p => p.url)
+}
+/** Find + verify a dealership's inventory pages on the server and save them (the "magic" button). */
+async function detectFor(row: SetupRow) {
+  if (row.detecting || !row.website) return
+  row.detecting = true
+  row.detectNote = 'Opening the website…'
+  try {
+    const r = await $fetch<any>('/api/scanner/discover', { method: 'POST', body: { dealershipId: row.id, save: true } })
+    row.pages = (r.pages || []).map((p: any) => p.url)
+    row.detectNote = r.pages?.length ? `${r.pages.length} page${r.pages.length === 1 ? '' : 's'} verified · ${r.pages.reduce((n: number, p: any) => n + (p.total || p.cards || 0), 0)} vehicles${r.aiUsed ? ' · AI helped' : ''}` : 'No inventory pages found — pick them by hand'
+    const d = dealerships.value.find(x => x.id === row.id)
+    if (d) d.scanPages = r.saved || []
+  }
+  catch (e: any) { row.detectNote = e?.data?.message || e?.data?.statusMessage || 'Could not open the website' }
+  finally { row.detecting = false }
+}
+const missingPages = computed(() => setupRows.value.filter(r => !r.pages.length && r.website))
+const detectingAll = ref(false)
+async function detectAll() {
+  if (detectingAll.value) return
+  detectingAll.value = true
+  try {
+    // Two sites at a time — each takes 20–60 s.
+    const queue = [...missingPages.value]
+    const worker = async () => { while (queue.length) { const row = queue.shift()!; await detectFor(row) } }
+    await Promise.all([worker(), worker()])
+    const found = setupRows.value.filter(r => r.pages.length).length
+    toast.success(`Pages ready for ${found} of ${setupRows.value.length} dealerships`)
+  }
+  finally { detectingAll.value = false }
 }
 const ready = computed(() => setupRows.value.filter(r => r.pages.length))
 const starting = ref(false)
 async function start() {
-  if (!ready.value.length) return toast.error('None of the selected dealerships has a website')
+  if (!ready.value.length) return toast.error('No pages to scan yet', { description: 'Detect or pick the inventory pages first — the scanner never starts from a bare home page.' })
   starting.value = true
   try {
     await bs.create(setupRows.value.map(r => r.id), { pages: Object.fromEntries(setupRows.value.map(r => [r.id, r.pages])), concurrency: concurrency.value })
@@ -95,7 +126,8 @@ const FEED_CLS: Record<string, string> = { info: 'text-emerald-300/80', ok: 'tex
 
 async function pause() { await bs.pause(); toast('Paused', { description: 'Running scans keep what they found. Press Resume to continue.' }) }
 async function resume() { bs.drive() }
-async function cancelAll() { if (!confirm('Cancel the dealerships still waiting? Running scans stop and keep what they found.')) return; await bs.cancel() }
+const cancelAsk = ref(false)
+async function cancelAll() { cancelAsk.value = false; await bs.cancel(); toast('Cancelled the rest', { description: 'Running scans stop and keep what they found. Everything scanned so far is saved.' }) }
 async function retry(i: BatchItem) { await bs.requeue(i.dealershipId); toast(`${i.name} queued again`) }
 
 // ─── Email step ───
@@ -162,8 +194,26 @@ const viewId = ref<string | null>(null)
 const viewOpen = ref(false)
 
 // ─── Lifecycle ───
+/** Closing while scans run: keep going in the background (this browser tab stays the engine) or pause. */
+const closeAsk = ref(false)
+const background = ref(false)
+bs.whenFinished((b, reason) => {
+  if (open.value || !b) return
+  if (reason === 'finished') toast.success(`Batch finished — ${b.counts.done} of ${b.counts.total} dealerships scanned`, { description: `${b.totals.vehicles} vehicles · ${b.totals.withoutReal} without a real photo. Open Mission Control to send the emails.`, duration: 15_000, action: { label: 'Open', onClick: () => { open.value = true } } })
+})
 watch(open, async (v) => {
-  if (!v) { bs.dispose(); if (clock) clearInterval(clock); clock = null; return }
+  if (!v) {
+    if (background.value) { background.value = false; return }
+    bs.dispose(); if (clock) clearInterval(clock); clock = null
+    return
+  }
+  // Re-opened while a batch still runs in the background → just show it.
+  if (driving.value && batch.value) {
+    if (props.batchId && props.batchId !== batch.value.id) toast('Another batch is still running', { description: 'Finish, pause or cancel it before opening a different one.' })
+    else if (!props.batchId && props.dealershipIds?.length) toast('A batch is still running', { description: 'Finish, pause or cancel it before starting a new one.' })
+    step.value = 'scan'
+    return
+  }
   step.value = 'setup'
   sentResults.value = []
   focus.value = null
@@ -174,7 +224,12 @@ watch(open, async (v) => {
       step.value = batch.value?.finished ? 'email' : 'scan'
       t0.value = new Date(batch.value?.createdAt || Date.now()).getTime()
       if (step.value === 'email') await goEmail()
-      else bs.drive()
+      else {
+        // Paused dealerships continue where they left off; failed ones wait for Retry.
+        const n = await bs.resumeStopped()
+        if (n) toast(`Resuming ${n} paused dealership${n === 1 ? '' : 's'}`, { description: 'They continue from where they stopped.' })
+        bs.drive()
+      }
     }
     catch { toast.error('Could not load that batch'); open.value = false; return }
   }
@@ -184,9 +239,12 @@ watch(open, async (v) => {
 }, { immediate: true })
 onBeforeUnmount(() => { if (clock) clearInterval(clock) })
 function closeDialog() {
-  if (driving.value && !confirm('Scans are running. Close Mission Control? They pause and you can resume from the Dealerships page.')) return
+  if (driving.value) { closeAsk.value = true; return }
   open.value = false
 }
+function closeKeepRunning() { closeAsk.value = false; background.value = true; open.value = false; toast('Still scanning in the background', { description: 'Keep this browser tab open. The Batches button on the Dealerships page shows progress; you will be told when it finishes.' }) }
+async function closePause() { closeAsk.value = false; await bs.pause(); open.value = false; toast('Paused', { description: 'Everything found so far is saved. Resume from the Batches menu whenever you like.' }) }
+async function closeCancel() { closeAsk.value = false; await bs.cancel(); open.value = false; toast('Batch cancelled', { description: 'Scanned dealerships keep their audits. Waiting ones were dropped.' }) }
 const short = (u: string) => u.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')
 const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(new Date(iso), { addSuffix: true }) : '' } catch { return '' } }
 </script>
@@ -228,28 +286,35 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
               </div>
               <div class="ml-auto flex items-center gap-3">
                 <div class="text-xs text-zinc-400">Scan <Select v-model="concurrency"><SelectTrigger class="inline-flex h-8 w-16 ml-1 mr-1 bg-white/5 border-white/10 text-zinc-100"><SelectValue /></SelectTrigger><SelectContent><SelectItem :value="1">1</SelectItem><SelectItem :value="2">2</SelectItem><SelectItem :value="3">3</SelectItem></SelectContent></Select> at a time</div>
-                <Button class="h-10 gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold px-5" :disabled="starting || !ready.length" @click="start"><Loader2 v-if="starting" class="size-4 animate-spin" /><Play v-else class="size-4" /> Start scanning {{ ready.length }} dealership{{ ready.length === 1 ? '' : 's' }}</Button>
+                <Button v-if="missingPages.length" variant="outline" class="h-10 gap-2 bg-transparent border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200" :disabled="detectingAll" @click="detectAll"><Loader2 v-if="detectingAll" class="size-4 animate-spin" /><Wand2 v-else class="size-4" /> Detect pages for {{ missingPages.length }}</Button>
+                <Button class="h-10 gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold px-5" :disabled="starting || detectingAll || !ready.length" @click="start"><Loader2 v-if="starting" class="size-4 animate-spin" /><Play v-else class="size-4" /> Start scanning {{ ready.length }} dealership{{ ready.length === 1 ? '' : 's' }}<span v-if="setupRows.length - ready.length" class="ml-1 rounded bg-black/20 px-1.5 text-[11px] font-medium">{{ setupRows.length - ready.length }} skipped</span></Button>
               </div>
             </div>
             <div class="rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
               <table class="w-full text-sm">
                 <thead class="text-[10px] uppercase tracking-wider text-zinc-500 bg-white/[0.03]"><tr><th class="text-left font-medium px-4 py-2.5 w-10">#</th><th class="text-left font-medium px-3 py-2.5">Dealership</th><th class="text-left font-medium px-3 py-2.5">Pages to scan</th><th class="px-3 py-2.5" /></tr></thead>
                 <tbody class="divide-y divide-white/5">
-                  <tr v-for="(r, i) in setupRows" :key="r.id" :class="!r.pages.length && 'opacity-50'">
+                  <tr v-for="(r, i) in setupRows" :key="r.id" :class="!r.pages.length && !r.detecting && 'bg-amber-500/[0.04]'">
                     <td class="px-4 py-3 font-mono text-xs text-zinc-500">{{ String(i + 1).padStart(2, '0') }}</td>
                     <td class="px-3 py-3"><p class="font-medium">{{ r.name }}</p><p class="text-[11px] text-zinc-500">{{ r.website ? short(r.website) : 'No website — will be skipped' }}</p></td>
                     <td class="px-3 py-3">
                       <div class="flex flex-wrap gap-1.5">
                         <span v-for="p in r.pages" :key="p" class="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 ring-1 ring-emerald-500/25 text-emerald-200 px-2 py-0.5 text-[11px] font-mono max-w-[320px] truncate" :title="p"><Globe class="size-3 shrink-0" />{{ short(p).replace(/^[^/]+/, '') || '/' }}</span>
-                        <span v-if="!r.pages.length" class="text-[11px] text-zinc-500">—</span>
+                        <span v-if="r.detecting" class="inline-flex items-center gap-1.5 text-[11px] text-emerald-300"><Loader2 class="size-3 animate-spin" /> {{ r.detectNote || 'Looking for inventory pages…' }}</span>
+                        <span v-else-if="!r.pages.length && r.website" class="inline-flex items-center gap-1.5 text-[11px] text-amber-300"><AlertTriangle class="size-3" /> No pages yet — will be skipped{{ r.detectNote ? ` · ${r.detectNote}` : '' }}</span>
+                        <span v-else-if="!r.pages.length" class="text-[11px] text-zinc-500">—</span>
+                        <span v-else-if="r.detectNote" class="text-[11px] text-zinc-500">{{ r.detectNote }}</span>
                       </div>
                     </td>
-                    <td class="px-3 py-3 text-right whitespace-nowrap"><Button variant="outline" size="sm" class="h-7 gap-1.5 text-xs bg-transparent border-white/15 text-zinc-200 hover:bg-white/10 hover:text-white" :disabled="!r.website" @click="editPages(r)"><Pencil class="size-3.5" /> {{ r.pages.length > 1 || (r.pages.length === 1 && r.pages[0] !== r.website) ? 'Edit pages' : 'Pick pages' }}</Button></td>
+                    <td class="px-3 py-3 text-right whitespace-nowrap space-x-1.5">
+                      <Button variant="outline" size="sm" class="h-7 gap-1.5 text-xs bg-transparent border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200" :disabled="!r.website || r.detecting || detectingAll" @click="detectFor(r)"><Wand2 class="size-3.5" /> {{ r.pages.length ? 'Re-detect' : 'Detect' }}</Button>
+                      <Button variant="outline" size="sm" class="h-7 gap-1.5 text-xs bg-transparent border-white/15 text-zinc-200 hover:bg-white/10 hover:text-white" :disabled="!r.website || r.detecting" @click="editPages(r)"><Pencil class="size-3.5" /> {{ r.pages.length ? 'Edit' : 'Pick' }}</Button>
+                    </td>
                   </tr>
                 </tbody>
               </table>
             </div>
-            <p class="text-[11px] text-zinc-500 flex items-center gap-1.5"><Zap class="size-3.5 text-emerald-400" /> Tip: "Pick pages" opens the site and lists its inventory menus — one click per page. Without picked pages the scanner starts from the home page and follows the inventory links itself.</p>
+            <p class="text-[11px] text-zinc-500 flex items-center gap-1.5"><Zap class="size-3.5 text-emerald-400" /> "Detect" opens the site in the cloud browser, finds its inventory menus (AI helps with odd wording), opens each candidate and keeps only pages that really list vehicles — then saves them on the dealership. Dealerships without pages are skipped, never scanned blind.</p>
           </div>
         </div>
 
@@ -271,7 +336,7 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
               <div class="flex flex-wrap gap-1.5 mt-1">
                 <Button v-if="driving" size="sm" variant="outline" class="h-7 gap-1.5 text-xs bg-transparent border-white/15 text-zinc-100 hover:bg-white/10" @click="pause"><Pause class="size-3.5" /> Pause</Button>
                 <Button v-else-if="!batch.finished" size="sm" class="h-7 gap-1.5 text-xs bg-emerald-500 hover:bg-emerald-400 text-black" @click="resume"><Play class="size-3.5" /> Resume</Button>
-                <Button v-if="!batch.finished" size="sm" variant="ghost" class="h-7 gap-1.5 text-xs text-zinc-400 hover:text-rose-300 hover:bg-rose-500/10" @click="cancelAll"><Square class="size-3 fill-current" /> Cancel rest</Button>
+                <Button v-if="!batch.finished" size="sm" variant="ghost" class="h-7 gap-1.5 text-xs text-zinc-400 hover:text-rose-300 hover:bg-rose-500/10" @click="cancelAsk = true"><Square class="size-3 fill-current" /> Cancel rest</Button>
                 <Button size="sm" class="h-7 gap-1.5 text-xs" :class="batch.finished ? 'bg-white text-black hover:bg-zinc-200' : 'bg-white/10 text-white hover:bg-white/20'" :disabled="!doneItems.length" @click="goEmail"><Mail class="size-3.5" /> Emails <span v-if="doneItems.length" class="rounded-full bg-black/20 px-1.5 text-[10px] tabular-nums">{{ doneItems.length }}</span></Button>
               </div>
             </div>
@@ -351,10 +416,15 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
                 <div v-else-if="!batch.finished && !driving" class="rounded-2xl border border-dashed border-white/15 p-10 text-center text-zinc-400">
                   <Pause class="size-6 mx-auto mb-2" /> Paused — {{ batch.counts.queued }} dealership{{ batch.counts.queued === 1 ? '' : 's' }} waiting. <button type="button" class="text-emerald-300 hover:underline" @click="resume">Resume</button>
                 </div>
+                <div v-else-if="batch.finished && !doneItems.length" class="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-6 text-center">
+                  <AlertTriangle class="size-8 mx-auto text-rose-400" />
+                  <p class="mt-2 text-lg font-semibold">Nothing was scanned</p>
+                  <p class="text-sm text-zinc-400">{{ batch.counts.failed }} failed{{ batch.counts.skipped ? `, ${batch.counts.skipped} skipped` : '' }}{{ batch.counts.cancelled ? `, ${batch.counts.cancelled} cancelled` : '' }}. Pick a dealership on the left to see why — most often its inventory pages are not picked yet. Fix the pages, then press Retry.</p>
+                </div>
                 <div v-else-if="batch.finished" class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6 text-center">
                   <CheckCircle2 class="size-8 mx-auto text-emerald-400" />
                   <p class="mt-2 text-lg font-semibold">All done — {{ batch.totals.vehicles.toLocaleString() }} vehicles checked across {{ doneItems.length }} dealership{{ doneItems.length === 1 ? '' : 's' }}</p>
-                  <p class="text-sm text-zinc-400">{{ batch.totals.withoutReal.toLocaleString() }} without a real photo{{ withoutPct !== null ? ` (${withoutPct}%)` : '' }}. Audits are saved. Pick a dealership on the left for details, or go to Emails.</p>
+                  <p class="text-sm text-zinc-400">{{ batch.totals.withoutReal.toLocaleString() }} without a real photo{{ withoutPct !== null ? ` (${withoutPct}%)` : '' }}.{{ batch.counts.failed ? ` ${batch.counts.failed} failed — see the left rail.` : '' }} Audits are saved. Pick a dealership on the left for details, or go to Emails.</p>
                   <Button class="mt-4 h-10 gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold" @click="goEmail"><Mail class="size-4" /> Continue to emails</Button>
                 </div>
               </div>
@@ -448,6 +518,40 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
           <DialogContent class="sm:max-w-4xl max-h-[92vh] p-0 gap-0 overflow-hidden flex flex-col">
             <DialogHeader class="px-5 pt-5 pb-3 border-b"><DialogTitle class="text-base">{{ previewRow?.name }} — {{ tplList.find(t => t.id === previewRow?.templateId)?.name }}</DialogTitle><DialogDescription class="text-xs">Filled with this dealership's latest audit and contact — exactly what will be sent.</DialogDescription></DialogHeader>
             <CrmEmailPreview v-model:device="previewDevice" class="flex-1 min-h-0 rounded-none border-0" :html="previewRendered?.html || ''" :subject="previewRendered?.subject" :preheader="previewRendered?.preheader" :from="previewCtx?.from" :to="previewCtx?.to" :loading="previewLoading" max-height="calc(92vh - 110px)" />
+          </DialogContent>
+        </Dialog>
+        <!-- Close while running -->
+        <Dialog v-model:open="closeAsk">
+          <DialogContent class="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle class="flex items-center gap-2"><DoorOpen class="size-4 text-emerald-600" /> Scans are still running</DialogTitle>
+              <DialogDescription>{{ batch?.counts.running || 0 }} scanning now, {{ batch?.counts.queued || 0 }} waiting. Everything found so far is already saved — choose what happens next.</DialogDescription>
+            </DialogHeader>
+            <div class="grid gap-2">
+              <button type="button" class="rounded-xl border p-3 text-left hover:bg-accent/60 transition-colors" @click="closeKeepRunning">
+                <p class="text-sm font-semibold flex items-center gap-2"><Zap class="size-4 text-emerald-600" /> Keep scanning in the background</p>
+                <p class="text-xs text-muted-foreground mt-0.5">Close this window and carry on working. Keep this browser tab open — the Batches button shows progress and you'll get a message when it's done.</p>
+              </button>
+              <button type="button" class="rounded-xl border p-3 text-left hover:bg-accent/60 transition-colors" @click="closePause">
+                <p class="text-sm font-semibold flex items-center gap-2"><Pause class="size-4 text-amber-600" /> Pause and close</p>
+                <p class="text-xs text-muted-foreground mt-0.5">Running scans stop and keep their vehicles. Resume any time from Batches — they continue where they left off.</p>
+              </button>
+              <button type="button" class="rounded-xl border border-rose-500/30 p-3 text-left hover:bg-rose-500/5 transition-colors" @click="closeCancel">
+                <p class="text-sm font-semibold flex items-center gap-2 text-rose-600"><Ban class="size-4" /> Cancel the rest</p>
+                <p class="text-xs text-muted-foreground mt-0.5">Drop the waiting dealerships. Finished audits stay in the CRM.</p>
+              </button>
+            </div>
+            <DialogFooter><Button variant="ghost" @click="closeAsk = false">Keep watching</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+        <!-- Cancel the rest -->
+        <Dialog v-model:open="cancelAsk">
+          <DialogContent class="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle class="flex items-center gap-2"><Ban class="size-4 text-rose-600" /> Cancel the waiting dealerships?</DialogTitle>
+              <DialogDescription>{{ batch?.counts.queued || 0 }} waiting will be dropped. Running scans stop and keep what they found; finished audits stay in the CRM. You can still email the finished ones.</DialogDescription>
+            </DialogHeader>
+            <DialogFooter class="gap-2"><Button variant="ghost" @click="cancelAsk = false">Keep going</Button><Button variant="destructive" @click="cancelAll">Cancel the rest</Button></DialogFooter>
           </DialogContent>
         </Dialog>
         <CrmScanPagesEditor v-model:open="showPages" :dealership="editing" @saved="pagesSaved" />

@@ -62,7 +62,7 @@ export function safeUrl(raw: string) {
   return u.href
 }
 
-async function loadDealership(db: Db, dealershipId: string) {
+export async function loadDealership(db: Db, dealershipId: string) {
   const { ObjectId } = await import('mongodb')
   if (!ObjectId.isValid(dealershipId)) throw createError({ statusCode: 400, statusMessage: 'Invalid dealership' })
   const d = await db.collection(CRM_COLLECTIONS.dealerships).findOne({ _id: new ObjectId(dealershipId) })
@@ -71,7 +71,7 @@ async function loadDealership(db: Db, dealershipId: string) {
 }
 
 // ───────────────────────── Browser tab ─────────────────────────
-interface Tab { browser: BrowserHandle, conn: CdpConnection, sid: string, targetId: string, loading: boolean, url: string, status: number | null, mainFrameId: string }
+export interface Tab { browser: BrowserHandle, conn: CdpConnection, sid: string, targetId: string, loading: boolean, url: string, status: number | null, mainFrameId: string }
 
 /**
  * One warm browser per server instance, shared by previews and scans (each gets its own tab).
@@ -109,7 +109,7 @@ function scheduleIdleClose() {
   }, WARM_IDLE_MS)
 }
 
-async function openTab(): Promise<Tab> {
+export async function openTab(): Promise<Tab> {
   if (pool.tabs >= MAX_TABS) throw createError({ statusCode: 429, statusMessage: 'The scanner is busy', message: 'The scanner is busy with other pages — wait a moment and try again' })
   const browser = await warmBrowser()
   pool.tabs++
@@ -149,13 +149,13 @@ async function openTab(): Promise<Tab> {
   }
 }
 
-async function closeTab(t: Tab) {
+export async function closeTab(t: Tab) {
   pool.tabs = Math.max(0, pool.tabs - 1)
   await t.conn.send('Target.closeTarget', { targetId: t.targetId }, undefined, 5000).catch(() => {})
   scheduleIdleClose()
 }
 
-async function evaluate<T = any>(t: Tab, expression: string, timeoutMs = 30_000): Promise<T> {
+export async function evaluate<T = any>(t: Tab, expression: string, timeoutMs = 30_000): Promise<T> {
   const r = await t.conn.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: true }, t.sid, timeoutMs)
   if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description?.split('\n')[0] || r.exceptionDetails.text || 'Script error')
   return r.result?.value as T
@@ -169,11 +169,22 @@ async function waitForSettle(t: Tab, ms = 15_000) {
 
 /** Sites that say "too many requests" (429) or "busy" (503) get a polite pause and up to two retries. */
 const RATE_LIMIT_WAITS = [4000, 9000]
-async function goto(t: Tab, url: string, timeoutMs = 25_000, log?: (s: string) => void) {
+export async function goto(t: Tab, url: string, timeoutMs = 25_000, log?: (s: string) => void) {
   for (let attempt = 0; ; attempt++) {
     t.loading = true
     t.status = null
-    const r = await t.conn.send('Page.navigate', { url }, t.sid, timeoutMs)
+    let r: any
+    try { r = await t.conn.send('Page.navigate', { url }, t.sid, timeoutMs) }
+    catch (e: any) {
+      // Some dealer sites take ages to answer (bot checks, slow CDNs). Give the page one more
+      // stretch; if anything rendered we carry on, otherwise it's a clear "did not respond".
+      if (!/timed out/i.test(String(e?.message))) throw e
+      log?.(`${url.replace(/^https?:\/\//, '')} is slow to answer — waiting a little longer`)
+      await waitForSettle(t, 20_000)
+      const alive = await evaluate<boolean>(t, '!!document.body && document.body.innerText.trim().length > 0', 5_000).catch(() => false)
+      if (!alive) throw createError({ statusCode: 504, statusMessage: 'The website did not respond', message: `${url.replace(/^https?:\/\//, '')} did not respond within ${Math.round((timeoutMs + 20_000) / 1000)} s. Try again later or check the address.` })
+      return
+    }
     if (r?.errorText) throw createError({ statusCode: 502, statusMessage: 'Could not open the site', message: `Could not open ${url.replace(/^https?:\/\//, '')} (${r.errorText})` })
     await waitForSettle(t, timeoutMs)
     const limited = t.status === 429 || t.status === 503 || t.status === 509
@@ -550,7 +561,8 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     // Each inventory page advertises its own total; the next one starts fresh.
     advertised = null
     }
-    if (doc.vehicles.length === startCount) throw createError({ statusCode: 422, statusMessage: 'No vehicle cards found', message: urls.length > 1 ? 'No vehicle cards were found on any of the pages — check the scan pages for this dealership.' : 'No vehicle cards found on this page. Pick the inventory / search results page (e.g. Used Inventory), then press Continue.' })
+    if (doc.vehicles.length === startCount && startCount > 0) log('Nothing new on these pages — keeping the vehicles found earlier')
+    if (doc.vehicles.length === 0) throw createError({ statusCode: 422, statusMessage: 'No vehicle cards found', message: urls.length > 1 ? 'No vehicle cards were found on any of the pages — check the scan pages for this dealership.' : 'No vehicle cards found on this page. Pick the inventory / search results page (e.g. Used Inventory), then press Continue.' })
     // Keep what was collected even if the photo step is cut short.
     await col.updateOne({ _id: doc._id }, { $set: { vehicles: doc.vehicles, progress: doc.progress, heartbeatAt: new Date().toISOString() } }).catch(() => {})
 

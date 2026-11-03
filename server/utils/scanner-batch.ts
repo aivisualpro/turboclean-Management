@@ -34,6 +34,8 @@ export interface BatchItem {
   claimedAt: string | null
   finishedAt: string | null
   email: { mode: 'now' | 'queue', status: 'sent' | 'queued' | 'failed' | 'skipped', emailId?: string | null, draftId?: string | null, to?: string, subject?: string, templateName?: string, error?: string | null, at: string } | null
+  /** Set when a stopped scan is queued again: the new scan continues from this one (keeps its vehicles). */
+  resumeFrom?: string | null
 }
 
 const who = (a: SessionActor | null | undefined) => a ? { id: a.id, name: a.name } : null
@@ -58,9 +60,9 @@ export function serializeBatch(b: any) {
 }
 
 /** The pages a dealership's scan should cover: its saved scan pages, else its website. */
+/** Only pages someone picked (or discovery verified) — a bare website is not scanned any more. */
 export function pagesFor(d: any): string[] {
-  const saved = (Array.isArray(d?.scanPages) ? d.scanPages : []).map((p: any) => typeof p === 'string' ? p : p?.url).filter(Boolean)
-  return saved.length ? saved : d?.website ? [d.website] : []
+  return (Array.isArray(d?.scanPages) ? d.scanPages : []).map((p: any) => typeof p === 'string' ? p : p?.url).filter(Boolean)
 }
 
 export async function createBatch(db: Db, body: any, actor: SessionActor) {
@@ -78,7 +80,7 @@ export async function createBatch(db: Db, body: any, actor: SessionActor) {
     return {
       dealershipId: id, name: d.name || '', website: d.website || '', urls,
       status: urls.length ? 'queued' : 'skipped', scanId: null, auditId: null, summary: null,
-      error: urls.length ? null : 'No website or scan pages', claimedAt: null, finishedAt: null, email: null,
+      error: urls.length ? null : (d?.website ? 'No scan pages picked — detect or pick its inventory pages first' : 'No website on this dealership'), claimedAt: null, finishedAt: null, email: null,
     } as BatchItem
   })
   // Remember page lists typed in the console as the dealership's scan pages for next time.
@@ -141,7 +143,11 @@ export async function updateBatchItem(db: Db, batchId: string, dealershipId: str
 /** Re-queue one dealership (retry a failed / skipped item, optionally with new pages). */
 export async function requeueItem(db: Db, batchId: string, dealershipId: string, urls?: string[]) {
   const clean = (urls || []).map(u => { try { return safeUrl(str(u, 2000)) } catch { return '' } }).filter(Boolean).slice(0, 30)
-  const patch: Partial<BatchItem> = { status: 'queued', scanId: null, auditId: null, summary: null, error: null, claimedAt: null, finishedAt: null, email: null }
+  const current = await db.collection(BATCHES_COLLECTION).findOne({ _id: oid(batchId) }, { projection: { items: 1 } })
+  const item = ((current?.items || []) as BatchItem[]).find(i => i.dealershipId === dealershipId)
+  // A paused / interrupted scan picks up where it left off; a failed one starts clean.
+  const resumeFrom = item && item.status === 'stopped' && item.scanId ? item.scanId : null
+  const patch: Partial<BatchItem> = { status: 'queued', scanId: null, auditId: null, summary: null, error: null, claimedAt: null, finishedAt: null, email: null, resumeFrom }
   if (clean.length) patch.urls = clean
   await updateBatchItem(db, batchId, dealershipId, patch)
   await db.collection(BATCHES_COLLECTION).updateOne({ _id: oid(batchId) }, { $set: { status: 'running' } })
