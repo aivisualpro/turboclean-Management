@@ -30,6 +30,7 @@ export const LEAD_SOURCES = [
   'Existing client introduction',
   'Dealer group relationship',
   'Website/inbound',
+  'Web discovery',
   'Other',
 ] as const
 

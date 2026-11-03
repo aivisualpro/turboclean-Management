@@ -68,7 +68,7 @@ async function saveSettings() {
 </script>
 
 <template>
-  <div class="h-full flex flex-col p-2 sm:max-w-4xl mx-auto w-full">
+  <div class="h-full flex flex-col p-2 sm:max-w-6xl mx-auto w-full">
     <div v-if="loading" class="flex-1 flex items-center justify-center">
       <Loader2 class="size-6 animate-spin text-primary" />
     </div>
@@ -231,6 +231,9 @@ async function saveSettings() {
           </Button>
         </div>
       </div>
+
+      <!-- Prospecting search area (used by "Search Web" on /crm/dealership) -->
+      <SettingsProspectingCard />
 
     </div>
   </div>

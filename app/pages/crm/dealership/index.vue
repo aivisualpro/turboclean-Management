@@ -8,7 +8,7 @@ import { INTERACTION_ICONS } from '~/constants/crm-icons'
 import {
   Plus, Search, Store, ShieldAlert, Download, RefreshCw, ChevronUp, ChevronDown,
   ChevronsUpDown, X, Filter, UserCircle2,
-  CheckSquare, Tag, UserCheck, Loader2, ExternalLink, Briefcase, Trophy, SlidersHorizontal, Upload,
+  CheckSquare, Tag, UserCheck, Loader2, ExternalLink, Briefcase, Trophy, SlidersHorizontal, Upload, Binoculars,
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { format, formatDistanceToNow } from 'date-fns'
@@ -326,6 +326,12 @@ const bulkAssign = (u: UserOpt | null) => bulk(u ? `Assigned to ${u.name}` : 'Un
 
 // ─── Actions ───
 const showForm = ref(false)
+// "Search Web" — Google Places discovery (deep link: /crm/dealership?discover=1)
+// (No URL syncing on open/close: query-only navigations trigger the clear-header middleware.)
+const showDiscover = ref(route.query.discover === '1')
+async function onDiscoverImported() {
+  try { await Promise.all([fetchDealerships(), loadFacts()]) } catch {}
+}
 const refreshing = ref(false)
 async function refresh() {
   refreshing.value = true
@@ -353,6 +359,7 @@ const searchEl = ref<any>(null)
 const isTyping = (e: KeyboardEvent) => ['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName) || (e.target as HTMLElement)?.isContentEditable
 onKeyStroke('/', (e) => { if (!isTyping(e)) { e.preventDefault(); (searchEl.value?.$el ?? searchEl.value)?.focus?.() } })
 onKeyStroke('n', (e) => { if (!isTyping(e) && canAdd.value && !showForm.value) { e.preventDefault(); showForm.value = true } })
+onKeyStroke('d', (e) => { if (!isTyping(e) && canAdd.value && !showForm.value && !showDiscover.value) { e.preventDefault(); showDiscover.value = true } })
 onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
 </script>
 
@@ -450,6 +457,9 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
         </Button>
         <Button v-if="canAdd" variant="outline" size="icon" class="size-8" title="Import CSV" @click="navigateTo('/crm/data-quality?tab=import')">
           <Upload class="size-4" />
+        </Button>
+        <Button v-if="canAdd" variant="outline" size="sm" class="h-8 gap-1.5 border-primary/50 text-primary hover:bg-primary/10 hover:text-primary" title="Search Web — discover dealerships near base (Google Places)" @click="showDiscover = true">
+          <Binoculars class="size-4" /><span class="hidden lg:inline">Search Web</span>
         </Button>
         <Button v-if="canAdd" size="sm" class="h-8 gap-1.5" @click="showForm = true">
           <Plus class="size-4" /><span class="hidden lg:inline">New dealership</span>
@@ -675,6 +685,10 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
     </div>
 
     <CrmDealershipForm v-model:open="showForm" @saved="open($event)" />
+
+    <ClientOnly>
+      <CrmDiscoverDialog v-model:open="showDiscover" @imported="onDiscoverImported" />
+    </ClientOnly>
 
     <Dialog v-model:open="showBulkLost">
       <DialogContent class="sm:max-w-lg">

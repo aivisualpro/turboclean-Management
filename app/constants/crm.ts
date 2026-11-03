@@ -7,6 +7,7 @@ export const LEAD_SOURCES = [
   'Existing client introduction',
   'Dealer group relationship',
   'Website/inbound',
+  'Web discovery',
   'Other',
 ] as const
 
@@ -75,6 +76,7 @@ export const LEAD_SOURCE_STYLE: Record<string, { dot: string, badge: string }> =
   'Existing client introduction': { dot: 'bg-lime-500', badge: 'bg-lime-500/10 text-lime-700 dark:text-lime-300 border-lime-500/20' },
   'Dealer group relationship': { dot: 'bg-amber-500', badge: 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20' },
   'Website/inbound': { dot: 'bg-violet-500', badge: 'bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/20' },
+  'Web discovery': { dot: 'bg-cyan-500', badge: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-500/20' },
   'Other': { dot: 'bg-zinc-400', badge: 'bg-zinc-500/10 text-zinc-700 dark:text-zinc-300 border-zinc-500/20' },
 }
 
