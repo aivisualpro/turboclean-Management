@@ -1,10 +1,4 @@
-import { closeSession, getScannerSession } from '../../../../utils/scanner-session'
-import { requireActor } from '../../../../utils/automation-http'
-
-/** DELETE /api/scanner/sessions/:id — close the browser. */
-export default defineEventHandler(async (event) => {
-  const actor = await requireActor(event)
-  const s = getScannerSession(getRouterParam(event, 'id')!, actor)
-  await closeSession(s.id)
-  return { ok: true }
+/** Retired: the live-session scanner was replaced by /api/scanner/preview + /api/scanner/run. Safe to delete this folder. */
+export default defineEventHandler(() => {
+  throw createError({ statusCode: 410, statusMessage: 'Gone', message: 'The scanner was updated — reload the page' })
 })

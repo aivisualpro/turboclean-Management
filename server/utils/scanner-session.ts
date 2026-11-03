@@ -1,110 +1,54 @@
 /**
- * Inventory Scanner — live browser sessions + the scan itself.
+ * Inventory Scanner — the scan engine (stateless; built for serverless hosting such as Vercel).
  *
- * One session = one private headless Chrome tab at desktop size (1440×900) that the user drives
- * from the CRM through a live screencast (clicks, scrolling, typing are forwarded). "Continue"
- * starts the scan in that same tab: scroll to load every card → collect → next page / load more →
- * repeat → download every main photo → analyse → verdicts. Progress, frames and results stream to
- * the browser over Server-Sent Events.
+ * Every request stands on its own and starts its own headless Chromium, so nothing lives in
+ * server memory between requests:
+ *  - preview  → opens the dealer site at desktop size (1440×900), returns a full-page screenshot,
+ *               the page title, inventory shortcuts and how many vehicle cards it can see.
+ *  - run      → one long streaming request (Server-Sent Events): scroll to load every card → collect
+ *               → next page / load more → repeat → download every main photo → analyse → verdicts.
+ *               Progress and low-res live frames stream to the browser while it works.
+ *  - the scan itself is written to MongoDB (turboCleanScannerScans) as it goes, so results survive
+ *    a dropped connection and the review / save steps are plain requests against the stored scan.
  *
- * Sessions live in memory on the server process (kept on globalThis so dev hot-reloads don't orphan
- * Chrome) and close after 20 idle minutes. Saving writes an append-only CRM audit (source
- * 'automated') plus the full scan in turboCleanScannerScans for traceability.
+ * No images are stored anywhere: photos are downloaded only to measure them, then discarded. The
+ * review screen shows the dealer's own image URLs.
+ *
+ * Time budget: Vercel Pro allows up to 800 s per request. Collection stops at ~55% of the budget and
+ * photo checks at ~88%, so there is always time left to classify and save what was found.
  */
-import { randomUUID } from 'node:crypto'
 import process from 'node:process'
 import type { Db } from 'mongodb'
 import type { SessionActor } from './crm'
 import { CRM_COLLECTIONS, str } from './crm'
-import { openBrowser, SCANNER_VIEWPORT } from './scanner-cdp'
-import type { BrowserHandle } from './scanner-cdp'
+import { isServerless, openBrowser, SCANNER_VIEWPORT } from './scanner-cdp'
+import type { BrowserHandle, CdpConnection } from './scanner-cdp'
 import { ANALYZE_FN_JS, EXTRACT_JS, FIND_NEXT_JS, NAV_LINKS_JS, SCANNER_BOOTSTRAP_JS, SCROLL_STEP_JS } from './scanner-page'
-import { classify, downloadImage, finalVerdict, listRules, summarize, VERDICT_LABEL } from './scanner-images'
+import { classify, downloadImage, finalVerdict, listRules, RULES_COLLECTION, summarize, VERDICT_LABEL } from './scanner-images'
 import type { ImageCluster, ImageInfo, PhotoVerdict, ScanVehicle } from './scanner-images'
 
 export const SCANS_COLLECTION = 'turboCleanScannerScans'
-const IDLE_MS = 20 * 60_000
-const MAX_SESSIONS = 3
+export const ENGINE_VERSION = '2.0'
 const MAX_PAGES = 60
 const MAX_VEHICLES = 2500
-const SCAN_TIME_LIMIT_MS = 8 * 60_000
+const MAX_CONCURRENT = 2
+/** A running scan that has not written a heartbeat for this long was cut off (deploy, timeout, crash). */
+const STALE_MS = 120_000
 
-export type ScanPhase = 'browsing' | 'collecting' | 'analyzing' | 'done' | 'stopped' | 'error'
-export interface ScanProgress { phase: ScanPhase, page: number, vehicles: number, advertised: number | null, analyzed: number, toAnalyze: number, message: string, startedAt: string | null, finishedAt: string | null, pagesVisited: string[] }
-
-interface Listener { (event: string, data: any): void }
-
-export interface ScannerSession {
-  id: string
-  dealershipId: string
-  dealershipName: string
-  ownerId: string
-  createdAt: string
-  lastActivity: number
-  browser: BrowserHandle
-  sid: string
-  targetId: string
-  url: string
-  title: string
-  loading: boolean
-  navLinks: { label: string, href: string, kind: string }[]
-  history: { canBack: boolean, canForward: boolean }
-  frame: { data: string, w: number, h: number, ts: number } | null
-  listeners: Set<Listener>
-  progress: ScanProgress
-  log: { at: string, text: string }[]
-  vehicles: ScanVehicle[]
-  images: Map<string, ImageInfo>
-  clusters: ImageCluster[]
-  countStockAsMissing: boolean
-  evidence: string | null
-  abort: boolean
-  stopRequested: boolean
-  scanning: boolean
-  closed: boolean
-  savedAuditId: string | null
+/** Seconds one scan may take: Vercel Pro max is 800 s (maxDuration in nuxt.config.ts). */
+function budgetMs() {
+  const s = Number(process.env.SCANNER_MAX_SECONDS) || (isServerless() ? 780 : 1500)
+  return Math.max(60, s) * 1000
 }
+
+export type ScanPhase = 'collecting' | 'analyzing' | 'done' | 'stopped' | 'error'
+export interface ScanProgress { phase: ScanPhase, page: number, vehicles: number, advertised: number | null, analyzed: number, toAnalyze: number, message: string, startedAt: string, finishedAt: string | null, pagesVisited: string[] }
+export type ScanStatus = 'running' | 'done' | 'stopped' | 'failed' | 'saved' | 'interrupted'
 
 const g = globalThis as any
-const sessions: Map<string, ScannerSession> = g.__zrzScannerSessions ||= new Map()
-if (!g.__zrzScannerSweeper) {
-  g.__zrzScannerSweeper = setInterval(() => {
-    for (const s of sessions.values()) if (!s.scanning && Date.now() - s.lastActivity > IDLE_MS) closeSession(s.id).catch(() => {})
-  }, 60_000)
-  const killAll = () => { for (const s of sessions.values()) s.browser.close().catch(() => {}) }
-  process.once('exit', killAll)
-}
+const live: Set<BrowserHandle> = g.__zrzScannerBrowsers ||= new Set()
 
-export function getScannerSession(id: string, actor?: SessionActor | null) {
-  const s = sessions.get(id)
-  if (!s || s.closed) throw createError({ statusCode: 404, statusMessage: 'Scanner session ended', message: 'This scanner session has ended — open the scanner again' })
-  if (actor && s.ownerId !== actor.id) throw createError({ statusCode: 403, statusMessage: 'This scanner session belongs to someone else' })
-  s.lastActivity = Date.now()
-  return s
-}
-
-function emit(s: ScannerSession, event: string, data: any) {
-  for (const l of s.listeners) { try { l(event, data) } catch {} }
-}
-function log(s: ScannerSession, text: string) {
-  const entry = { at: new Date().toISOString(), text }
-  s.log.push(entry)
-  if (s.log.length > 200) s.log.shift()
-  emit(s, 'log', entry)
-}
-export function publicState(s: ScannerSession) {
-  return {
-    id: s.id, dealershipId: s.dealershipId, dealershipName: s.dealershipName, url: s.url, title: s.title, loading: s.loading,
-    navLinks: s.navLinks, history: s.history, viewport: SCANNER_VIEWPORT, progress: s.progress, scanning: s.scanning,
-    hasResults: s.vehicles.length > 0 && !s.scanning, savedAuditId: s.savedAuditId, browser: s.browser.kind,
-  }
-}
-const pushState = (s: ScannerSession) => emit(s, 'state', publicState(s))
-
-export function subscribe(s: ScannerSession, l: Listener) {
-  s.listeners.add(l)
-  return () => s.listeners.delete(l)
-}
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 // ───────────────────────── URL safety ─────────────────────────
 export function safeUrl(raw: string) {
@@ -119,443 +63,534 @@ export function safeUrl(raw: string) {
   return u.href
 }
 
-// ───────────────────────── Lifecycle ─────────────────────────
-export async function createSession(db: Db, dealershipId: string, urlInput: string | undefined, actor: SessionActor) {
+async function loadDealership(db: Db, dealershipId: string) {
   const { ObjectId } = await import('mongodb')
   if (!ObjectId.isValid(dealershipId)) throw createError({ statusCode: 400, statusMessage: 'Invalid dealership' })
   const d = await db.collection(CRM_COLLECTIONS.dealerships).findOne({ _id: new ObjectId(dealershipId) })
   if (!d) throw createError({ statusCode: 404, statusMessage: 'Dealership not found' })
-  const raw = str(urlInput, 1000) || d.website
-  if (!raw) throw createError({ statusCode: 400, statusMessage: 'This dealership has no website — add one first' })
-  const url = safeUrl(raw)
-  // One live session per person: reuse slots instead of piling up browsers.
-  for (const s of sessions.values()) if (s.ownerId === actor.id && !s.scanning) await closeSession(s.id)
-  if ([...sessions.values()].filter(s => !s.closed).length >= MAX_SESSIONS) throw createError({ statusCode: 429, statusMessage: 'The scanner is busy with other scans — try again in a minute' })
-
-  return launchSession({ dealershipId, dealershipName: d.name || '', ownerId: actor.id, url })
+  return d
 }
 
-/** Start Chrome, open a desktop-size tab, wire the screencast and page events, then load `url`. */
-export async function launchSession(o: { dealershipId: string, dealershipName: string, ownerId: string, url: string }) {
-  const { dealershipId, url } = o
+// ───────────────────────── Browser tab ─────────────────────────
+interface Tab { browser: BrowserHandle, conn: CdpConnection, sid: string, loading: boolean, url: string }
+
+async function openTab(): Promise<Tab> {
+  if (live.size >= MAX_CONCURRENT) throw createError({ statusCode: 429, statusMessage: 'The scanner is busy', message: 'The scanner is busy with another scan — try again in a minute' })
   const browser = await openBrowser()
-  const { conn } = browser
-  const { targetId } = await conn.send('Target.createTarget', { url: 'about:blank' })
-  const { sessionId: sid } = await conn.send('Target.attachToTarget', { targetId, flatten: true })
-  const s: ScannerSession = {
-    id: randomUUID(), dealershipId, dealershipName: o.dealershipName, ownerId: o.ownerId, createdAt: new Date().toISOString(), lastActivity: Date.now(),
-    browser, sid, targetId, url, title: '', loading: true, navLinks: [], history: { canBack: false, canForward: false }, frame: null, listeners: new Set(),
-    progress: { phase: 'browsing', page: 0, vehicles: 0, advertised: null, analyzed: 0, toAnalyze: 0, message: '', startedAt: null, finishedAt: null, pagesVisited: [] },
-    log: [], vehicles: [], images: new Map(), clusters: [], countStockAsMissing: true, evidence: null, abort: false, stopRequested: false, scanning: false, closed: false, savedAuditId: null,
-  }
-  sessions.set(s.id, s)
-  conn.on('disconnected', (reason: string) => { if (!s.closed) { s.closed = true; emit(s, 'closed', { reason }); sessions.delete(s.id) } })
-
-  const version = await conn.send('Browser.getVersion')
-  const ua = String(version.userAgent || '').replace(/HeadlessChrome/g, 'Chrome')
-  await Promise.all([
-    conn.send('Page.enable', {}, sid),
-    conn.send('Runtime.enable', {}, sid),
-    conn.send('Network.enable', {}, sid),
-    conn.send('Network.setUserAgentOverride', { userAgent: ua, acceptLanguage: 'en-US,en;q=0.9', platform: process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'macOS' : 'Linux' }, sid),
-    conn.send('Emulation.setDeviceMetricsOverride', { width: SCANNER_VIEWPORT.width, height: SCANNER_VIEWPORT.height, deviceScaleFactor: 1, mobile: false }, sid),
-    conn.send('Page.addScriptToEvaluateOnNewDocument', { source: SCANNER_BOOTSTRAP_JS }, sid),
-    conn.send('Page.setLifecycleEventsEnabled', { enabled: true }, sid),
-  ])
-  conn.send('Browser.setDownloadBehavior', { behavior: 'deny' }).catch(() => {})
-
-  conn.on(`${sid}:Page.screencastFrame`, (p: any) => {
-    conn.send('Page.screencastFrameAck', { sessionId: p.sessionId }, sid).catch(() => {})
-    s.frame = { data: p.data, w: p.metadata?.deviceWidth || SCANNER_VIEWPORT.width, h: p.metadata?.deviceHeight || SCANNER_VIEWPORT.height, ts: Date.now() }
-    emit(s, 'frame', s.frame)
-  })
-  conn.on(`${sid}:Page.frameStartedLoading`, () => { if (!s.loading) { s.loading = true; pushState(s) } })
-  conn.on(`${sid}:Page.frameNavigated`, (p: any) => { if (!p.frame?.parentId) { s.url = p.frame.url; pushState(s) } })
-  conn.on(`${sid}:Page.navigatedWithinDocument`, (p: any) => { s.url = p.url; refreshPageInfo(s).catch(() => {}) })
-  conn.on(`${sid}:Page.loadEventFired`, () => { s.loading = false; refreshPageInfo(s).catch(() => {}) })
-  conn.on(`${sid}:Page.javascriptDialogOpening`, () => { conn.send('Page.handleJavaScriptDialog', { accept: true }, sid).catch(() => {}) })
-
-  await conn.send('Page.startScreencast', { format: 'jpeg', quality: 72, maxWidth: SCANNER_VIEWPORT.width, maxHeight: SCANNER_VIEWPORT.height, everyNthFrame: 1 }, sid)
-  log(s, `Opening ${url}`)
-  conn.send('Page.navigate', { url }, sid).then((r: any) => { if (r?.errorText) { log(s, `Could not open the site: ${r.errorText}`); emit(s, 'failure', { message: `Could not open the site (${r.errorText})` }) } }).catch(() => {})
-  return s
+  live.add(browser)
+  try {
+    const { conn } = browser
+    const { targetId } = await conn.send('Target.createTarget', { url: 'about:blank' })
+    const { sessionId: sid } = await conn.send('Target.attachToTarget', { targetId, flatten: true })
+    const t: Tab = { browser, conn, sid, loading: false, url: '' }
+    const version = await conn.send('Browser.getVersion')
+    const ua = String(version.userAgent || '').replace(/HeadlessChrome/g, 'Chrome')
+    await Promise.all([
+      conn.send('Page.enable', {}, sid),
+      conn.send('Runtime.enable', {}, sid),
+      conn.send('Network.enable', {}, sid),
+      // Present as a normal desktop Chrome on Windows — the most common dealer-site visitor.
+      conn.send('Network.setUserAgentOverride', { userAgent: ua.replace(/\(X11; Linux x86_64\)/, '(Windows NT 10.0; Win64; x64)'), acceptLanguage: 'en-US,en;q=0.9', platform: 'Windows' }, sid),
+      conn.send('Emulation.setDeviceMetricsOverride', { width: SCANNER_VIEWPORT.width, height: SCANNER_VIEWPORT.height, deviceScaleFactor: 1, mobile: false }, sid),
+      conn.send('Page.addScriptToEvaluateOnNewDocument', { source: SCANNER_BOOTSTRAP_JS }, sid),
+    ])
+    conn.send('Browser.setDownloadBehavior', { behavior: 'deny' }).catch(() => {})
+    conn.on(`${sid}:Page.frameStartedLoading`, () => { t.loading = true })
+    conn.on(`${sid}:Page.loadEventFired`, () => { t.loading = false })
+    conn.on(`${sid}:Page.frameNavigated`, (p: any) => { if (!p.frame?.parentId) t.url = p.frame.url })
+    conn.on(`${sid}:Page.navigatedWithinDocument`, (p: any) => { t.url = p.url })
+    conn.on(`${sid}:Page.javascriptDialogOpening`, () => { conn.send('Page.handleJavaScriptDialog', { accept: true }, sid).catch(() => {}) })
+    return t
+  } catch (e) { await closeTab({ browser } as Tab); throw e }
 }
 
-async function refreshPageInfo(s: ScannerSession) {
-  const [title, links, hist] = await Promise.all([
-    evaluate(s, 'document.title').catch(() => s.title),
-    evaluate(s, NAV_LINKS_JS).catch(() => s.navLinks),
-    s.browser.conn.send('Page.getNavigationHistory', {}, s.sid).catch(() => null),
-  ])
-  s.title = String(title || '')
-  if (Array.isArray(links) && links.length) s.navLinks = links
-  if (hist) s.history = { canBack: hist.currentIndex > 0, canForward: hist.currentIndex < hist.entries.length - 1 }
-  pushState(s)
+async function closeTab(t: Tab) {
+  live.delete(t.browser)
+  await t.browser.close().catch(() => {})
 }
 
-export async function closeSession(id: string) {
-  const s = sessions.get(id)
-  if (!s) return
-  s.abort = true
-  s.closed = true
-  sessions.delete(id)
-  emit(s, 'closed', { reason: 'closed' })
-  s.listeners.clear()
-  await s.browser.close().catch(() => {})
-}
-
-async function evaluate<T = any>(s: ScannerSession, expression: string, timeoutMs = 30_000): Promise<T> {
-  const r = await s.browser.conn.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: true }, s.sid, timeoutMs)
+async function evaluate<T = any>(t: Tab, expression: string, timeoutMs = 30_000): Promise<T> {
+  const r = await t.conn.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: true }, t.sid, timeoutMs)
   if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description?.split('\n')[0] || r.exceptionDetails.text || 'Script error')
   return r.result?.value as T
 }
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-// ───────────────────────── Remote control ─────────────────────────
-const KEYS: Record<string, { code: string, vk: number, text?: string }> = {
-  Enter: { code: 'Enter', vk: 13, text: '\r' }, Backspace: { code: 'Backspace', vk: 8 }, Tab: { code: 'Tab', vk: 9 }, Escape: { code: 'Escape', vk: 27 },
-  ArrowLeft: { code: 'ArrowLeft', vk: 37 }, ArrowUp: { code: 'ArrowUp', vk: 38 }, ArrowRight: { code: 'ArrowRight', vk: 39 }, ArrowDown: { code: 'ArrowDown', vk: 40 },
-  Delete: { code: 'Delete', vk: 46 }, Home: { code: 'Home', vk: 36 }, End: { code: 'End', vk: 35 }, PageUp: { code: 'PageUp', vk: 33 }, PageDown: { code: 'PageDown', vk: 34 }, ' ': { code: 'Space', vk: 32, text: ' ' },
+async function waitForSettle(t: Tab, ms = 15_000) {
+  const start = Date.now()
+  while (Date.now() - start < ms) { if (!t.loading) break; await sleep(250) }
+  await sleep(900)
 }
-export async function sendInput(s: ScannerSession, body: any) {
-  const { conn } = s.browser
-  const x = Math.max(0, Math.min(SCANNER_VIEWPORT.width, Number(body.x) || 0))
-  const y = Math.max(0, Math.min(SCANNER_VIEWPORT.height, Number(body.y) || 0))
-  switch (body.type) {
-    case 'move': return conn.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }, s.sid)
-    case 'click': {
-      await conn.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }, s.sid)
-      await conn.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1, buttons: 1 }, s.sid)
-      return conn.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1, buttons: 0 }, s.sid)
+
+async function goto(t: Tab, url: string, timeoutMs = 25_000) {
+  t.loading = true
+  const r = await t.conn.send('Page.navigate', { url }, t.sid, timeoutMs)
+  if (r?.errorText) throw createError({ statusCode: 502, statusMessage: 'Could not open the site', message: `Could not open ${url.replace(/^https?:\/\//, '')} (${r.errorText})` })
+  await waitForSettle(t, timeoutMs)
+}
+
+// ───────────────────────── Preview ─────────────────────────
+/**
+ * Open the page once and return a full-page screenshot (scrollable in the popup but not clickable),
+ * the inventory shortcuts on it and how many vehicle cards are visible.
+ */
+export async function previewSite(db: Db, dealershipId: string, urlInput: string | undefined) {
+  const d = await loadDealership(db, dealershipId)
+  const raw = str(urlInput, 2000) || d.website
+  if (!raw) throw createError({ statusCode: 400, statusMessage: 'This dealership has no website — add one first' })
+  const url = safeUrl(raw)
+  const t = await openTab()
+  try {
+    await goto(t, url)
+    // Nudge lazy-loaded images in the first few screens, then back to the top.
+    for (let y = 0; y < 3600; y += 900) { await evaluate(t, `window.scrollTo(0, ${y})`).catch(() => {}); await sleep(220) }
+    await evaluate(t, 'window.scrollTo(0, 0)').catch(() => {})
+    await sleep(700)
+    const [title, navLinks, cards, metrics] = await Promise.all([
+      evaluate<string>(t, 'document.title').catch(() => ''),
+      evaluate<any[]>(t, NAV_LINKS_JS).catch(() => []),
+      evaluate<any>(t, EXTRACT_JS, 30_000).catch(() => null),
+      t.conn.send('Page.getLayoutMetrics', {}, t.sid).catch(() => null),
+    ])
+    const fullH = Math.round(metrics?.cssContentSize?.height || metrics?.contentSize?.height || SCANNER_VIEWPORT.height)
+    let height = Math.max(SCANNER_VIEWPORT.height, Math.min(fullH, 4000))
+    let shot = await t.conn.send('Page.captureScreenshot', { format: 'jpeg', quality: 60, captureBeyondViewport: true, clip: { x: 0, y: 0, width: SCANNER_VIEWPORT.width, height, scale: 1 } }, t.sid, 30_000)
+    // Stay well inside the 4.5 MB response limit of serverless hosting.
+    if (shot.data.length > 3_000_000) {
+      height = Math.min(height, 2700)
+      shot = await t.conn.send('Page.captureScreenshot', { format: 'jpeg', quality: 45, captureBeyondViewport: true, clip: { x: 0, y: 0, width: SCANNER_VIEWPORT.width, height, scale: 1 } }, t.sid, 30_000)
     }
-    case 'wheel': return conn.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: Number(body.dx) || 0, deltaY: Math.max(-3000, Math.min(3000, Number(body.dy) || 0)) }, s.sid)
-    case 'text': { const text = str(body.text, 500); return text ? conn.send('Input.insertText', { text }, s.sid) : null }
-    case 'key': {
-      const k = KEYS[String(body.key)]
-      if (!k) return null
-      await conn.send('Input.dispatchKeyEvent', { type: k.text ? 'keyDown' : 'rawKeyDown', key: body.key, code: k.code, windowsVirtualKeyCode: k.vk, nativeVirtualKeyCode: k.vk, ...(k.text ? { text: k.text, unmodifiedText: k.text } : {}) }, s.sid)
-      return conn.send('Input.dispatchKeyEvent', { type: 'keyUp', key: body.key, code: k.code, windowsVirtualKeyCode: k.vk, nativeVirtualKeyCode: k.vk }, s.sid)
+    const finalUrl = (await evaluate<string>(t, 'location.href').catch(() => '')) || t.url || url
+    return {
+      url: finalUrl,
+      title: String(title || ''),
+      screenshot: `data:image/jpeg;base64,${shot.data}`,
+      width: SCANNER_VIEWPORT.width,
+      height,
+      pageHeight: fullH,
+      navLinks: Array.isArray(navLinks) ? navLinks : [],
+      detected: { cards: cards?.cards?.length || 0, advertised: cards?.total || null, strategy: cards?.strategy || null },
     }
-    default: throw createError({ statusCode: 400, statusMessage: 'Unknown input' })
+  }
+  finally { await closeTab(t) }
+}
+
+// ───────────────────────── Stored scans ─────────────────────────
+export interface ScanDoc {
+  _id?: any
+  scannerVersion: string
+  dealershipId: string
+  dealershipName: string
+  status: ScanStatus
+  stopRequested: boolean
+  startUrl: string
+  allPages: boolean
+  progress: ScanProgress
+  log: { at: string, text: string }[]
+  vehicles: ScanVehicle[]
+  images: ImageInfo[]
+  clusters: ImageCluster[]
+  countStockAsMissing: boolean
+  auditId: string | null
+  error: string | null
+  heartbeatAt: string
+  createdAt: string
+  createdBy: { id: string, name: string }
+  savedAt?: string | null
+  savedBy?: { id: string, name: string } | null
+}
+
+const statusOf = (doc: ScanDoc): ScanStatus => doc.status === 'running' && Date.now() - new Date(doc.heartbeatAt).getTime() > STALE_MS ? 'interrupted' : doc.status
+
+export function scanMeta(doc: ScanDoc) {
+  return {
+    id: String(doc._id), dealershipId: doc.dealershipId, status: statusOf(doc), startUrl: doc.startUrl, allPages: doc.allPages,
+    progress: doc.progress, log: (doc.log || []).slice(-30), error: doc.error, auditId: doc.auditId, createdAt: doc.createdAt, createdBy: doc.createdBy,
+    savedAt: doc.savedAt || null, vehicles: doc.vehicles?.length || 0,
   }
 }
 
-export async function navigate(s: ScannerSession, body: any) {
-  const { conn } = s.browser
-  if (s.scanning) throw createError({ statusCode: 409, statusMessage: 'A scan is running — stop it first' })
-  if (body.action === 'reload') return conn.send('Page.reload', {}, s.sid)
-  if (body.action === 'back' || body.action === 'forward') {
-    const h = await conn.send('Page.getNavigationHistory', {}, s.sid)
-    const entry = h.entries[h.currentIndex + (body.action === 'back' ? -1 : 1)]
-    return entry ? conn.send('Page.navigateToHistoryEntry', { entryId: entry.id }, s.sid) : null
+export function resultsOf(doc: ScanDoc) {
+  const summary = summarize(doc.vehicles, doc.clusters, { countStockAsMissing: doc.countStockAsMissing })
+  const used = new Set(doc.vehicles.map(v => v.imageId).filter(Boolean) as string[])
+  const images: Record<string, any> = {}
+  for (const i of doc.images) {
+    if (!used.has(i.id)) continue
+    images[i.id] = { id: i.id, url: i.url, ok: i.ok, error: i.error || null, w: i.w || null, h: i.h || null, hash: i.hash || null, text: i.text || '', ocr: !!i.ocr }
   }
-  const url = safeUrl(str(body.url, 2000))
-  s.loading = true
-  pushState(s)
-  const r = await conn.send('Page.navigate', { url }, s.sid)
-  if (r?.errorText) throw createError({ statusCode: 502, statusMessage: `Could not open that page (${r.errorText})` })
-  return r
+  const cmap = new Map(doc.clusters.map(c => [c.id, c]))
+  return {
+    scanId: String(doc._id), summary, countStockAsMissing: doc.countStockAsMissing, advertised: doc.progress.advertised, pages: doc.progress.pagesVisited,
+    vehicles: doc.vehicles.map(v => ({ ...v, final: finalVerdict(v, cmap) })), clusters: doc.clusters, images,
+    savedAuditId: doc.auditId, labels: VERDICT_LABEL, finishedAt: doc.progress.finishedAt,
+  }
+}
+
+export async function getScan(db: Db, id: string) {
+  const { ObjectId } = await import('mongodb')
+  if (!ObjectId.isValid(id)) throw createError({ statusCode: 400, statusMessage: 'Invalid scan' })
+  const doc = await db.collection<ScanDoc>(SCANS_COLLECTION).findOne({ _id: new ObjectId(id) as any })
+  if (!doc || doc.scannerVersion !== ENGINE_VERSION) throw createError({ statusCode: 404, statusMessage: 'Scan not found' })
+  return doc as ScanDoc
+}
+
+const hasResults = (doc: ScanDoc) => ['done', 'stopped', 'saved'].includes(doc.status) && doc.vehicles.length > 0
+
+/** The scan + its results (when finished). */
+export function scanPayload(doc: ScanDoc) {
+  return { scan: scanMeta(doc), results: hasResults(doc) ? resultsOf(doc) : null }
+}
+
+/** Most recent scan for a dealership (running or finished). */
+export async function latestScan(db: Db, dealershipId: string) {
+  const doc = await db.collection<ScanDoc>(SCANS_COLLECTION).find({ dealershipId, scannerVersion: ENGINE_VERSION }).sort({ createdAt: -1 }).limit(1).next()
+  return doc ? scanPayload(doc as ScanDoc) : { scan: null, results: null }
+}
+
+export async function requestStop(db: Db, id: string) {
+  const doc = await getScan(db, id)
+  if (doc.status !== 'running') return { stopping: false }
+  await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { stopRequested: true } })
+  return { stopping: true }
 }
 
 // ───────────────────────── The scan ─────────────────────────
+type Emit = (event: string, data: any) => void
+
 function vehicleKey(c: any) {
   if (c.vin) return `vin:${c.vin}`
   if (c.url) return `url:${String(c.url).split('#')[0]}`
   if (c.stock) return `stock:${c.stock}`
   return `t:${c.title}|${c.price}|${c.image?.url || ''}`
 }
-function setProgress(s: ScannerSession, patch: Partial<ScanProgress>) {
-  Object.assign(s.progress, patch)
-  emit(s, 'progress', s.progress)
-}
-
-async function waitForSettle(s: ScannerSession, ms = 12_000) {
-  const start = Date.now()
-  while (Date.now() - start < ms) { if (!s.loading) break; await sleep(250) }
-  await sleep(900)
-}
 
 /**
- * Scroll the page top → bottom so lazy images and infinite-scroll batches load. `collect` runs every
- * few steps as well as at the end, so virtualised lists (cards removed once off-screen) are captured too.
+ * Start a scan: validates, creates the stored scan and returns it plus a `run(emit)` function that
+ * does the work and streams events. `appendTo` continues an earlier scan (e.g. New after Used).
  */
-async function scrollThrough(s: ScannerSession, collect: () => Promise<void>) {
-  await evaluate(s, 'window.scrollTo({ top: 0, behavior: "instant" })').catch(() => {})
-  await sleep(300)
-  let stableAtBottom = 0
-  let lastH = 0
-  for (let i = 0; i < 220 && !s.abort && !s.stopRequested; i++) {
-    const r = await evaluate<{ y: number, h: number, atBottom: boolean }>(s, SCROLL_STEP_JS).catch(() => null)
-    if (!r) break
-    await sleep(r.atBottom ? 1100 : 300)
-    if (i % 4 === 3) await collect()
-    if (r.atBottom) {
-      if (r.h === lastH) stableAtBottom++
-      else stableAtBottom = 0
-      if (stableAtBottom >= 2) break
-    }
-    lastH = r.h
+export async function createScan(db: Db, body: any, actor: SessionActor) {
+  const d = await loadDealership(db, str(body?.dealershipId, 40))
+  const raw = str(body?.url, 2000) || d.website
+  if (!raw) throw createError({ statusCode: 400, statusMessage: 'This dealership has no website — add one first' })
+  const url = safeUrl(raw)
+  const dealershipId = String(d._id)
+  const col = db.collection<ScanDoc>(SCANS_COLLECTION)
+  const busy = await col.findOne({ dealershipId, scannerVersion: ENGINE_VERSION, status: 'running', heartbeatAt: { $gt: new Date(Date.now() - STALE_MS).toISOString() } })
+  if (busy) throw createError({ statusCode: 409, statusMessage: 'Already scanning', message: 'A scan is already running for this dealership — wait for it or stop it first' })
+
+  const base = body?.appendTo ? await getScan(db, str(body.appendTo, 40)) : null
+  if (base && base.dealershipId !== dealershipId) throw createError({ statusCode: 400, statusMessage: 'That scan belongs to another dealership' })
+  const now = new Date().toISOString()
+  const progress: ScanProgress = { phase: 'collecting', page: 0, vehicles: base?.vehicles.length || 0, advertised: base?.progress.advertised ?? null, analyzed: 0, toAnalyze: 0, message: 'Opening the website…', startedAt: now, finishedAt: null, pagesVisited: base ? [...base.progress.pagesVisited] : [] }
+  const doc: ScanDoc = {
+    scannerVersion: ENGINE_VERSION, dealershipId, dealershipName: d.name || '', status: 'running', stopRequested: false, startUrl: url, allPages: body?.allPages !== false,
+    progress, log: [], vehicles: base ? base.vehicles.map(v => ({ ...v })) : [], images: base ? base.images.map(i => ({ ...i })) : [], clusters: base ? base.clusters.map(c => ({ ...c })) : [],
+    countStockAsMissing: base ? base.countStockAsMissing : true, auditId: null, error: null, heartbeatAt: now, createdAt: now, createdBy: { id: actor.id, name: actor.name },
   }
-  await collect()
+  if (base) {
+    // Continue the same scan record so one audit covers both lists.
+    await col.updateOne({ _id: base._id }, { $set: { status: 'running', stopRequested: false, startUrl: url, progress, heartbeatAt: now, auditId: null, error: null } })
+    doc._id = base._id
+    doc.log = base.log || []
+  }
+  else {
+    const r = await col.insertOne(doc as any)
+    doc._id = r.insertedId
+  }
+  return { doc, run: (emit: Emit, opts: { isClosed: () => boolean }) => runScan(db, doc, emit, opts) }
 }
 
-export function startScan(s: ScannerSession, opts: { allPages: boolean, append: boolean }) {
-  if (s.scanning) throw createError({ statusCode: 409, statusMessage: 'Already scanning' })
-  s.scanning = true
-  s.abort = false
-  s.stopRequested = false
-  s.savedAuditId = null
-  if (!opts.append) { s.vehicles = []; s.images = new Map(); s.clusters = []; s.progress.pagesVisited = [] }
-  setProgress(s, { phase: 'collecting', page: 0, vehicles: s.vehicles.length, advertised: null, analyzed: 0, toAnalyze: 0, message: 'Finding vehicle cards…', startedAt: new Date().toISOString(), finishedAt: null })
-  pushState(s)
-  runScan(s, opts).catch((e) => {
-    setProgress(s, { phase: 'error', message: e?.message || 'Scan failed', finishedAt: new Date().toISOString() })
-    log(s, `Scan failed: ${e?.message}`)
-  }).finally(() => { s.scanning = false; s.lastActivity = Date.now(); pushState(s) })
-}
+async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () => boolean }) {
+  const col = db.collection<ScanDoc>(SCANS_COLLECTION)
+  const t0 = Date.now()
+  const budget = budgetMs()
+  const collectUntil = t0 + budget * 0.55
+  const analyzeUntil = t0 + budget * 0.88
+  let stop = false
+  let lastPersist = 0
 
-async function runScan(s: ScannerSession, opts: { allPages: boolean }) {
-  const started = Date.now()
-  const seen = new Map(s.vehicles.map(v => [v.key, v]))
-  let advertised: number | null = null
-  const better = (a: any, b: any) => (!a?.url && b?.url) || (a?.url && b?.url && a.url !== b.url && (a.nw || 0) === 0 && (b.nw || 0) > 0)
-  for (let page = 1; page <= MAX_PAGES && !s.abort && !s.stopRequested; page++) {
-    setProgress(s, { page, message: page === 1 ? 'Loading every vehicle on this page…' : `Page ${page}: loading vehicles…` })
-    let res: any = null
-    let added = 0
-    let pageCards = 0
-    const collect = async () => {
-      const r = await evaluate<any>(s, EXTRACT_JS, 45_000).catch(() => null)
-      if (!r) return
-      res = r
-      pageCards = Math.max(pageCards, r.cards?.length || 0)
-      if (r.total) advertised = Math.max(advertised || 0, r.total)
-      for (const c of r.cards || []) {
-        const key = vehicleKey(c)
-        const had = seen.get(key)
-        if (had) { if (better(had.image, c.image)) had.image = c.image; if (!had.noPhotoText && c.noPhotoText) had.noPhotoText = c.noPhotoText; continue }
-        const v: ScanVehicle = {
-          key, title: c.title || '', year: c.year ?? null, make: c.make || '', model: c.model || '', vin: c.vin || '', stock: c.stock || '', price: c.price || '',
-          condition: (['new', 'used', 'certified'].includes(c.condition) ? c.condition : '') as any, url: c.url || '', image: c.image || null, imageId: null,
-          imageCount: c.imageCount || 0, photoCountText: c.photoCountText || '', noPhotoText: c.noPhotoText || '', page, sourceUrl: r.url,
-          verdict: 'review', suggested: 'real', confidence: 0, reasons: [], clusterId: null, override: null,
-        }
-        seen.set(key, v)
-        s.vehicles.push(v)
-        added++
-      }
-      setProgress(s, { vehicles: s.vehicles.length, advertised, message: `${s.vehicles.length} vehicles found` })
-    }
-    await scrollThrough(s, collect)
-    if (s.abort) break
-    if (!s.evidence) {
-      // Evidence screenshot for the audit / email: the inventory page with the first cards in view.
+  const log = (text: string) => {
+    const entry = { at: new Date().toISOString(), text }
+    doc.log.push(entry)
+    if (doc.log.length > 120) doc.log.shift()
+    emit('log', entry)
+  }
+  /** Throttled heartbeat: progress + log to the DB, and pick up a Stop pressed in another request. */
+  const persist = async (force = false) => {
+    if (!force && Date.now() - lastPersist < 3000) return
+    lastPersist = Date.now()
+    try {
+      const r = await col.findOneAndUpdate({ _id: doc._id }, { $set: { progress: doc.progress, log: doc.log.slice(-60), heartbeatAt: new Date().toISOString() } }, { projection: { stopRequested: 1 }, returnDocument: 'after' })
+      if ((r as any)?.stopRequested && !stop) { stop = true; log('Stopping — checking the photos found so far…') }
+    } catch {}
+  }
+  const setProgress = (patch: Partial<ScanProgress>) => {
+    Object.assign(doc.progress, patch)
+    emit('progress', doc.progress)
+    persist().catch(() => {})
+  }
+
+  let t: Tab | null = null
+  let frameTimer: ReturnType<typeof setInterval> | null = null
+  try {
+    emit('scan', { id: String(doc._id) })
+    emit('progress', doc.progress)
+    log(`Starting a private browser${isServerless() ? ' in the cloud' : ''}…`)
+    t = await openTab()
+    const tab = t
+
+    // Live view: a small frame every ~2.5 s while collecting (non-interactive), capped in total size.
+    let frameBytes = 0
+    let framing = false
+    const FRAME_CAP = 2_500_000
+    frameTimer = setInterval(async () => {
+      if (framing || frameBytes > FRAME_CAP || doc.progress.phase !== 'collecting' || opts.isClosed()) return
+      framing = true
       try {
-        const first = (res?.cards || [])[0]
-        await evaluate(s, `window.scrollTo({ top: ${Math.max(0, (first?.box?.y || 0) - 140)}, behavior: "instant" })`)
-        await sleep(900)
-        const shot = await s.browser.conn.send('Page.captureScreenshot', { format: 'jpeg', quality: 70 }, s.sid)
-        s.evidence = `data:image/jpeg;base64,${shot.data}`
+        const shot = await tab.conn.send('Page.captureScreenshot', { format: 'jpeg', quality: 45, clip: { x: 0, y: 0, width: SCANNER_VIEWPORT.width, height: SCANNER_VIEWPORT.height, scale: 2 / 3 }, fromSurface: true }, tab.sid, 8000)
+        frameBytes += shot.data.length
+        emit('frame', { data: shot.data, w: SCANNER_VIEWPORT.width, h: SCANNER_VIEWPORT.height, ts: Date.now() })
       } catch {}
-    }
-    s.progress.pagesVisited.push(res?.url || s.url)
-    log(s, `Page ${page}: ${pageCards} cards on screen, ${added} new — ${res?.strategy === 'known' ? 'recognised layout' : 'detected by structure'}`)
-    if (!s.vehicles.length && page === 1) throw new Error('No vehicle cards found on this page. Open the inventory / search results page, then press Continue.')
-    if (!opts.allPages || s.vehicles.length >= MAX_VEHICLES || Date.now() - started > SCAN_TIME_LIMIT_MS) break
-    if (added === 0 && page > 1) break
-    if (advertised && s.vehicles.length >= advertised) break
+      framing = false
+    }, 2500)
 
-    // Next page or "Load more"
-    const next = await evaluate<any>(s, FIND_NEXT_JS).catch(() => null)
-    if (!next) break
-    if (next.kind === 'href') {
-      log(s, `${next.label} → ${next.href}`)
-      s.loading = true
-      await s.browser.conn.send('Page.navigate', { url: next.href }, s.sid)
-      await waitForSettle(s, 20_000)
-    } else {
-      log(s, `Clicking “${next.label}”`)
-      await sleep(400)
-      await evaluate(s, `(() => { const el = document.querySelector('[data-zrz-next]'); if (el) el.click(); return !!el })()`)
-      await sleep(1500)
-      await waitForSettle(s, 15_000)
+    log(`Opening ${doc.startUrl.replace(/^https?:\/\//, '')}`)
+    setProgress({ message: 'Loading the inventory page…' })
+    await goto(tab, doc.startUrl)
+
+    // ── Collect ──
+    const seen = new Map(doc.vehicles.map(v => [v.key, v]))
+    let advertised: number | null = doc.progress.advertised
+    const better = (a: any, b: any) => (!a?.url && b?.url) || (a?.url && b?.url && a.url !== b.url && (a.nw || 0) === 0 && (b.nw || 0) > 0)
+    const startCount = doc.vehicles.length
+    for (let page = 1; page <= MAX_PAGES && !stop; page++) {
+      setProgress({ page, message: page === 1 ? 'Loading every vehicle on this page…' : `Page ${page}: loading vehicles…` })
+      let res: any = null
+      let added = 0
+      let pageCards = 0
+      const collect = async () => {
+        const r = await evaluate<any>(tab, EXTRACT_JS, 45_000).catch(() => null)
+        if (!r) return
+        res = r
+        pageCards = Math.max(pageCards, r.cards?.length || 0)
+        if (r.total) advertised = Math.max(advertised || 0, r.total)
+        for (const c of r.cards || []) {
+          const key = vehicleKey(c)
+          const had = seen.get(key)
+          if (had) { if (better(had.image, c.image)) had.image = c.image; if (!had.noPhotoText && c.noPhotoText) had.noPhotoText = c.noPhotoText; continue }
+          const v: ScanVehicle = {
+            key, title: c.title || '', year: c.year ?? null, make: c.make || '', model: c.model || '', vin: c.vin || '', stock: c.stock || '', price: c.price || '',
+            condition: (['new', 'used', 'certified'].includes(c.condition) ? c.condition : '') as any, url: c.url || '', image: c.image || null, imageId: null,
+            imageCount: c.imageCount || 0, photoCountText: c.photoCountText || '', noPhotoText: c.noPhotoText || '', page, sourceUrl: r.url,
+            verdict: 'review', suggested: 'real', confidence: 0, reasons: [], clusterId: null, override: null,
+          }
+          seen.set(key, v)
+          doc.vehicles.push(v)
+          added++
+        }
+        setProgress({ vehicles: doc.vehicles.length, advertised, message: `${doc.vehicles.length} vehicles found` })
+      }
+      // Scroll top → bottom so lazy images and infinite-scroll batches load; collect as we go so
+      // virtualised lists (cards removed once off-screen) are captured too.
+      await evaluate(tab, 'window.scrollTo({ top: 0, behavior: "instant" })').catch(() => {})
+      await sleep(300)
+      let stableAtBottom = 0
+      let lastH = 0
+      for (let i = 0; i < 220 && !stop && Date.now() < collectUntil; i++) {
+        const r = await evaluate<{ y: number, h: number, atBottom: boolean }>(tab, SCROLL_STEP_JS).catch(() => null)
+        if (!r) break
+        await sleep(r.atBottom ? 1100 : 300)
+        if (i % 4 === 3) await collect()
+        if (r.atBottom) {
+          if (r.h === lastH) stableAtBottom++
+          else stableAtBottom = 0
+          if (stableAtBottom >= 2) break
+        }
+        lastH = r.h
+      }
+      await collect()
+      doc.progress.pagesVisited.push(res?.url || tab.url)
+      log(`Page ${page}: ${pageCards} cards on screen, ${added} new — ${res?.strategy === 'known' ? 'recognised layout' : 'detected by structure'}`)
+      if (doc.vehicles.length === startCount && page === 1) throw createError({ statusCode: 422, statusMessage: 'No vehicle cards found', message: 'No vehicle cards found on this page. Pick the inventory / search results page (e.g. Used Inventory), then press Continue.' })
+      if (!doc.allPages || doc.vehicles.length >= MAX_VEHICLES) break
+      if (Date.now() >= collectUntil) { log('Time limit for collecting reached — checking the photos found so far'); break }
+      if (added === 0 && page > 1) break
+      if (advertised && doc.vehicles.length >= advertised) break
+
+      const next = await evaluate<any>(tab, FIND_NEXT_JS).catch(() => null)
+      if (!next) break
+      if (next.kind === 'href') {
+        log(`${next.label} → ${String(next.href).replace(/^https?:\/\/[^/]+/, '')}`)
+        await goto(tab, next.href).catch((e: any) => log(`Could not open the next page (${e?.message})`))
+      }
+      else {
+        log(`Clicking “${next.label}”`)
+        await sleep(400)
+        await evaluate(tab, `(() => { const el = document.querySelector('[data-zrz-next]'); if (el) el.click(); return !!el })()`)
+        await sleep(1500)
+        await waitForSettle(tab, 15_000)
+      }
     }
+    // Keep what was collected even if the photo step is cut short.
+    await col.updateOne({ _id: doc._id }, { $set: { vehicles: doc.vehicles, progress: doc.progress, heartbeatAt: new Date().toISOString() } }).catch(() => {})
+
+    // ── Photos ──
+    await analyzePhotos(tab, doc, { setProgress, log, deadline: analyzeUntil })
+    await reclassify(db, doc, log)
+
+    const sum = summarize(doc.vehicles, doc.clusters, { countStockAsMissing: doc.countStockAsMissing })
+    doc.status = stop ? 'stopped' : 'done'
+    Object.assign(doc.progress, { phase: doc.status, message: `${stop ? 'Stopped early — ' : ''}${sum.total} vehicles · ${sum.withoutReal} without a real photo (${sum.withoutRealPct ?? 0}%)`, finishedAt: new Date().toISOString() })
+    log(`Done in ${Math.round((Date.now() - t0) / 1000)}s`)
+    await col.updateOne({ _id: doc._id }, { $set: { status: doc.status, progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, images: doc.images.map(stripImage), clusters: doc.clusters, heartbeatAt: new Date().toISOString() } })
+    emit('progress', doc.progress)
+    emit('done', { id: String(doc._id), status: doc.status, summary: sum })
   }
-
-  // Photos
-  await analyzePhotos(s)
-  if (s.abort) return
-  const sum = summarize(s.vehicles, s.clusters, { countStockAsMissing: s.countStockAsMissing })
-  setProgress(s, { phase: s.stopRequested ? 'stopped' : 'done', message: `${s.stopRequested ? 'Stopped early — ' : ''}${sum.total} vehicles · ${sum.withoutReal} without a real photo (${sum.withoutRealPct ?? 0}%)`, finishedAt: new Date().toISOString() })
-  log(s, `Done in ${Math.round((Date.now() - started) / 1000)}s`)
-  emit(s, 'result', await resultsOf(s))
+  catch (e: any) {
+    const message = e?.message || e?.statusMessage || 'Scan failed'
+    doc.status = 'failed'
+    Object.assign(doc.progress, { phase: 'error', message, finishedAt: new Date().toISOString() })
+    log(`Scan failed: ${message}`)
+    await col.updateOne({ _id: doc._id }, { $set: { status: 'failed', error: message, progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, heartbeatAt: new Date().toISOString() } }).catch(() => {})
+    emit('progress', doc.progress)
+    emit('failure', { message })
+  }
+  finally {
+    if (frameTimer) clearInterval(frameTimer)
+    if (t) await closeTab(t)
+  }
 }
 
-async function analyzePhotos(s: ScannerSession) {
-  const { conn } = s.browser
-  // One image entry per distinct URL.
+const stripImage = (i: ImageInfo): ImageInfo => { const { bytes, thumb, ...rest } = i as any; return rest }
+
+async function analyzePhotos(t: Tab, doc: ScanDoc, o: { setProgress: (p: Partial<ScanProgress>) => void, log: (s: string) => void, deadline: number }) {
+  const images = new Map(doc.images.map(i => [i.id, i]))
   const byUrl = new Map<string, string>()
-  for (const [id, info] of s.images) byUrl.set(info.url, id)
-  for (const v of s.vehicles) {
+  for (const [id, info] of images) byUrl.set(info.url, id)
+  for (const v of doc.vehicles) {
     const u = v.image?.url
     if (!u) continue
     let id = byUrl.get(u)
-    if (!id) { id = `i${s.images.size + 1}`; s.images.set(id, { id, url: u, ok: false }); byUrl.set(u, id) }
+    if (!id) { id = `i${images.size + 1}`; images.set(id, { id, url: u, ok: false }); byUrl.set(u, id) }
     v.imageId = id
   }
-  const todo = [...s.images.values()].filter(i => !i.hash && !i.error)
-  setProgress(s, { phase: 'analyzing', analyzed: 0, toAnalyze: todo.length, message: `Checking ${todo.length} photos…` })
+  const todo = [...images.values()].filter(i => !i.hash && !i.error)
+  o.setProgress({ phase: 'analyzing', analyzed: 0, toAnalyze: todo.length, message: `Checking ${todo.length} photos…` })
   if (todo.length) {
     // A blank tab does the image maths (no page scripts, no cross-origin limits on our own bytes).
-    const { targetId } = await conn.send('Target.createTarget', { url: 'about:blank' })
-    const { sessionId: asid } = await conn.send('Target.attachToTarget', { targetId, flatten: true })
+    const { targetId } = await t.conn.send('Target.createTarget', { url: 'about:blank' })
+    const { sessionId: asid } = await t.conn.send('Target.attachToTarget', { targetId, flatten: true })
+    let timedOut = false
     try {
       let done = 0
       const queue = [...todo]
-      const referer = s.url
+      const referer = doc.progress.pagesVisited[0] || doc.startUrl
       const worker = async () => {
-        while (queue.length && !s.abort) {
+        while (queue.length) {
+          if (Date.now() > o.deadline) { timedOut = true; return }
           const batch = queue.splice(0, 4)
           const dl = await Promise.all(batch.map(async (img) => {
             const r = await downloadImage(img.url, referer)
             if ('error' in r) { img.ok = false; img.error = r.error; return null }
-            img.bytes = r.bytes
             return { id: img.id, b64: r.b64, mime: r.mime }
           }))
           const items = dl.filter(Boolean) as { id: string, b64: string, mime: string }[]
           if (items.length) {
-            const res = await conn.send('Runtime.evaluate', { expression: `(${ANALYZE_FN_JS})(${JSON.stringify(items)})`, returnByValue: true, awaitPromise: true }, asid, 60_000).catch((e: any) => ({ result: { value: items.map(i => ({ id: i.id, ok: false, error: e.message })) } }))
+            const res = await t.conn.send('Runtime.evaluate', { expression: `(${ANALYZE_FN_JS})(${JSON.stringify(items)})`, returnByValue: true, awaitPromise: true }, asid, 60_000).catch((e: any) => ({ result: { value: items.map(i => ({ id: i.id, ok: false, error: e.message })) } }))
             for (const a of (res?.result?.value || []) as any[]) {
-              const img = s.images.get(a.id)
+              const img = images.get(a.id)
               if (img) Object.assign(img, a)
             }
           }
           done += batch.length
-          setProgress(s, { analyzed: done, message: `Checking photos… ${done} of ${todo.length}` })
+          o.setProgress({ analyzed: done, message: `Checking photos… ${done} of ${todo.length}` })
         }
       }
       await Promise.all([worker(), worker(), worker()])
     }
-    finally { conn.send('Target.closeTarget', { targetId }).catch(() => {}) }
+    finally { t.conn.send('Target.closeTarget', { targetId }).catch(() => {}) }
+    if (timedOut) {
+      const left = todo.filter(i => !i.hash && !i.error)
+      for (const i of left) { i.ok = false; i.error = 'Not checked (time limit)' }
+      o.log(`Time limit reached — ${left.length} photos judged by their web address and text only`)
+    }
   }
-  await reclassify(s)
+  doc.images = [...images.values()].map(stripImage)
 }
 
-async function reclassify(s: ScannerSession) {
-  let db: Db | null = null
+async function reclassify(db: Db | null, doc: ScanDoc, log?: (s: string) => void) {
   let rules: Awaited<ReturnType<typeof listRules>> = []
-  try {
-    const { getCrmDb } = await import('./crm')
-    db = await getCrmDb()
-    rules = await listRules(db)
-  } catch (e: any) { log(s, `Saved image rules unavailable (${e?.message}) — using built-in checks only`) }
-  const keepCluster = new Map(s.clusters.map(c => [c.hash, c.override]))
-  const { clusters, ruleHits } = classify(s.vehicles, s.images, rules)
-  for (const c of clusters) { const o = keepCluster.get(c.hash); if (o) c.override = o }
-  s.clusters = clusters
+  try { if (db) rules = await listRules(db) }
+  catch (e: any) { log?.(`Saved image rules unavailable (${e?.message}) — using built-in checks only`) }
+  const keep = new Map(doc.clusters.map(c => [c.hash, c.override]))
+  const images = new Map(doc.images.map(i => [i.id, i]))
+  const { clusters, ruleHits } = classify(doc.vehicles, images, rules)
+  for (const c of clusters) { const o = keep.get(c.hash); if (o) c.override = o }
+  doc.clusters = clusters
   if (ruleHits.size && db) {
     const { ObjectId } = await import('mongodb')
-    const { RULES_COLLECTION } = await import('./scanner-images')
-    for (const [id, n] of ruleHits) if (ObjectId.isValid(id)) await db!.collection(RULES_COLLECTION).updateOne({ _id: new ObjectId(id) }, { $inc: { hits: n }, $set: { lastHitAt: new Date().toISOString() } })
+    for (const [id, n] of ruleHits) if (ObjectId.isValid(id)) await db.collection(RULES_COLLECTION).updateOne({ _id: new ObjectId(id) }, { $inc: { hits: n }, $set: { lastHitAt: new Date().toISOString() } }).catch(() => {})
   }
 }
 
-export async function resultsOf(s: ScannerSession) {
-  const summary = summarize(s.vehicles, s.clusters, { countStockAsMissing: s.countStockAsMissing })
-  const usedImageIds = new Set(s.vehicles.map(v => v.imageId).filter(Boolean) as string[])
-  const images: Record<string, any> = {}
-  for (const [id, i] of s.images) {
-    if (!usedImageIds.has(id)) continue
-    images[id] = { id, url: i.url, ok: i.ok, error: i.error || null, w: i.w || null, h: i.h || null, hash: i.hash || null, thumb: i.thumb || null, text: i.text || '', ocr: !!i.ocr }
-  }
-  const cmap = new Map(s.clusters.map(c => [c.id, c]))
-  return {
-    summary, countStockAsMissing: s.countStockAsMissing, advertised: s.progress.advertised, pages: s.progress.pagesVisited,
-    vehicles: s.vehicles.map(v => ({ ...v, final: finalVerdict(v, cmap) })), clusters: s.clusters, images,
-    hasEvidence: !!s.evidence, savedAuditId: s.savedAuditId, labels: VERDICT_LABEL,
-  }
-}
-
+// ───────────────────────── Review & save ─────────────────────────
 /** Overrides from the review screen (per vehicle, per duplicate group) + the stock setting. */
-export async function applyReview(s: ScannerSession, body: any) {
-  if (s.scanning) throw createError({ statusCode: 409, statusMessage: 'Wait for the scan to finish' })
+export async function applyReview(db: Db, id: string, body: any) {
+  const doc = await getScan(db, id)
+  if (!hasResults(doc)) throw createError({ statusCode: 409, statusMessage: 'Wait for the scan to finish' })
   const ok = (v: any): Exclude<PhotoVerdict, 'review'> | null => ['real', 'placeholder', 'stock', 'missing'].includes(v) ? v : null
-  if (Array.isArray(body.vehicles)) {
+  if (Array.isArray(body?.vehicles)) {
     const set = new Map<string, any>(body.vehicles.map((x: any) => [String(x.key), x.verdict]))
-    for (const v of s.vehicles) if (set.has(v.key)) v.override = ok(set.get(v.key))
+    for (const v of doc.vehicles) if (set.has(v.key)) v.override = ok(set.get(v.key))
   }
-  if (Array.isArray(body.clusters)) {
-    for (const x of body.clusters) { const c = s.clusters.find(c => c.id === x.id); if (c) c.override = ok(x.verdict) }
+  if (Array.isArray(body?.clusters)) {
+    for (const x of body.clusters) { const c = doc.clusters.find(c => c.id === x.id); if (c) c.override = ok(x.verdict) }
   }
-  if (typeof body.countStockAsMissing === 'boolean') s.countStockAsMissing = body.countStockAsMissing
-  if (body.reapplyRules) await reclassify(s)
-  s.savedAuditId = null
-  return resultsOf(s)
+  if (typeof body?.countStockAsMissing === 'boolean') doc.countStockAsMissing = body.countStockAsMissing
+  if (body?.reapplyRules) await reclassify(db, doc)
+  // Any change after saving makes it a draft again until saved once more.
+  if (doc.status === 'saved') doc.status = 'done'
+  doc.auditId = null
+  await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { vehicles: doc.vehicles, clusters: doc.clusters, countStockAsMissing: doc.countStockAsMissing, status: doc.status, auditId: null } })
+  return resultsOf(doc)
 }
 
-/** Save the scan to the CRM: an automated audit (+ evidence screenshot) and the full scan record. */
-export async function saveScan(db: Db, s: ScannerSession, actor: SessionActor) {
-  if (s.scanning) throw createError({ statusCode: 409, statusMessage: 'Wait for the scan to finish' })
-  if (!s.vehicles.length) throw createError({ statusCode: 400, statusMessage: 'Nothing scanned yet' })
-  const { ObjectId } = await import('mongodb')
-  const d = await db.collection(CRM_COLLECTIONS.dealerships).findOne({ _id: new ObjectId(s.dealershipId) })
-  if (!d) throw createError({ statusCode: 404, statusMessage: 'Dealership not found' })
-  const sum = summarize(s.vehicles, s.clusters, { countStockAsMissing: s.countStockAsMissing })
-  const cmap = new Map(s.clusters.map(c => [c.id, c]))
-  const without = s.vehicles.filter((v) => { const f = finalVerdict(v, cmap); return f === 'missing' || f === 'placeholder' || (s.countStockAsMissing && f === 'stock') })
-  let screenshotFileId: string | null = null
-  if (s.evidence) {
-    try {
-      const { saveDataUrl } = await import('./crm-files')
-      const f = await saveDataUrl(db, { dataUrl: s.evidence, filename: `${(d.name || 'inventory').replace(/[^\w]+/g, '-')}-inventory.jpg`, dealershipId: s.dealershipId, purpose: 'audit-screenshot' }, actor)
-      screenshotFileId = f.id
-    } catch (e: any) { log(s, `Evidence screenshot not saved: ${e?.statusMessage || e?.message}`) }
-  }
+/** Save the scan to the CRM as an automated inventory audit (no screenshots or images kept). */
+export async function saveScan(db: Db, id: string, actor: SessionActor) {
+  const doc = await getScan(db, id)
+  if (!hasResults(doc)) throw createError({ statusCode: 409, statusMessage: 'Wait for the scan to finish' })
+  const d = await loadDealership(db, doc.dealershipId)
+  const sum = summarize(doc.vehicles, doc.clusters, { countStockAsMissing: doc.countStockAsMissing })
+  const cmap = new Map(doc.clusters.map(c => [c.id, c]))
+  const without = doc.vehicles.filter((v) => { const f = finalVerdict(v, cmap); return f === 'missing' || f === 'placeholder' || (doc.countStockAsMissing && f === 'stock') })
+  const pages = doc.progress.pagesVisited
   const parts = [
-    `Inventory Scanner: ${sum.total} vehicles on ${s.progress.pagesVisited.length} page${s.progress.pagesVisited.length === 1 ? '' : 's'}${s.progress.advertised ? ` (site advertises ${s.progress.advertised})` : ''}.`,
-    `${sum.by.real} real photos · ${sum.by.missing + sum.by.placeholder} no photo (${sum.by.placeholder} showing a placeholder image such as “photos unavailable”, ${sum.by.missing} with no image) · ${sum.by.stock} stock images${s.countStockAsMissing ? ' (counted as no photo)' : ' (counted as photos)'}.`,
+    `Inventory Scanner: ${sum.total} vehicles on ${pages.length} page${pages.length === 1 ? '' : 's'}${doc.progress.advertised ? ` (site advertises ${doc.progress.advertised})` : ''}.`,
+    `${sum.by.real} real photos · ${sum.by.missing + sum.by.placeholder} no photo (${sum.by.placeholder} showing a placeholder image such as “photos unavailable”, ${sum.by.missing} with no image) · ${sum.by.stock} stock images${doc.countStockAsMissing ? ' (counted as no photo)' : ' (counted as photos)'}.`,
   ]
   const { recordAudit } = await import('./crm-audit')
   const audit = await recordAudit(db, d, {
     ...sum.counts,
     source: 'automated',
-    inventoryUrl: s.progress.pagesVisited[0] || s.url,
+    inventoryUrl: pages[0] || doc.startUrl,
     examples: without.filter(v => v.url).slice(0, 25).map(v => ({ url: v.url, label: `${v.title}${v.stock ? ` #${v.stock}` : ''} — ${VERDICT_LABEL[finalVerdict(v, cmap)]}` })),
     merchandisingIssues: [
       ...(sum.by.missing + sum.by.placeholder ? ['Vehicles listed with no photos (placeholder / “photos unavailable”)'] : []),
       ...(sum.by.stock ? ['Stock images instead of real photos'] : []),
     ],
     notes: parts.join('\n'),
-    screenshotFileId,
-    collector: { name: 'ZRZ Inventory Scanner', version: '1.0', runId: s.id },
+    screenshotFileId: null,
+    collector: { name: 'ZRZ Inventory Scanner', version: ENGINE_VERSION, runId: String(doc._id) },
   }, actor)
-  await db.collection(SCANS_COLLECTION).insertOne({
-    sessionId: s.id, dealershipId: s.dealershipId, dealershipName: s.dealershipName, auditId: audit?.id || null,
-    startUrl: s.progress.pagesVisited[0] || s.url, pages: s.progress.pagesVisited, advertised: s.progress.advertised,
-    summary: sum, countStockAsMissing: s.countStockAsMissing,
-    vehicles: s.vehicles.map(v => ({ key: v.key, title: v.title, vin: v.vin, stock: v.stock, price: v.price, condition: v.condition, url: v.url, imageUrl: v.image?.url || '', verdict: v.verdict, final: finalVerdict(v, cmap), override: v.override, confidence: v.confidence, reasons: v.reasons, clusterId: v.clusterId })),
-    clusters: s.clusters.map(c => ({ id: c.id, hash: c.hash, url: c.url, vehicles: c.vehicles, models: c.models, verdict: c.verdict, override: c.override })),
-    startedAt: s.progress.startedAt, finishedAt: s.progress.finishedAt, savedAt: new Date().toISOString(), savedBy: { id: actor.id, name: actor.name },
-    scannerVersion: '1.0',
-  })
+  await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { status: 'saved', auditId: audit?.id || null, summary: sum, savedAt: new Date().toISOString(), savedBy: { id: actor.id, name: actor.name } } })
   try {
     const { logEventRun } = await import('./automation')
-    await logEventRun(db, 'count_inventory', `${d.name}: ${sum.total} vehicles scanned, ${sum.withoutReal} without a real photo (${sum.withoutRealPct ?? 0}%)`, { vehicles: sum.total, withoutReal: sum.withoutReal }, [{ dealershipId: s.dealershipId, name: d.name }])
+    await logEventRun(db, 'count_inventory', `${d.name}: ${sum.total} vehicles scanned, ${sum.withoutReal} without a real photo (${sum.withoutRealPct ?? 0}%)`, { vehicles: sum.total, withoutReal: sum.withoutReal }, [{ dealershipId: doc.dealershipId, name: d.name }])
   } catch {}
-  s.savedAuditId = audit?.id || null
-  log(s, 'Saved to the CRM as an inventory audit')
-  pushState(s)
   return { audit, summary: sum }
 }
 
-/** Used on server shutdown / dev reload. */
+/** Used on server shutdown / dev reload: no Chromium may outlive the server. */
 export async function closeAllScannerSessions() {
-  await Promise.all([...sessions.keys()].map(id => closeSession(id).catch(() => {})))
-}
-
-export function stopScan(s: ScannerSession) {
-  if (!s.scanning) return false
-  s.stopRequested = true
-  log(s, 'Stopping — checking the photos found so far…')
-  return true
+  await Promise.all([...live].map(b => b.close().catch(() => {})))
+  live.clear()
 }

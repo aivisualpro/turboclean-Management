@@ -101,6 +101,12 @@ export default defineNuxtConfig({
     ],
   },
 
+  nitro: {
+    // Vercel: the Inventory Scanner runs a whole scan inside one request (Pro plan maximum = 800 s,
+    // needs Fluid compute). Normal requests are unaffected — they still finish in milliseconds.
+    vercel: { functions: { maxDuration: 800 } },
+  },
+
   compatibilityDate: '2024-12-14',
 })
 

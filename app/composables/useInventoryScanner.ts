@@ -1,11 +1,18 @@
 /**
- * Inventory Scanner (client): drives a live, server-side Chrome session through
- * /api/scanner/* and Server-Sent Events. One instance per open scanner dialog.
+ * Inventory Scanner (client). Works the same on a laptop and on serverless hosting (Vercel):
+ *  - preview(): a full-page snapshot of a dealer page (scrollable, not clickable) + shortcuts
+ *  - run():     one streaming request that collects every vehicle and checks every photo, with
+ *               progress, a log and low-res live frames; the scan is stored as it goes, so if the
+ *               stream drops we fall back to polling the stored scan.
+ *  - review / save work on the stored scan by id.
  */
 export type PhotoVerdict = 'real' | 'placeholder' | 'stock' | 'missing' | 'review'
 export type FinalVerdict = Exclude<PhotoVerdict, 'review'>
-export interface ScannerProgress { phase: 'browsing' | 'collecting' | 'analyzing' | 'done' | 'stopped' | 'error', page: number, vehicles: number, advertised: number | null, analyzed: number, toAnalyze: number, message: string, startedAt: string | null, finishedAt: string | null, pagesVisited: string[] }
-export interface ScannerState { id: string, dealershipId: string, dealershipName: string, url: string, title: string, loading: boolean, navLinks: { label: string, href: string, kind: string }[], history: { canBack: boolean, canForward: boolean }, viewport: { width: number, height: number }, progress: ScannerProgress, scanning: boolean, hasResults: boolean, savedAuditId: string | null, browser: 'local' | 'remote' }
+export interface ScannerProgress { phase: 'collecting' | 'analyzing' | 'done' | 'stopped' | 'error', page: number, vehicles: number, advertised: number | null, analyzed: number, toAnalyze: number, message: string, startedAt: string | null, finishedAt: string | null, pagesVisited: string[] }
+export type ScanStatus = 'running' | 'done' | 'stopped' | 'failed' | 'saved' | 'interrupted'
+export interface ScanMeta { id: string, dealershipId: string, status: ScanStatus, startUrl: string, allPages: boolean, progress: ScannerProgress, log: { at: string, text: string }[], error: string | null, auditId: string | null, createdAt: string, createdBy: { id: string, name: string }, savedAt: string | null, vehicles: number }
+export interface NavLink { label: string, href: string, kind: string }
+export interface PagePreview { url: string, title: string, screenshot: string, width: number, height: number, pageHeight: number, navLinks: NavLink[], detected: { cards: number, advertised: number | null, strategy: string | null } }
 export interface ScannedVehicle {
   key: string
   title: string
@@ -30,9 +37,10 @@ export interface ScannedVehicle {
   clusterId: string | null
   override: FinalVerdict | null
 }
-export interface ScannedImage { id: string, url: string, ok: boolean, error: string | null, w: number | null, h: number | null, hash: string | null, thumb: string | null, text: string, ocr: boolean }
+export interface ScannedImage { id: string, url: string, ok: boolean, error: string | null, w: number | null, h: number | null, hash: string | null, text: string, ocr: boolean }
 export interface ImageGroup { id: string, imageIds: string[], hash: string, vehicles: number, models: number, modelNames: string[], thumb: string, url: string, verdict: PhotoVerdict, reason: string, override: FinalVerdict | null }
 export interface ScanResults {
+  scanId: string
   summary: { total: number, by: Record<FinalVerdict, number>, withoutReal: number, withoutRealPct: number | null, review: number, counts: { newTotal: number, usedTotal: number, newMissingPhotos: number, usedMissingPhotos: number }, newPct: number | null, usedPct: number | null }
   countStockAsMissing: boolean
   advertised: number | null
@@ -40,9 +48,9 @@ export interface ScanResults {
   vehicles: ScannedVehicle[]
   clusters: ImageGroup[]
   images: Record<string, ScannedImage>
-  hasEvidence: boolean
   savedAuditId: string | null
   labels: Record<PhotoVerdict, string>
+  finishedAt: string | null
 }
 export interface ImageRule { id: string, hash: string, urlContains: string, verdict: FinalVerdict, label: string, thumb: string, hits: number, createdAt: string, createdBy: { name: string } | null }
 
@@ -55,108 +63,179 @@ export const VERDICT_META: Record<PhotoVerdict, { label: string, short: string, 
   review: { label: 'Needs review', short: 'Review', dot: 'bg-sky-500', pill: 'bg-sky-500/15 text-sky-700 dark:text-sky-300 ring-sky-500/30', ring: 'ring-sky-500/50', hex: '#0ea5e9' },
 }
 
+const errMsg = (e: any, fallback: string) => e?.data?.message || e?.data?.statusMessage || e?.statusMessage || e?.message || fallback
+
 export function useInventoryScanner() {
-  const state = ref<ScannerState | null>(null)
+  const preview = ref<PagePreview | null>(null)
+  const previewing = ref(false)
+  const previewError = ref<string | null>(null)
+  const scan = ref<ScanMeta | null>(null)
   const progress = ref<ScannerProgress | null>(null)
   const results = ref<ScanResults | null>(null)
   const log = ref<{ at: string, text: string }[]>([])
   const frame = ref<{ data: string, w: number, h: number, ts: number } | null>(null)
-  const connected = ref(false)
   const error = ref<string | null>(null)
-  const ended = ref<string | null>(null)
-  let es: EventSource | null = null
-  let pollTimer: ReturnType<typeof setInterval> | null = null
-  let lastFrameAt = 0
+  const running = ref(false)
+  let abort: AbortController | null = null
+  let previewSeq = 0
+  let poll: ReturnType<typeof setInterval> | null = null
+  let disposed = false
 
-  const base = () => `/api/scanner/sessions/${state.value?.id}`
+  const status = () => $fetch<{ ok: boolean, kind: string, binary: string | null }>('/api/scanner/status')
 
-  function listen() {
-    if (!state.value) return
-    es?.close()
-    es = new EventSource(`${base()}/stream`)
-    es.onopen = () => { connected.value = true }
-    es.onerror = async () => {
-      connected.value = false
-      // The server restarted (or the session timed out): stop retrying and tell the user.
-      try { await $fetch(base()) }
-      catch (e: any) { if (e?.statusCode === 404 || e?.response?.status === 404) { ended.value = 'The scanner session ended (the server restarted or it was idle too long)'; es?.close() } }
+  async function loadPreview(dealershipId: string, url?: string) {
+    const seq = ++previewSeq
+    previewing.value = true
+    previewError.value = null
+    try {
+      const p = await $fetch<PagePreview>('/api/scanner/preview', { method: 'POST', body: { dealershipId, url } })
+      if (seq === previewSeq) preview.value = p
     }
-    es.addEventListener('frame', (e: MessageEvent) => { frame.value = JSON.parse(e.data); lastFrameAt = Date.now() })
-    es.addEventListener('state', (e: MessageEvent) => { state.value = JSON.parse(e.data); progress.value = state.value!.progress })
-    es.addEventListener('progress', (e: MessageEvent) => { progress.value = JSON.parse(e.data) })
-    es.addEventListener('log', (e: MessageEvent) => { log.value = [...log.value.slice(-80), JSON.parse(e.data)] })
-    es.addEventListener('result', (e: MessageEvent) => { results.value = JSON.parse(e.data) })
-    es.addEventListener('failure', (e: MessageEvent) => { try { error.value = JSON.parse(e.data).message } catch {} })
-    es.addEventListener('closed', (e: MessageEvent) => { try { ended.value = JSON.parse(e.data).reason || 'closed' } catch { ended.value = 'closed' } es?.close() })
-    // Fallback: if no frames arrive over SSE (proxy buffering), poll the latest frame.
-    pollTimer = setInterval(async () => {
-      if (!state.value || ended.value || Date.now() - lastFrameAt < 4000) return
-      try {
-        const blob = await $fetch<Blob>(`${base()}/frame`, { responseType: 'blob' })
-        if (blob && (blob as any).size) {
-          const data = await new Promise<string>((resolve) => { const r = new FileReader(); r.onload = () => resolve(String(r.result).split(',')[1] || ''); r.readAsDataURL(blob) })
-          frame.value = { data, w: state.value.viewport.width, h: state.value.viewport.height, ts: Date.now() }
-        }
-      } catch {}
-    }, 1000)
+    catch (e: any) { if (seq === previewSeq) previewError.value = errMsg(e, 'Could not open that page') }
+    finally { if (seq === previewSeq) previewing.value = false }
   }
 
-  async function open(dealershipId: string, url?: string) {
-    error.value = null; ended.value = null; results.value = null; log.value = []; frame.value = null
-    state.value = await $fetch<ScannerState>('/api/scanner/sessions', { method: 'POST', body: { dealershipId, url } })
-    progress.value = state.value.progress
-    listen()
+  function apply(p: { scan: ScanMeta | null, results: ScanResults | null }) {
+    scan.value = p.scan
+    if (p.scan) { progress.value = p.scan.progress; if (p.scan.log?.length) log.value = p.scan.log }
+    results.value = p.results
   }
-  async function close() {
-    es?.close(); es = null
-    if (pollTimer) clearInterval(pollTimer)
-    pollTimer = null
-    const id = state.value?.id
-    state.value = null
-    if (id) await fetch(`/api/scanner/sessions/${id}`, { method: 'DELETE', keepalive: true, credentials: 'same-origin' }).catch(() => {})
+
+  /** The dealership's last scan — shows "last scanned …" and lets you reopen its results. */
+  async function loadLatest(dealershipId: string) {
+    disposed = false
+    const p = await $fetch<{ scan: ScanMeta | null, results: ScanResults | null }>('/api/scanner/scans', { query: { dealershipId } })
+    apply(p)
+    if (p.scan?.status === 'running') watchStored(p.scan.id)
+    return p
   }
-  // Input is fire-and-forget, batched so fast mouse moves don't flood the server.
-  let queue: any[] = []
-  let flushing = false
-  async function flush() {
-    if (flushing || !queue.length || !state.value) return
-    flushing = true
-    const events = queue.splice(0, 50)
-    try { await $fetch(`${base()}/input`, { method: 'POST', body: { events } }) } catch {}
-    flushing = false
-    if (queue.length) flush()
+
+  async function refresh(id = scan.value?.id) {
+    if (!id) return null
+    const p = await $fetch<{ scan: ScanMeta, results: ScanResults | null }>(`/api/scanner/scans/${id}`)
+    apply(p)
+    return p
   }
-  function input(e: any) {
-    if (e.type === 'move') { const last = queue[queue.length - 1]; if (last?.type === 'move') { queue[queue.length - 1] = e; return } }
-    if (e.type === 'wheel') { const last = queue[queue.length - 1]; if (last?.type === 'wheel') { last.dy += e.dy; last.dx += e.dx; last.x = e.x; last.y = e.y; return } }
-    queue.push(e)
-    flush()
+
+  /** Poll a stored scan until it finishes (a scan started elsewhere, or after the stream dropped). */
+  function watchStored(id: string) {
+    stopPolling()
+    running.value = true
+    poll = setInterval(async () => {
+      try {
+        const p = await refresh(id)
+        if (p && p.scan.status !== 'running') { stopPolling(); running.value = false }
+      } catch { /* keep trying */ }
+    }, 3000)
   }
-  const go = (body: { url?: string, action?: 'back' | 'forward' | 'reload' }) => $fetch(`${base()}/navigate`, { method: 'POST', body })
-  async function scan(opts: { allPages?: boolean, append?: boolean } = {}) {
+  function stopPolling() { if (poll) clearInterval(poll); poll = null }
+
+  /** Run a scan in one streaming request. Resolves when it is finished (or failed). */
+  async function run(dealershipId: string, opts: { url?: string, allPages?: boolean, appendTo?: string | null } = {}) {
+    disposed = false
     error.value = null
-    if (!opts.append) results.value = null
-    const s = await $fetch<ScannerState>(`${base()}/scan`, { method: 'POST', body: opts })
-    state.value = s; progress.value = s.progress
+    frame.value = null
+    log.value = []
+    if (!opts.appendTo) results.value = null
+    running.value = true
+    progress.value = { phase: 'collecting', page: 0, vehicles: 0, advertised: null, analyzed: 0, toAnalyze: 0, message: 'Starting a private browser…', startedAt: new Date().toISOString(), finishedAt: null, pagesVisited: [] }
+    abort?.abort()
+    abort = new AbortController()
+    let scanId: string | null = null
+    let finished = false
+    let lastEvent = Date.now()
+    const watchdog = setInterval(() => { if (Date.now() - lastEvent > 40_000) abort?.abort() }, 5000)
+    try {
+      const res = await fetch('/api/scanner/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+        body: JSON.stringify({ dealershipId, url: opts.url, allPages: opts.allPages !== false, appendTo: opts.appendTo || undefined }),
+        signal: abort.signal,
+        credentials: 'same-origin',
+      })
+      if (!res.ok || !res.body) {
+        const body = await res.json().catch(() => null)
+        throw new Error(body?.message || body?.statusMessage || `The scan could not start (${res.status})`)
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      const handle = (name: string, data: any) => {
+        lastEvent = Date.now()
+        switch (name) {
+          case 'scan': scanId = data.id; break
+          case 'progress': progress.value = data; break
+          case 'log': log.value = [...log.value.slice(-80), data]; break
+          case 'frame': frame.value = data; break
+          case 'done': finished = true; break
+          case 'failure': finished = true; error.value = data.message; break
+        }
+      }
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        let i: number
+        while ((i = buf.indexOf('\n\n')) !== -1) {
+          const block = buf.slice(0, i)
+          buf = buf.slice(i + 2)
+          let name = 'message'
+          let data = ''
+          for (const line of block.split('\n')) {
+            if (line.startsWith('event:')) name = line.slice(6).trim()
+            else if (line.startsWith('data:')) data += line.slice(5).trim()
+          }
+          if (data) { try { handle(name, JSON.parse(data)) } catch {} }
+        }
+      }
+    }
+    catch (e: any) {
+      if (!scanId) { running.value = false; error.value = errMsg(e, 'The scan could not start'); clearInterval(watchdog); throw new Error(error.value!) }
+    }
+    finally { clearInterval(watchdog) }
+    if (!scanId || disposed) { running.value = false; return }
+    // Load the stored scan (results, final progress). If the stream dropped mid-scan, keep polling.
+    const p = await refresh(scanId).catch(() => null)
+    if (p?.scan.status === 'running' && !finished) { watchStored(scanId); return }
+    running.value = false
   }
-  const stop = () => $fetch(`${base()}/stop`, { method: 'POST' })
+
+  async function stop() {
+    const id = scan.value?.id
+    if (id) await $fetch(`/api/scanner/scans/${id}/stop`, { method: 'POST' }).catch(() => {})
+  }
+
+  /** Close the dialog: a running scan is asked to stop (what it found is still checked and kept). */
+  function dispose() {
+    disposed = true
+    if (running.value && scan.value?.id) fetch(`/api/scanner/scans/${scan.value.id}/stop`, { method: 'POST', keepalive: true, credentials: 'same-origin' }).catch(() => {})
+    abort?.abort()
+    abort = null
+    stopPolling()
+    running.value = false
+  }
+
   async function review(body: { vehicles?: { key: string, verdict: FinalVerdict | null }[], clusters?: { id: string, verdict: FinalVerdict | null }[], countStockAsMissing?: boolean, reapplyRules?: boolean }) {
-    results.value = await $fetch<ScanResults>(`${base()}/review`, { method: 'POST', body })
+    if (!results.value) return
+    results.value = await $fetch<ScanResults>(`/api/scanner/scans/${results.value.scanId}/review`, { method: 'POST', body })
   }
   async function save() {
-    const r = await $fetch<{ audit: any, summary: any }>(`${base()}/save`, { method: 'POST' })
-    if (results.value) results.value = { ...results.value, savedAuditId: r.audit?.id || 'saved' }
+    if (!results.value) throw new Error('Nothing to save')
+    const r = await $fetch<{ audit: any, summary: any }>(`/api/scanner/scans/${results.value.scanId}/save`, { method: 'POST' })
+    results.value = { ...results.value, savedAuditId: r.audit?.id || 'saved' }
+    if (scan.value) scan.value = { ...scan.value, status: 'saved', auditId: r.audit?.id || null, savedAt: new Date().toISOString() }
     return r
   }
-  async function refreshResults() {
-    const r = await $fetch<{ results: ScanResults | null }>(base())
-    if (r.results) results.value = r.results
-  }
-  const status = () => $fetch<{ ok: boolean, kind: string, binary: string | null }>('/api/scanner/status')
   const listRules = () => $fetch<{ rules: ImageRule[] }>('/api/scanner/rules')
   const addRule = (body: { hash?: string, urlContains?: string, verdict: FinalVerdict, label?: string, thumb?: string }) => $fetch<{ rule: ImageRule }>('/api/scanner/rules', { method: 'POST', body })
   const removeRule = (id: string) => $fetch(`/api/scanner/rules/${id}`, { method: 'DELETE' })
 
-  onBeforeUnmount(() => { close() })
-  return { state, progress, results, log, frame, connected, error, ended, open, close, input, go, scan, stop, review, save, refreshResults, status, listRules, addRule, removeRule }
+  function reset() {
+    dispose()
+    preview.value = null; previewError.value = null; previewing.value = false
+    scan.value = null; progress.value = null; results.value = null; log.value = []; frame.value = null; error.value = null
+  }
+
+  onBeforeUnmount(dispose)
+  return { preview, previewing, previewError, scan, progress, results, log, frame, error, running, status, loadPreview, loadLatest, refresh, run, stop, dispose, reset, review, save, listRules, addRule, removeRule }
 }

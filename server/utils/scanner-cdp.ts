@@ -8,8 +8,13 @@
  *  - websocket: connects to a remote browser (e.g. a hosted Chrome such as Browserless) when
  *               SCANNER_BROWSER_WS is set — the way to run the scanner on serverless hosting.
  *
+ * On serverless hosting (Vercel / AWS Lambda) there is no Chrome installed, so a serverless build of
+ * Chromium (@sparticuz/chromium-min) is downloaded once per cold start into /tmp and launched the
+ * same way over a pipe.
+ *
  * Env: SCANNER_CHROME_PATH (explicit browser binary), SCANNER_BROWSER_WS (remote ws endpoint),
- *      SCANNER_HEADFUL=1 (show the browser window — debugging only).
+ *      SCANNER_CHROMIUM_PACK_URL (serverless Chromium pack; defaults to the official release),
+ *      SCANNER_SERVERLESS=1 (force the serverless Chromium), SCANNER_HEADFUL=1 (debugging only).
  */
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
@@ -103,21 +108,52 @@ export function findBrowserBinary(): string | null {
 
 export interface BrowserHandle {
   conn: CdpConnection
-  kind: 'local' | 'remote'
+  kind: 'local' | 'remote' | 'serverless'
   binary: string | null
   close: () => Promise<void>
 }
 
 export const SCANNER_VIEWPORT = { width: 1440, height: 900 }
 
+/** Official serverless Chromium build matching @sparticuz/chromium-min in package.json. */
+const DEFAULT_PACK_URL = 'https://github.com/Sparticuz/chromium/releases/download/v153.0.0/chromium-v153.0.0-pack.x64.tar'
+export const isServerless = () => !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.SCANNER_SERVERLESS === '1')
+
+/** Serverless Chromium: binary path + the flags it needs (single process, no sandbox, /tmp only). */
+async function serverlessChromium(): Promise<{ binary: string, args: string[] }> {
+  const mod: any = await import('@sparticuz/chromium-min')
+  const Chromium = mod.default || mod
+  try { Chromium.setGraphicsMode = false } catch {} // no WebGL needed — skips unpacking SwiftShader
+  const binary = await Chromium.executablePath(process.env.SCANNER_CHROMIUM_PACK_URL || DEFAULT_PACK_URL)
+  return { binary, args: Chromium.args as string[] }
+}
+
 /** Launch local Chrome over a pipe, or connect to SCANNER_BROWSER_WS. */
 export async function openBrowser(): Promise<BrowserHandle> {
   const ws = process.env.SCANNER_BROWSER_WS
   if (ws) return connectRemote(ws)
-  const binary = findBrowserBinary()
-  if (!binary) throw createError({ statusCode: 501, statusMessage: 'No Chrome found on the server. Install Google Chrome, or set SCANNER_CHROME_PATH (or SCANNER_BROWSER_WS for a hosted browser).' })
   const profile = mkdtempSync(join(tmpdir(), 'zrz-scanner-'))
-  const args = [
+  let binary: string | null
+  let args: string[]
+  if (!process.env.SCANNER_CHROME_PATH && isServerless()) {
+    let sl: { binary: string, args: string[] }
+    try { sl = await serverlessChromium() }
+    catch (e: any) { throw createError({ statusCode: 500, statusMessage: 'Could not prepare the browser', message: `Could not prepare the serverless browser: ${e?.message}` }) }
+    binary = sl.binary
+    args = [
+      ...sl.args,
+      '--remote-debugging-pipe',
+      `--user-data-dir=${profile}`,
+      '--no-first-run', '--disable-background-networking', '--disable-sync', '--disable-extensions', '--disable-component-update',
+      '--mute-audio', '--hide-scrollbars', '--force-color-profile=srgb', '--lang=en-US',
+      `--window-size=${SCANNER_VIEWPORT.width},${SCANNER_VIEWPORT.height}`,
+      'about:blank',
+    ]
+  }
+  else {
+  binary = findBrowserBinary()
+  if (!binary) throw createError({ statusCode: 501, statusMessage: 'No Chrome found on the server. Install Google Chrome, or set SCANNER_CHROME_PATH (or SCANNER_BROWSER_WS for a hosted browser).' })
+  args = [
     process.env.SCANNER_HEADFUL === '1' ? '' : '--headless=new',
     '--remote-debugging-pipe',
     `--user-data-dir=${profile}`,
@@ -132,7 +168,8 @@ export async function openBrowser(): Promise<BrowserHandle> {
     `--window-size=${SCANNER_VIEWPORT.width},${SCANNER_VIEWPORT.height}`,
     'about:blank',
   ].filter(Boolean)
-  const child: ChildProcess = spawn(binary, args, { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'], detached: false })
+  }
+  const child: ChildProcess = spawn(binary!, args, { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'], detached: false })
   const input = child.stdio[3] as NodeJS.WritableStream
   const output = child.stdio[4] as NodeJS.ReadableStream
   let stderr = ''
@@ -162,10 +199,13 @@ export async function openBrowser(): Promise<BrowserHandle> {
     throw createError({ statusCode: 500, statusMessage: `Chrome did not start: ${e.message}${stderr ? ` — ${stderr.split('\n').filter(Boolean).slice(-2).join(' ')}` : ''}` })
   }
   return {
-    conn, kind: 'local', binary,
+    conn, kind: isServerless() && !process.env.SCANNER_CHROME_PATH ? 'serverless' : 'local', binary,
     close: async () => {
       try { await conn.send('Browser.close', {}, undefined, 3000) } catch {}
-      setTimeout(() => { try { if (child.exitCode === null) child.kill('SIGKILL') } catch {} }, 1500)
+      // Wait briefly for a clean exit, then make sure no Chromium outlives the request.
+      if (child.exitCode === null) await new Promise<void>((resolve) => { const t = setTimeout(resolve, 1500); child.once('exit', () => { clearTimeout(t); resolve() }) })
+      try { if (child.exitCode === null) child.kill('SIGKILL') } catch {}
+      cleanup()
     },
   }
 }
@@ -187,6 +227,7 @@ async function connectRemote(endpoint: string): Promise<BrowserHandle> {
 
 export function browserAvailability() {
   if (process.env.SCANNER_BROWSER_WS) return { ok: true, kind: 'remote' as const, binary: null }
+  if (!process.env.SCANNER_CHROME_PATH && isServerless()) return { ok: true, kind: 'serverless' as const, binary: null }
   const binary = findBrowserBinary()
   return { ok: !!binary, kind: 'local' as const, binary }
 }

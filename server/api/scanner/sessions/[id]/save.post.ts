@@ -1,9 +1,4 @@
-import { getCrmDb } from '../../../../utils/crm'
-import { getScannerSession, saveScan } from '../../../../utils/scanner-session'
-import { requireActor } from '../../../../utils/automation-http'
-
-/** POST /api/scanner/sessions/:id/save — record the scan as an automated inventory audit. */
-export default defineEventHandler(async (event) => {
-  const actor = await requireActor(event)
-  return saveScan(await getCrmDb(), getScannerSession(getRouterParam(event, 'id')!, actor), actor)
+/** Retired: the live-session scanner was replaced by /api/scanner/preview + /api/scanner/run. Safe to delete this folder. */
+export default defineEventHandler(() => {
+  throw createError({ statusCode: 410, statusMessage: 'Gone', message: 'The scanner was updated — reload the page' })
 })

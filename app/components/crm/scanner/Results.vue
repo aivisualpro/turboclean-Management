@@ -71,6 +71,10 @@ const FILTERS = computed(() => [
 ])
 
 const img = (v: ScannedVehicle) => v.imageId ? r.value.images[v.imageId] : null
+/** Photos are not stored — the dealer's own image is shown. Track the ones their server refuses. */
+const broken = ref(new Set<string>())
+const photoSrc = (v: ScannedVehicle) => { const u = img(v)?.url || v.image?.url || ''; return u && !broken.value.has(u) ? u : '' }
+function onBroken(u: string) { const next = new Set(broken.value); next.add(u); broken.value = next }
 const busy = ref(false)
 async function setVerdict(v: ScannedVehicle, verdict: FinalVerdict | null) {
   busy.value = true
@@ -98,7 +102,7 @@ async function remember(g: ImageGroup) {
   if (!verdict || !g.hash) return
   busy.value = true
   try {
-    await props.addRule({ hash: g.hash, verdict, thumb: g.thumb, label: `${VERDICT_META[verdict].label} (seen on ${g.vehicles} vehicles)` })
+    await props.addRule({ hash: g.hash, verdict, thumb: g.url, label: `${VERDICT_META[verdict].label} (seen on ${g.vehicles} vehicles)` })
     await props.review({ reapplyRules: true })
     await loadRules()
     toast.success('Remembered — this image will be recognised on every dealership from now on')
@@ -109,7 +113,7 @@ async function rememberVehicle(v: ScannedVehicle, verdict: FinalVerdict) {
   if (!i?.hash) return toast.error('This image could not be fingerprinted')
   busy.value = true
   try {
-    await props.addRule({ hash: i.hash, verdict, thumb: i.thumb || '', label: `${VERDICT_META[verdict].label} — ${v.title}` })
+    await props.addRule({ hash: i.hash, verdict, thumb: i.url, label: `${VERDICT_META[verdict].label} — ${v.title}` })
     await props.review({ reapplyRules: true })
     await loadRules()
     toast.success('Rule saved — applied to this scan and every future scan')
@@ -190,7 +194,7 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
           <div class="grid grid-cols-[repeat(auto-fill,minmax(210px,1fr))] gap-2">
             <article v-for="v in filtered.slice(0, shown)" :key="v.key" class="group rounded-xl border bg-card overflow-hidden flex flex-col [content-visibility:auto] [contain-intrinsic-size:300px]" :class="isWithout(v) && 'ring-1 ' + VERDICT_META[v.final].ring">
               <div class="relative aspect-[4/3] bg-muted/50 overflow-hidden">
-                <img v-if="img(v)?.thumb" :src="img(v)!.thumb!" :alt="v.title" class="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" loading="lazy">
+                <img v-if="photoSrc(v)" :src="photoSrc(v)" :alt="v.title" class="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="onBroken(photoSrc(v))">
                 <div v-else class="size-full flex flex-col items-center justify-center gap-1 text-muted-foreground"><ImageOff class="size-7" /><span class="text-[11px]">{{ v.image?.url ? 'Could not load' : 'No photo' }}</span></div>
                 <span class="absolute top-2 left-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 backdrop-blur bg-background/80" :class="VERDICT_META[pillFor(v)].pill">{{ v.override ? `${VERDICT_META[v.override].short} · set by you` : VERDICT_META[pillFor(v)].short }}{{ !v.override && v.verdict === 'review' ? ` → ${VERDICT_META[v.suggested].short}?` : '' }}</span>
                 <span v-if="!v.override" class="absolute top-2 right-2 rounded-full bg-black/55 text-white px-1.5 py-0.5 text-[10px] tabular-nums" title="How sure the scanner is">{{ conf(v) }}</span>
@@ -246,7 +250,8 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
           <ul class="divide-y">
             <li v-for="g in r.clusters" :key="g.id" class="p-3 space-y-2">
               <div class="flex gap-2.5">
-                <img v-if="g.thumb" :src="g.thumb" alt="" class="size-16 rounded-md object-cover border shrink-0">
+                <img v-if="g.url && !broken.has(g.url)" :src="g.url" alt="" class="size-16 rounded-md object-cover border shrink-0" referrerpolicy="no-referrer" @error="onBroken(g.url)">
+                <span v-else class="size-16 rounded-md border bg-muted flex items-center justify-center shrink-0"><ImageOff class="size-5 text-muted-foreground" /></span>
                 <div class="min-w-0 text-xs">
                   <p class="font-semibold">On {{ g.vehicles }} vehicles</p>
                   <p class="text-muted-foreground line-clamp-2">{{ g.models > 1 ? `${g.models} different models` : g.modelNames[0] }}</p>
@@ -277,7 +282,7 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
             </div>
             <ul class="space-y-1.5">
               <li v-for="rule in rules" :key="rule.id" class="flex items-center gap-2 text-xs">
-                <img v-if="rule.thumb" :src="rule.thumb" alt="" class="size-8 rounded object-cover border">
+                <img v-if="rule.thumb && !broken.has(rule.thumb)" :src="rule.thumb" alt="" class="size-8 rounded object-cover border" referrerpolicy="no-referrer" @error="onBroken(rule.thumb)">
                 <span v-else class="size-8 rounded border bg-muted flex items-center justify-center"><Link2 class="size-3.5 text-muted-foreground" /></span>
                 <div class="min-w-0 flex-1"><p class="truncate">{{ rule.urlContains ? `“${rule.urlContains}”` : rule.label }}</p><p class="text-[10px] text-muted-foreground"><span :class="VERDICT_META[rule.verdict].pill" class="rounded px-1">{{ VERDICT_META[rule.verdict].short }}</span> · used {{ rule.hits || 0 }}×</p></div>
                 <Button size="icon" variant="ghost" class="size-7" aria-label="Delete rule" :disabled="busy" @click="delRule(rule)"><Trash2 class="size-3.5" /></Button>

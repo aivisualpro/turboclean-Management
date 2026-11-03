@@ -42,7 +42,6 @@ export interface ImageInfo {
   uniqueColors?: number
   text?: string
   ocr?: boolean
-  thumb?: string
   bytes?: number
 }
 export interface ScanVehicle {
@@ -126,7 +125,7 @@ export async function saveRule(db: Db, body: { hash?: string, urlContains?: stri
   if (!hash && !urlContains) throw createError({ statusCode: 400, statusMessage: 'A rule needs an image or a piece of the image address' })
   const col = db.collection(RULES_COLLECTION)
   const existing = hash ? await col.findOne({ hash }) : await col.findOne({ urlContains })
-  const doc = { hash, urlContains, verdict, label: String(body.label || '').slice(0, 120) || (verdict === 'real' ? 'Real photo' : verdict === 'stock' ? 'Stock image' : 'Placeholder image'), thumb: String(body.thumb || '').slice(0, 60_000), updatedAt: new Date().toISOString() }
+  const doc = { hash, urlContains, verdict, label: String(body.label || '').slice(0, 120) || (verdict === 'real' ? 'Real photo' : verdict === 'stock' ? 'Stock image' : 'Placeholder image'), thumb: /^https?:\/\//i.test(String(body.thumb || '')) ? String(body.thumb).slice(0, 2000) : '', updatedAt: new Date().toISOString() }
   if (existing) { await col.updateOne({ _id: existing._id }, { $set: doc }); return { id: existing._id.toString(), ...existing, ...doc } }
   const res = await col.insertOne({ ...doc, hits: 0, createdAt: doc.updatedAt, createdBy: actor ? { id: actor.id, name: actor.name } : null })
   return { id: res.insertedId.toString(), ...doc, hits: 0 }
@@ -167,7 +166,7 @@ export function buildClusters(vehicles: ScanVehicle[], images: Map<string, Image
     if (vs.length < 2) continue
     const models = [...new Set(vs.map(modelKey).filter(Boolean))]
     const first = images.get(imgIds[0]!)!
-    clusters.push({ id: `c${++n}`, imageIds: imgIds, hash: first.hash || '', vehicles: vs.length, models: models.length, modelNames: [...new Set(vs.map(v => `${v.make} ${v.model}`.trim() || modelKey(v)))].slice(0, 6), thumb: imgIds.map(i => images.get(i)?.thumb).find(Boolean) || '', url: first.url, verdict: 'review', reason: '', override: null })
+    clusters.push({ id: `c${++n}`, imageIds: imgIds, hash: first.hash || '', vehicles: vs.length, models: models.length, modelNames: [...new Set(vs.map(v => `${v.make} ${v.model}`.trim() || modelKey(v)))].slice(0, 6), thumb: first.url, url: first.url, verdict: 'review', reason: '', override: null })
   }
   return clusters.sort((a, b) => b.vehicles - a.vehicles)
 }

@@ -266,15 +266,14 @@ export const FIND_NEXT_JS = `(() => {
 /**
  * Runs in a blank analysis tab: decodes downloaded images and measures them.
  * dHash (64-bit perceptual hash, for spotting the same picture on many cars), white/grey share,
- * colourfulness, edge density, white border (studio renders), optional OCR (Shape Detection API)
- * and a small JPEG thumbnail for the review screen.
+ * colourfulness, edge density, white border (studio renders) and optional OCR (Shape Detection API).
+ * Nothing is kept: the review screen shows the dealer's own image URL.
  */
 export const ANALYZE_FN_JS = `async (items) => {
   var hasOcr = typeof TextDetector !== 'undefined'
   var detector = null
   try { if (hasOcr) detector = new TextDetector() } catch (e) { detector = null }
   function b64ToBytes(b64) { var bin = atob(b64); var u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u }
-  async function toB64(blob) { var buf = new Uint8Array(await blob.arrayBuffer()); var s = ''; for (var i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000)); return btoa(s) }
   var out = []
   for (var n = 0; n < items.length; n++) {
     var it = items[n]
@@ -319,10 +318,7 @@ export const ANALYZE_FN_JS = `async (items) => {
       for (var h = 0; h < 64; h += 4) hash += parseInt(bits.slice(h, h + 4), 2).toString(16)
       var text = ''
       if (detector) { try { var found = await detector.detect(bmp); text = found.map(function (f) { return f.rawValue }).join(' ').slice(0, 300) } catch (e) {} }
-      var tw = Math.min(240, bmp.width), th = Math.max(1, Math.round(bmp.height * (tw / Math.max(1, bmp.width))))
-      var tc = new OffscreenCanvas(tw, th); tc.getContext('2d').drawImage(bmp, 0, 0, tw, th)
-      var thumb = 'data:image/jpeg;base64,' + await toB64(await tc.convertToBlob({ type: 'image/jpeg', quality: 0.72 }))
-      out.push({ id: it.id, ok: true, w: bmp.width, h: bmp.height, hash: hash, whiteRatio: white / (W * H), grayRatio: gray / (W * H), colorfulness: Math.round(colorfulness * 10) / 10, edgeDensity: edges / ((W - 2) * (H - 2)), borderWhite: border ? borderWhite / border : 0, uniqueColors: Object.keys(q).length, text: text, ocr: !!detector, thumb: thumb })
+      out.push({ id: it.id, ok: true, w: bmp.width, h: bmp.height, hash: hash, whiteRatio: white / (W * H), grayRatio: gray / (W * H), colorfulness: Math.round(colorfulness * 10) / 10, edgeDensity: edges / ((W - 2) * (H - 2)), borderWhite: border ? borderWhite / border : 0, uniqueColors: Object.keys(q).length, text: text, ocr: !!detector })
       bmp.close && bmp.close()
     } catch (e) { out.push({ id: it.id, ok: false, error: String(e && e.message || e) }) }
   }

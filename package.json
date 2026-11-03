@@ -37,6 +37,7 @@
     "@iconify-json/radix-icons": "^1.2.5",
     "@internationalized/date": "^3.10.0",
     "@number-flow/vue": "^0.4.8",
+    "@sparticuz/chromium-min": "153.0.0",
     "@tailwindcss/vite": "^4.1.14",
     "@tanstack/vue-table": "^8.21.3",
     "@types/three": "^0.183.1",
