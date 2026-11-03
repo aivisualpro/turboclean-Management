@@ -6,7 +6,7 @@ import { matchAll } from '~/composables/useCrmFilters'
 import { INTERACTION_TYPE_MAP } from '~/constants/crm'
 import { INTERACTION_ICONS } from '~/constants/crm-icons'
 import {
-  Plus, Search, Store, ShieldAlert, Download, RefreshCw, ArrowUpRight, Globe, ChevronUp, ChevronDown,
+  Plus, Search, Store, ShieldAlert, Download, RefreshCw, ChevronUp, ChevronDown,
   ChevronsUpDown, X, Filter, UserCircle2,
   CheckSquare, Tag, UserCheck, Loader2, ExternalLink, Briefcase, Trophy, SlidersHorizontal, Upload,
 } from 'lucide-vue-next'
@@ -555,7 +555,6 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
               </button>
               <span v-else>{{ c.label }}</span>
             </th>
-            <th class="w-12 border-b border-border" />
           </tr>
         </thead>
         <tbody>
@@ -654,13 +653,6 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
               <td v-else-if="c.key === 'added'" class="px-3 border-b border-border/60 whitespace-nowrap text-xs text-muted-foreground tabular-nums" :class="rowPad" :title="format(new Date(d.createdAt), 'PPpp')">{{ format(new Date(d.createdAt), 'MMM d, yyyy') }}</td>
               <td v-else-if="c.key === 'updated'" class="px-3 border-b border-border/60 whitespace-nowrap text-xs text-muted-foreground tabular-nums" :class="rowPad" :title="format(new Date(d.updatedAt), 'PPpp')">{{ formatDistanceToNow(new Date(d.updatedAt), { addSuffix: true }) }}</td>
             </template>
-            <td class="px-2 py-0 border-b border-border/60 text-right" @click.stop>
-              <div class="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity">
-                <a v-if="d.website" :href="d.website" target="_blank" rel="noopener" class="size-5 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent" title="Open website"><Globe class="size-3.5" /></a>
-                <button v-if="d.dealerId" type="button" class="size-5 inline-flex items-center justify-center rounded-md text-emerald-600 hover:bg-emerald-500/10" title="Continue in Dealers" @click="navigateTo(`/dealers/${d.dealerId}/details`)"><Briefcase class="size-3.5" /></button>
-                <button type="button" class="size-5 inline-flex items-center justify-center rounded-md text-primary hover:bg-primary/10" title="Open record" @click="open(d)"><ArrowUpRight class="size-4" /></button>
-              </div>
-            </td>
           </tr>
         </tbody>
       </table>

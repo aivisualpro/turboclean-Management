@@ -464,3 +464,71 @@ button,
   margin-inline-start: 0;
   margin-inline-end: 8px;
 }
+
+/* ───────── Data tables: one design on every route (template = /crm/dealership) ─────────
+   • 2px theme-colour border around the table (or around the box it sits in)
+   • 1px theme-tinted column and row lines
+   • dark header row, compact rows (4px top/bottom), 13px text
+   Unlayered so it wins over the utility classes used inside pages.
+   Opt out with class "table-plain" on the <table>; calendars (role="grid") are never touched. */
+table:not([role="grid"], .table-plain) {
+  --grid-line: color-mix(in oklab, var(--primary) 30%, transparent);
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 2px solid var(--primary);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 20px;
+}
+table:not([role="grid"], .table-plain) > :is(thead, tbody, tfoot) > tr > :is(th, td) {
+  border-right: 1px solid var(--grid-line);
+  border-bottom: 1px solid var(--grid-line);
+  padding-left: 8px;
+  padding-right: 8px;
+}
+table:not([role="grid"], .table-plain) > :is(thead, tbody, tfoot) > tr > :is(th, td):last-child { border-right: 0; }
+table:not([role="grid"], .table-plain) > :is(tbody, tfoot):last-child > tr:last-child > :is(th, td) { border-bottom: 0; }
+/* Compact rows (empty-state / expanded rows use colspan and keep their own spacing) */
+table:not([role="grid"], .table-plain) > :is(tbody, tfoot) > tr > :is(th, td):not([colspan]) {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+/* Dark header */
+table:not([role="grid"], .table-plain) > thead > tr > th {
+  background: #18181b;
+  color: #d4d4d8;
+  height: auto;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  border-right-color: rgb(255 255 255 / .14);
+  border-bottom: 0;
+}
+table:not([role="grid"], .table-plain) > thead > tr > th :is(span, div, p, svg, button, a, label) { color: inherit; }
+table:not([role="grid"], .table-plain) > thead > tr > th :is(button, a):hover { color: #fff; }
+table:not([role="grid"], .table-plain) > thead > tr:first-child > th:first-child { border-top-left-radius: 6px; }
+table:not([role="grid"], .table-plain) > thead > tr:first-child > th:last-child { border-top-right-radius: 6px; }
+.dark table:not([role="grid"], .table-plain) > thead > tr > th { background: #09090b; }
+/* A table that sits directly in a bordered box uses that box as its 2px frame (no double border) */
+:is(.border, .border-2, [data-slot="card"]):has(> table:not([role="grid"], .table-plain), > div > table:not([role="grid"], .table-plain), > div > div > table:not([role="grid"], .table-plain)) {
+  border-width: 2px;
+  border-color: var(--primary);
+}
+:is(.border, .border-2, [data-slot="card"]) > table:not([role="grid"], .table-plain),
+:is(.border, .border-2, [data-slot="card"]) > div > table:not([role="grid"], .table-plain),
+:is(.border, .border-2, [data-slot="card"]) > div > div > table:not([role="grid"], .table-plain) {
+  border: 0;
+  border-radius: 0;
+}
+:is(.border, .border-2, [data-slot="card"]) > table:not([role="grid"], .table-plain) > thead > tr:first-child > th,
+:is(.border, .border-2, [data-slot="card"]) > div > table:not([role="grid"], .table-plain) > thead > tr:first-child > th,
+:is(.border, .border-2, [data-slot="card"]) > div > div > table:not([role="grid"], .table-plain) > thead > tr:first-child > th { border-radius: 0; }
+/* …and clips the dark header to its rounded corners (scroll containers are left alone) */
+:is(.border, .border-2, [data-slot="card"]):not(.overflow-auto, .overflow-x-auto, .overflow-y-auto, .overflow-scroll):has(> table:not([role="grid"], .table-plain), > div > table:not([role="grid"], .table-plain), > div > div > table:not([role="grid"], .table-plain)) {
+  overflow: hidden;
+}

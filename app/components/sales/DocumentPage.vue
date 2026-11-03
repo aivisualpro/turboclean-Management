@@ -356,9 +356,6 @@ const previewHtml = computed(() => {
               </TableCell>
               <TableCell>
                 <div class="flex items-center gap-2">
-                  <div class="flex items-center justify-center rounded-full size-7 text-[10px] font-bold" :class="getAvatarColor(item.client)">
-                    {{ getInitials(item.client) }}
-                  </div>
                   <div>
                     <p class="text-sm font-medium">
                       {{ item.client }}

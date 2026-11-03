@@ -21,8 +21,10 @@ setHeader({ title: props.title, description: props.description, icon: props.icon
 
 // UI State
 const search = ref('')
-const currentPage = ref(1)
-const perPage = 10
+// Rows load in batches as you scroll (no previous / next pages)
+const BATCH = 50
+const shownCount = ref(BATCH)
+const loadMoreTrigger = ref<HTMLElement | null>(null)
 const showDialog = ref(false)
 const showDeleteDialog = ref(false)
 const editingItem = ref<any>(null)
@@ -41,13 +43,12 @@ const filteredItems = computed(() => {
   )
 })
 
-const totalPages = computed(() => Math.ceil(filteredItems.value.length / perPage))
-const paginatedItems = computed(() => {
-  const start = (currentPage.value - 1) * perPage
-  return filteredItems.value.slice(start, start + perPage)
-})
+const paginatedItems = computed(() => filteredItems.value.slice(0, shownCount.value))
+const hasMore = computed(() => shownCount.value < filteredItems.value.length)
+function loadMore() { if (hasMore.value) shownCount.value += BATCH }
+useIntersectionObserver(loadMoreTrigger, (entries) => { if (entries.some(e => e.isIntersecting)) loadMore() }, { rootMargin: '0px 0px 300px 0px' })
 
-watch(search, () => { currentPage.value = 1 })
+watch(search, () => { shownCount.value = BATCH })
 
 // CRUD Handlers
 function openCreate() {
@@ -93,7 +94,7 @@ function handleDelete() {
 
 function handleReset() {
   reset()
-  currentPage.value = 1
+  shownCount.value = BATCH
   search.value = ''
   toast.info('Data has been reset to defaults')
 }
@@ -200,12 +201,6 @@ function formatNumber(value: any): string {
     return '—'
   return new Intl.NumberFormat('en-US').format(Number(value))
 }
-
-function getInitials(name: string): string {
-  if (!name)
-    return '??'
-  return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
-}
 </script>
 
 <template>
@@ -248,16 +243,8 @@ function getInitials(name: string): string {
           <TableBody>
             <TableRow v-for="item in paginatedItems" :key="item.id" class="group">
               <TableCell v-for="col in columns" :key="col.key">
-                <!-- Avatar -->
-                <div v-if="col.type === 'avatar'" class="flex items-center gap-3">
-                  <Avatar class="size-8 border">
-                    <AvatarImage :src="item.avatar" :alt="item[col.key]" />
-                    <AvatarFallback class="text-xs">
-                      {{ getInitials(item[col.key]) }}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span class="font-medium">{{ item[col.key] }}</span>
-                </div>
+                <!-- Name (no avatar in tables) -->
+                <span v-if="col.type === 'avatar'" class="font-medium">{{ item[col.key] }}</span>
                 <!-- Badge -->
                 <Badge v-else-if="col.type === 'badge'" variant="outline" :class="getBadgeClass(item[col.key])">
                   {{ item[col.key] || '—' }}
@@ -330,21 +317,10 @@ function getInitials(name: string): string {
       </div>
     </Card>
 
-    <!-- Pagination -->
-    <div v-if="totalPages > 1" class="flex flex-wrap items-center justify-between gap-2">
-      <p class="text-sm text-muted-foreground tabular-nums">
-        Showing {{ (currentPage - 1) * perPage + 1 }}–{{ Math.min(currentPage * perPage, filteredItems.length) }} of {{ filteredItems.length }}
-      </p>
-      <div class="flex gap-2">
-        <Button variant="outline" size="sm" :disabled="currentPage <= 1" @click="currentPage--">
-          <Icon name="i-lucide-chevron-left" class="mr-1 size-4" />
-          Previous
-        </Button>
-        <Button variant="outline" size="sm" :disabled="currentPage >= totalPages" @click="currentPage++">
-          Next
-          <Icon name="i-lucide-chevron-right" class="ml-1 size-4" />
-        </Button>
-      </div>
+    <!-- Load more on scroll -->
+    <div v-if="isLoaded && filteredItems.length" ref="loadMoreTrigger" class="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+      <span class="tabular-nums">Showing {{ paginatedItems.length }} of {{ filteredItems.length }}</span>
+      <Button v-if="hasMore" variant="ghost" size="sm" class="h-7 text-xs" @click="loadMore">Load more</Button>
     </div>
 
     <!-- Create/Edit Dialog -->
