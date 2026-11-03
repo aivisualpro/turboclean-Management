@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { CrmAudit, CrmDealership } from '~/composables/useCrmDealerships'
-import { ClipboardCheck, Plus, Car, ImageOff, Camera, TrendingUp, TrendingDown, Minus, ChevronDown, ExternalLink, Bot, User, FileDown, Link2 } from 'lucide-vue-next'
+import { ClipboardCheck, Plus, Car, ImageOff, Camera, TrendingUp, TrendingDown, Minus, ChevronDown, ExternalLink, Bot, User, FileDown, Link2, FileBarChart } from 'lucide-vue-next'
 import { format, formatDistanceToNow } from 'date-fns'
 
 const props = defineProps<{ dealership: CrmDealership, audits: CrmAudit[], canEdit: boolean }>()
@@ -18,6 +18,10 @@ const expanded = ref<Set<string>>(new Set())
 function toggle(id: string) { const s = new Set(expanded.value); s.has(id) ? s.delete(id) : s.add(id); expanded.value = s }
 onMounted(() => { if (latest.value) expanded.value = new Set([latest.value.id]) })
 
+// Stored analysis report per audit (then vs now, history, evidence) — view / PDF / dealer link
+const reportFor = ref<{ id: string, auditedAt: string } | null>(null)
+const reportOpen = ref(false)
+function openReport(a: { id: string, auditedAt: string }) { reportFor.value = a; reportOpen.value = true }
 function exportCsv() {
   const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`
   const head = ['Audit date', 'Source', 'Inventory URL', 'New total', 'Used total', 'Total', 'New missing photos', 'Used missing photos', 'Missing total', 'Missing %', 'New missing %', 'Used missing %', 'Poor photo sets', 'Poor set notes', 'Merchandising issues', 'Merchandising notes', 'Website issues', 'Website notes', 'Notes', 'Examples', 'Audited by']
@@ -103,7 +107,12 @@ function exportCsv() {
             </div>
             <ChevronDown class="size-4 text-muted-foreground transition-transform shrink-0" :class="expanded.has(a.id) && 'rotate-180'" />
           </button>
-          <div v-if="expanded.has(a.id)" class="border-t px-4 py-4 grid grid-cols-1 lg:grid-cols-2 gap-5 text-sm">
+          <div v-if="expanded.has(a.id)" class="border-t px-4 pt-3 flex flex-wrap items-center gap-2">
+            <Button size="sm" class="h-8 gap-1.5 bg-violet-600 hover:bg-violet-600/90 text-white" @click="openReport(a)"><FileBarChart class="size-4" /> Inventory report</Button>
+            <Button as="a" :href="`/api/crm/audits/${a.id}/report?format=pdf&download=1`" size="sm" variant="outline" class="h-8 gap-1.5"><FileDown class="size-4" /> PDF</Button>
+            <span class="text-[11px] text-muted-foreground">Stored as it read on this date{{ idx < sorted.length - 1 ? ' — includes then vs now' : ' — the baseline' }}.</span>
+          </div>
+          <div v-if="expanded.has(a.id)" class="px-4 py-4 grid grid-cols-1 lg:grid-cols-2 gap-5 text-sm">
             <div class="space-y-4">
               <table class="w-full text-xs">
                 <thead class="text-[10px] uppercase tracking-wider text-muted-foreground"><tr><th class="text-left font-medium pb-1"></th><th class="text-right font-medium pb-1">Total</th><th class="text-right font-medium pb-1">Missing photos</th><th class="text-right font-medium pb-1">Rate</th></tr></thead>
@@ -140,5 +149,6 @@ function exportCsv() {
         </article>
       </section>
     </template>
+    <CrmAuditReport v-model:open="reportOpen" :audit-id="reportFor?.id || null" :audited-at="reportFor?.auditedAt" :dealership-name="dealership.name" />
   </div>
 </template>

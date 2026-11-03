@@ -305,3 +305,114 @@ export const MISSING_PHOTOS_HTML_V2 = `<!doctype html>
 </table>
 </body>
 </html>`
+
+/**
+ * "Then vs Now" — re-engage / check-in email built on the audit history: the latest review vs the
+ * one ~3 months earlier ({{auditTrend}}), today's evidence list, and a button to the dealer's own
+ * full report ({{reportUrl}}). Same house style as Missing Photos V2. Needs at least two audits.
+ */
+export const THEN_VS_NOW_HTML = `<!doctype html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+<meta name="color-scheme" content="light only">
+<meta name="supported-color-schemes" content="light only">
+<title>{{dealership}} — then vs now</title>
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+  body, table, td, a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+  table, td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
+  a[x-apple-data-detectors] { color:inherit !important; text-decoration:none !important; }
+  @media only screen and (max-width:620px) {
+    .container { width:100% !important; }
+    .px { padding-left:22px !important; padding-right:22px !important; }
+    .hero-h1 { font-size:34px !important; line-height:39px !important; }
+    .h2 { font-size:22px !important; line-height:28px !important; }
+    .stack { display:block !important; width:100% !important; box-sizing:border-box; }
+    .stack-gap { display:block !important; width:100% !important; height:10px !important; }
+    .kpi-num { font-size:34px !important; line-height:38px !important; }
+    .hide-sm { display:none !important; }
+    .btn a { display:block !important; text-align:center !important; }
+  }
+</style>
+</head>
+<body style="margin:0;padding:0;background:#eef1ef;word-spacing:normal;">
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">{{auditPeriod|A few months}} ago {{prevUsedMissingPhotos}} pre-owned cars at {{dealership}} had no real photo. Today it&rsquo;s {{usedMissingPhotos}}. Your full report is inside.&#8199;&#65279;&#847;&#8199;&#65279;&#847;&#8199;&#65279;&#847;&#8199;&#65279;&#847;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef1ef;">
+<tr><td align="center" style="padding:28px 12px 40px;">
+<!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+<table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+
+  <!-- Brand bar -->
+  <tr><td class="px" style="background:#0e1714;padding:22px 40px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td style="font-size:20px;font-weight:800;letter-spacing:4px;color:#ffffff;">ZRZ<span style="color:#4ade80;">&nbsp;OPS</span></td>
+      <td align="right" class="hide-sm" style="font-size:10px;font-weight:700;letter-spacing:2.4px;color:#9fb3ab;">INVENTORY CHECK-IN</td>
+    </tr></table>
+  </td></tr>
+  <tr><td style="height:3px;line-height:3px;font-size:0;background:#22c55e;">&nbsp;</td></tr>
+
+  <!-- Hero -->
+  <tr><td class="px" style="background:#0e1714;padding:40px 40px 44px;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="background:#173026;border:1px solid #24493a;border-radius:999px;padding:6px 12px;font-size:11px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase;color:#86efac;">{{dealership}} &nbsp;&middot;&nbsp; {{prevAuditDate}} &rarr; {{auditDate}}</td></tr></table>
+    <h1 class="hero-h1" style="margin:22px 0 0;font-size:42px;line-height:48px;font-weight:800;letter-spacing:-1px;color:#ffffff;">{{auditPeriod|A few months}} ago: {{prevUsedMissingPhotos}}.<br><span style="color:#4ade80;">Today: {{usedMissingPhotos}}.</span><br>Pre-owned cars with no real photo.</h1>
+    <p style="margin:22px 0 0;font-size:16px;line-height:26px;color:#c9d6d0;">Hi {{firstName|there}} &mdash; we checked {{website}} again, the same way a shopper sees it. Here&rsquo;s how your online inventory has changed since our last review, and the cars that still need real photos today.</p>
+  </td></tr>
+
+  <!-- Then vs now -->
+  <tr><td class="px" style="padding:36px 40px 0;">{{auditTrend}}</td></tr>
+  <tr><td class="px" style="padding:18px 40px 0;">{{auditBreakdown}}</td></tr>
+
+  <!-- Evidence -->
+  <tr><td class="px" style="padding:22px 40px 0;">{{auditEvidence}}</td></tr>
+
+  <!-- Why -->
+  <tr><td class="px" style="padding:24px 40px 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td style="border-left:4px solid #e5484d;background:#fff7f7;border-radius:0 10px 10px 0;padding:18px 20px;font-size:15px;line-height:24px;color:#344054;"><strong style="color:#101828;">Why it keeps coming back:</strong> new trade-ins arrive every week. Without one owner for recon &rarr; photos &rarr; listing, the gap refills as fast as it&rsquo;s closed. That handoff is exactly what ZRZ OPS runs for dealerships &mdash; and we prove it every week.</td>
+    </tr></table>
+  </td></tr>
+
+  <!-- CTA -->
+  <tr><td class="px" style="padding:32px 40px 8px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#effaf3;border:1px solid #cdeedb;border-radius:14px;"><tr><td style="padding:26px 24px;">
+      <h2 class="h2" style="margin:0 0 10px;font-size:23px;line-height:29px;font-weight:800;letter-spacing:-.4px;color:#101828;">Your full report is ready</h2>
+      <p style="margin:0 0 20px;font-size:15px;line-height:24px;color:#475467;">Every review side by side, the trend, and the full list of listings without a real photo &mdash; open it, forward it, print it.</p>
+      <table role="presentation" class="btn" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-radius:10px;background:#16a34a;">
+        <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="{{reportUrl}}" style="height:50px;v-text-anchor:middle;width:300px;" arcsize="20%" stroke="f" fillcolor="#16a34a"><w:anchorlock/><center style="color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">See my inventory report &rarr;</center></v:roundrect><![endif]-->
+        <!--[if !mso]><!--><a href="{{reportUrl}}" style="display:inline-block;padding:16px 28px;border-radius:10px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;">See my inventory report &rarr;</a><!--<![endif]-->
+      </td></tr></table>
+      <p style="margin:16px 0 0;font-size:14px;line-height:22px;color:#475467;">Want us to start closing the gap? <a href="{{replyMailto}}" style="color:#15803d;font-weight:700;text-decoration:none;">Reply with a good time for 10 minutes &rarr;</a></p>
+    </td></tr></table>
+  </td></tr>
+
+  <!-- Signature -->
+  <tr><td class="px" style="padding:32px 40px 40px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #eaecf0;"><tr><td style="padding-top:26px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td width="52" valign="top"><div style="width:44px;height:44px;line-height:44px;border-radius:22px;background:#0e1714;color:#4ade80;font-size:16px;font-weight:800;text-align:center;">{{senderInitials|ZO}}</div></td>
+        <td valign="top" style="padding-left:12px;">
+          <div style="font-size:17px;font-weight:800;color:#101828;">{{senderName}}</div>
+          <div style="margin-top:2px;font-size:13px;color:#667085;">{{senderTitle|Owner}} &middot; {{senderCompany}}</div>
+          <div style="margin-top:10px;font-size:13px;line-height:20px;color:#344054;"><a href="tel:{{senderPhone}}" style="color:#344054;text-decoration:none;">{{senderPhone}}</a> &nbsp;&middot;&nbsp; <a href="mailto:{{senderEmail}}" style="color:#15803d;text-decoration:none;">{{senderEmail}}</a></div>
+        </td>
+      </tr></table>
+    </td></tr></table>
+  </td></tr>
+
+  <!-- Footer -->
+  <tr><td class="px" style="background:#0e1714;padding:22px 40px;">
+    <p style="margin:0;font-size:11px;line-height:17px;letter-spacing:1.2px;color:#9fb3ab;">{{senderTagline|DEALERSHIP RECONDITIONING · INVENTORY MERCHANDISING · MONITORING}}</p>
+    <p style="margin:8px 0 0;font-size:11px;line-height:17px;color:#7d918a;">Sent to {{dealership}} by {{senderCompany}}, {{senderRegion|Connecticut & Massachusetts}}. Based on publicly listed inventory. Not the right person, or not interested? Reply &ldquo;no thanks&rdquo; and we won&rsquo;t follow up.</p>
+  </td></tr>
+
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</td></tr>
+</table>
+</body>
+</html>`

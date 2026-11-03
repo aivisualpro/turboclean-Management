@@ -200,6 +200,8 @@ export const EMAIL_HTML_ONLY_FIELDS: { key: string, label: string }[] = [
   { key: 'senderTagline', label: 'Your tagline' }, { key: 'senderRegion', label: 'Your region' }, { key: 'senderInitials', label: 'Your initials' }, { key: 'inventoryUrl', label: 'Inventory URL' },
   { key: 'usedWithPhotos', label: 'Used with real photos' }, { key: 'placeholderImages', label: 'Placeholder images' }, { key: 'noImageCount', label: 'No image at all' }, { key: 'stockImages', label: 'Stock images' },
   { key: 'auditEvidence', label: '▣ Evidence list (block)' }, { key: 'usedPhotoBar', label: '▣ Photo bar (block)' }, { key: 'auditBreakdown', label: '▣ What we found (block)' }, { key: 'newInventoryNote', label: '▣ New-car note (block)' },
+  { key: 'auditTrend', label: '▣ Then vs now (block)' }, { key: 'reportUrl', label: 'Dealer report link' }, { key: 'prevAuditDate', label: 'Earlier review date' }, { key: 'prevUsedMissingPhotos', label: 'Used missing then' },
+  { key: 'prevUsedMissingPhotoPct', label: 'Used missing % then' }, { key: 'usedMissingChange', label: 'Change (cars)' }, { key: 'usedMissingPctChange', label: 'Change (pts)' }, { key: 'auditPeriod', label: 'Time between reviews' }, { key: 'trendWord', label: 'more / fewer' },
 ]
 export const EMAIL_TEMPLATE_CATEGORIES = ['First touch', 'Follow-up', 'Meeting', 'Proposal', 'Re-engage', 'Other'] as const
 /** The success funnel, in order. Opens/clicks are deliberately not part of it. */

@@ -20,9 +20,10 @@
  *   replied → conversation → meeting → (opportunity) → proposal → won
  * Reaching a later stage implies the earlier ones (a meeting implies a conversation happened).
  */
-import { createHmac as createHmacNode } from 'node:crypto'
+import { createHash, createHmac as createHmacNode } from 'node:crypto'
 import { ObjectId } from 'mongodb'
 import { auditBreakdown, auditEvidence, newInventoryNote, RAW_HTML_FIELDS, usedPhotoBar } from './crm-email-blocks'
+import { reportUrl as auditReportUrl, trendVars } from './crm-reports'
 import type { Db } from 'mongodb'
 import { Resend } from 'resend'
 import { CRM_COLLECTIONS, OPEN_STAGE_ORDER, logActivity, str } from './crm'
@@ -98,11 +99,13 @@ export const MERGE_FIELDS = [
   // Inventory Scanner detail + ready-made HTML blocks (see crm-email-blocks.ts)
   'usedWithPhotos', 'placeholderImages', 'noImageCount', 'stockImages',
   'auditEvidence', 'auditBreakdown', 'usedPhotoBar', 'newInventoryNote',
+  // Then vs now (vs the audit closest to ~3 months earlier) + public report link
+  'prevAuditDate', 'prevUsedTotal', 'prevUsedMissingPhotos', 'prevUsedMissingPhotoPct', 'prevTotalMissingPhotos', 'usedMissingChange', 'usedMissingPctChange', 'auditPeriod', 'trendWord', 'auditTrend', 'reportUrl',
 ] as const
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 export interface SenderProfile { displayName: string, title: string, company: string, phone: string, email: string, tagline: string, region: string }
 
-export function mergeVars(dealership: any, contact: any, sender: Partial<SenderProfile> & { name?: string } | null, audit: any = null, extra: { replyTo?: string, subject?: string } = {}) {
+export function mergeVars(dealership: any, contact: any, sender: Partial<SenderProfile> & { name?: string } | null, audit: any = null, extra: { replyTo?: string, subject?: string, history?: any[], reportUrl?: string } = {}) {
   const senderName = sender?.displayName || sender?.name || ''
   const d = audit?.auditedAt ? new Date(audit.auditedAt) : null
   const n = (v: any) => (v === null || v === undefined || v === '') ? '' : String(v)
@@ -141,6 +144,9 @@ export function mergeVars(dealership: any, contact: any, sender: Partial<SenderP
     auditBreakdown: audit ? auditBreakdown(audit) : '',
     usedPhotoBar: audit ? usedPhotoBar(audit) : '',
     newInventoryNote: audit ? newInventoryNote(audit) : '',
+    // Then vs now (latest audit vs the one ~3 months earlier) + the dealer's own report link.
+    ...trendVars(audit, extra.history || (audit ? [audit] : [])),
+    reportUrl: extra.reportUrl || '',
     replyMailto: extra.replyTo ? `mailto:${extra.replyTo}?subject=${encodeURIComponent(`Re: ${extra.subject || ''}`)}` : '',
   } as Record<string, string>
 }
@@ -430,11 +436,13 @@ export const DUPLICATE_EMAIL_DAYS = 7
 
 /** Everything the merge needs for one recipient. */
 export async function mergeContext(db: Db, dealership: any, contact: any, actor: SessionActor | null, extra: { replyTo?: string, subject?: string } = {}) {
-  const [sender, audit] = await Promise.all([
+  const [sender, recent] = await Promise.all([
     getSenderProfile(db, actor),
-    db.collection('turboCleanCrmAudits').find({ dealershipId: dealership._id.toString() }).sort({ auditedAt: -1, createdAt: -1 }).limit(1).next(),
+    db.collection('turboCleanCrmAudits').find({ dealershipId: dealership._id.toString() }).sort({ auditedAt: -1, createdAt: -1 }).limit(24).toArray(),
   ])
-  return { vars: mergeVars(dealership, contact, sender, audit, extra), sender, audit }
+  const audit = recent[0] || null
+  const history = [...recent].reverse()
+  return { vars: mergeVars(dealership, contact, sender, audit, { ...extra, history, reportUrl: audit ? auditReportUrl(audit._id.toString()) : '' }), sender, audit }
 }
 
 export async function sendCrmEmail(db: Db, dealership: any, input: SendInput, actor: SessionActor | null) {
@@ -499,8 +507,10 @@ export async function sendCrmEmail(db: Db, dealership: any, input: SendInput, ac
   const bodyEdited = !!version && !useHtml && typedBody !== (version.body || '')
   let bodyHtml: string, bodyText: string
   const attachments: any[] = []
+  const inlineFiles: { cid: string, fileId: string }[] = []
   if (useHtml) {
     const shot = audit?.screenshotFileId ? await getFile(db, audit.screenshotFileId) : null
+    if (shot) inlineFiles.push({ cid: 'audit-shot', fileId: String(audit!.screenshotFileId) })
     const merged = renderMerge(version.html, vars, { html: true }).text
     bodyHtml = merged.replace(/__AUDIT_SCREENSHOT__/g, shot ? `<img src="cid:audit-shot" alt="Inventory page screenshot" width="100%" style="display:block;width:100%;max-width:600px;height:auto;border:0" />` : '')
     if (shot && bodyHtml.includes('cid:audit-shot')) attachments.push({ content: shot.data.toString('base64'), filename: shot.filename, contentType: shot.contentType, contentId: 'audit-shot' })
@@ -532,6 +542,10 @@ export async function sendCrmEmail(db: Db, dealership: any, input: SendInput, ac
     bodyText,
     bodyHtml,
     bodyFormat: useHtml ? 'html' : 'text',
+    // Exact copy of what was sent, kept forever: content fingerprint + envelope + inline images.
+    contentSha256: createHash('sha256').update(`${subject}\n${bodyHtml}\n${bodyText}`).digest('hex'),
+    inlineFiles,
+    envelope: { from: `${fromName} <${fromEmail}>`, to: toEmail, replyTo, subject, date: now },
     templateId: template?._id?.toString() || null,
     templateName: template?.name || '',
     templateVersion: version?.version ?? null,
@@ -640,7 +654,7 @@ export async function previewCrmEmail(db: Db, dealership: any, input: SendInput,
  * instantly while typing or while Template Studio is writing.
  */
 export async function templatePreviewContext(db: Db, input: any, actor: SessionActor | null) {
-  const { SAMPLE_AUDIT, SAMPLE_CONTACT, SAMPLE_DEALERSHIP, SAMPLE_SENDER } = await import('./crm-email-blocks')
+  const { SAMPLE_AUDIT, SAMPLE_CONTACT, SAMPLE_DEALERSHIP, SAMPLE_HISTORY, SAMPLE_SENDER } = await import('./crm-email-blocks')
   const replyTo = REPLY_DOMAIN() ? `reply+preview@${REPLY_DOMAIN()}` : (process.env.CRM_REPLY_TO || actor?.email || FROM_EMAIL())
   const subject = str(input?.subject, 300)
   let vars: Record<string, string>, audit: any, sender: SenderProfile
@@ -662,7 +676,7 @@ export async function templatePreviewContext(db: Db, input: any, actor: SessionA
     const mine = await getSenderProfile(db, actor)
     sender = { ...SAMPLE_SENDER, ...Object.fromEntries(Object.entries(mine).filter(([, v]) => v)) } as SenderProfile
     audit = SAMPLE_AUDIT
-    vars = mergeVars(SAMPLE_DEALERSHIP, SAMPLE_CONTACT, sender, SAMPLE_AUDIT, { replyTo, subject })
+    vars = mergeVars(SAMPLE_DEALERSHIP, SAMPLE_CONTACT, sender, SAMPLE_AUDIT, { replyTo, subject, history: SAMPLE_HISTORY, reportUrl: '#sample-report' })
   }
   return {
     source, dealershipName, vars, rawFields: [...RAW_HTML_FIELDS],
@@ -681,6 +695,54 @@ async function advanceStage(db: Db, dealership: any, target: string, actor: Sess
   if (cur === -1 || to === -1 || to <= cur) return
   const { moveStage } = await import('./crm-stage')
   await moveStage(db, fresh, target, actor, 'email' as any, note)
+}
+
+// ───────────────────────── As-sent archive (HTML / PDF) ─────────────────────────
+/**
+ * The email exactly as it was sent, as one standalone document: an envelope header (from, to, date,
+ * subject, template, fingerprint) above the original HTML. Inline images (cid:) are embedded, so
+ * the archive opens anywhere and prints to PDF identically. Content is never re-rendered.
+ */
+export async function emailArchiveHtml(db: Db, id: string) {
+  const { emails } = await emailDb(db)
+  const e = await emails.findOne({ _id: oid(id) })
+  if (!e) throw createError({ statusCode: 404, statusMessage: 'Email not found' })
+  let body = String(e.bodyHtml || '') || textToHtml(String(e.bodyText || ''))
+  for (const f of (e.inlineFiles || []) as { cid: string, fileId: string }[]) {
+    const file = await getFile(db, f.fileId).catch(() => null)
+    if (file) body = body.split(`cid:${f.cid}`).join(`data:${file.contentType};base64,${file.data.toString('base64')}`)
+  }
+  // Old sends (before inlineFiles was recorded): embed the audit screenshot if one was referenced.
+  if (body.includes('cid:audit-shot') && e.auditId && ObjectId.isValid(e.auditId)) {
+    const a = await db.collection('turboCleanCrmAudits').findOne({ _id: new ObjectId(e.auditId) })
+    const file = a?.screenshotFileId ? await getFile(db, a.screenshotFileId).catch(() => null) : null
+    if (file) body = body.split('cid:audit-shot').join(`data:${file.contentType};base64,${file.data.toString('base64')}`)
+  }
+  const head = body.match(/<head[^>]*>([\s\S]*?)<\/head>/i)?.[1] || ''
+  const styles = (head.match(/<style[\s\S]*?<\/style>/gi) || []).join('\n')
+  const inner = body.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1] ?? body
+  const bodyAttr = body.match(/<body([^>]*)>/i)?.[1] || ''
+  const bg = bodyAttr.match(/background(?:-color)?:\s*([^;"]+)/i)?.[1] || '#ffffff'
+  const outbound = e.direction !== 'inbound'
+  const when = new Date(e.sentAt || e.receivedAt || e.createdAt)
+  const row = (k: string, v: string) => v ? `<tr><td style="padding:3px 14px 3px 0;color:#667085;white-space:nowrap;vertical-align:top">${k}</td><td style="padding:3px 0;color:#101828">${v}</td></tr>` : ''
+  const envelope = `<div class="zrz-envelope" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;line-height:17px;background:#ffffff;border-bottom:1px solid #eaecf0;padding:18px 24px">
+  <div style="font-size:10px;font-weight:700;letter-spacing:1.6px;color:#15803d;margin-bottom:8px">${outbound ? 'EMAIL AS SENT' : 'EMAIL AS RECEIVED'} &middot; ZRZ OPS CRM ARCHIVE</div>
+  <div style="font-size:17px;font-weight:700;color:#101828;margin-bottom:10px">${esc(String(e.subject || ''))}</div>
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+    ${row('From', esc(e.envelope?.from || (e.fromName ? `${e.fromName} <${e.fromEmail}>` : e.fromEmail || '')))}
+    ${row('To', esc(e.envelope?.to || e.toEmail || ''))}
+    ${row('Date', esc(when.toUTCString()))}
+    ${row('Dealership', esc(e.dealershipName || ''))}
+    ${outbound ? row('Template', esc([e.templateName, e.templateVersionLabel, e.subjectVariant ? `subject ${e.subjectVariant}` : '', e.templateEdited ? 'edited' : ''].filter(Boolean).join(' · '))) : ''}
+    ${row('Status', esc([e.status, e.deliveredAt ? `delivered ${String(e.deliveredAt).slice(0, 16).replace('T', ' ')}` : '', e.repliedAt ? 'replied' : ''].filter(Boolean).join(' · ')))}
+    ${row('Fingerprint', e.contentSha256 ? `<span style="font-family:ui-monospace,Menlo,monospace;color:#667085">sha256 ${esc(String(e.contentSha256).slice(0, 24))}…</span>` : '')}
+  </table>
+</div>`
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(String(e.subject || 'Email'))} — ${esc(e.dealershipName || '')}</title>
+<style>@page{size:Letter;margin:0.3in}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{margin:0;background:${esc(bg)}}</style>${styles}</head>
+<body>${envelope}<div class="zrz-archived-body">${inner}</div></body></html>`
+  return { html, email: e }
 }
 
 // ───────────────────────── Unsubscribe (deliverability) ─────────────────────────
@@ -1262,6 +1324,29 @@ export async function templateExperiments(db: Db, q: { from?: string, to?: strin
 export async function seedDefaultTemplates(db: Db) {
   await seedMissingPhotosV1(db)
   await seedMissingPhotosV2(db)
+  await seedThenVsNow(db)
+}
+/** "Then vs Now" — check-in email built on the audit history (latest vs ~3 months earlier). */
+async function seedThenVsNow(db: Db) {
+  const counters = db.collection(CRM_COLLECTIONS.counters)
+  const flag = await counters.findOne({ _id: 'crmEmailSeedThenVsNow' as any })
+  if (flag?.done) return
+  const claim = await counters.updateOne({ _id: 'crmEmailSeedThenVsNow' as any, startedAt: { $exists: false } }, { $set: { startedAt: new Date().toISOString() } }, { upsert: true }).catch(() => null)
+  if (!claim || (!claim.upsertedCount && !claim.modifiedCount)) return
+  try {
+    const { templates } = await emailDb(db)
+    if (!(await templates.findOne({ name: 'Then vs Now' }))) {
+      const { THEN_VS_NOW_HTML } = await import('./crm-email-seed')
+      await createTemplate(db, {
+        name: 'Then vs Now', category: 'Re-engage',
+        description: 'Check-in built on the audit history: latest review vs ~3 months earlier, today’s evidence list, button to the dealer’s full report. Needs two or more audits.',
+        subject: '{{dealership}}: {{prevUsedMissingPhotos}} → {{usedMissingPhotos}} cars without real photos since {{prevAuditDate}}',
+        format: 'html', html: THEN_VS_NOW_HTML, label: 'V1', note: 'Then vs now — audit history + report link',
+      }, null)
+    }
+    await counters.updateOne({ _id: 'crmEmailSeedThenVsNow' as any }, { $set: { done: true, finishedAt: new Date().toISOString() } })
+  }
+  catch (e) { await counters.deleteOne({ _id: 'crmEmailSeedThenVsNow' as any }).catch(() => {}); throw e }
 }
 async function seedMissingPhotosV1(db: Db) {
   const counters = db.collection(CRM_COLLECTIONS.counters)

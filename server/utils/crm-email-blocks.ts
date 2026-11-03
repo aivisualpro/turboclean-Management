@@ -8,7 +8,7 @@
  */
 
 /** Merge fields whose value is HTML and must not be escaped. */
-export const RAW_HTML_FIELDS = new Set(['auditScreenshot', 'auditEvidence', 'auditBreakdown', 'usedPhotoBar', 'newInventoryNote'])
+export const RAW_HTML_FIELDS = new Set(['auditScreenshot', 'auditEvidence', 'auditBreakdown', 'usedPhotoBar', 'newInventoryNote', 'auditTrend'])
 
 const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const FONT = `font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;`
@@ -116,7 +116,7 @@ export function auditEvidence(audit: any, opts: { max?: number, screenshot?: str
 
 /** Sample audit used for template previews (when no real dealership is picked). */
 export const SAMPLE_AUDIT = {
-  _id: null,
+  _id: 'sample-3',
   auditedAt: '2026-10-09T15:00:00.000Z',
   source: 'automated',
   inventoryUrl: 'https://www.bleakleykia.com/used-inventory',
@@ -132,6 +132,12 @@ export const SAMPLE_AUDIT = {
   ],
   screenshotFileId: null,
 }
+/** Earlier sample audits (≈3 months and ≈7 weeks before) so previews show "then vs now". */
+export const SAMPLE_HISTORY = [
+  { _id: 'sample-1', auditedAt: '2026-07-08T15:00:00.000Z', newTotal: 318, usedTotal: 158, newMissingPhotos: 9, usedMissingPhotos: 19, totalVehicles: 476, totalMissingPhotos: 28, missingPhotoPct: 5.9, newMissingPhotoPct: 2.8, usedMissingPhotoPct: 12 },
+  { _id: 'sample-2', auditedAt: '2026-08-20T15:00:00.000Z', newTotal: 327, usedTotal: 164, newMissingPhotos: 10, usedMissingPhotos: 27, totalVehicles: 491, totalMissingPhotos: 37, missingPhotoPct: 7.5, newMissingPhotoPct: 3.1, usedMissingPhotoPct: 16.5 },
+] as any[]
+SAMPLE_HISTORY.push(SAMPLE_AUDIT)
 export const SAMPLE_DEALERSHIP = { _id: null, name: 'Bleakley Kia', dealerGroup: 'Bleakley Auto Group', city: 'Hartford', state: 'CT', website: 'https://www.bleakleykia.com' }
 export const SAMPLE_CONTACT = { firstName: 'Mike', lastName: 'Rivera', jobTitle: 'General Manager', email: 'mike@bleakleykia.com' }
 export const SAMPLE_SENDER = { displayName: 'Shams Zia', title: 'Owner', company: 'ZRZ OPS LLC', phone: '(203) 535-7655', email: 'szia@turbocleanusa.com', tagline: '', region: 'Connecticut & Massachusetts' }

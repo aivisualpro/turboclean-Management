@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { CrmEmail } from '~/composables/useCrmEmail'
-import { Loader2, Search, MailOpen, MousePointerClick, CheckCheck, FileDown } from 'lucide-vue-next'
+import { Loader2, Search, MailOpen, MousePointerClick, CheckCheck, FileDown, Archive } from 'lucide-vue-next'
 import { format } from 'date-fns'
 import { EMAIL_OUTCOMES, EMAIL_STATUS_STYLE, SENTIMENT_STYLE } from '~/constants/crm'
 
@@ -36,6 +36,8 @@ function exportCsv() {
   const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `crm_emails_${format(new Date(), 'yyyy-MM-dd')}.csv` })
   a.click(); URL.revokeObjectURL(a.href)
 }
+const viewId = ref<string | null>(null)
+const viewOpen = ref(false)
 </script>
 
 <template>
@@ -76,7 +78,7 @@ function exportCsv() {
           <tr v-for="e in rows" :key="e.id" class="hover:bg-muted/30 cursor-pointer align-top" @click="navigateTo(`/crm/dealership/${e.dealershipId}?tab=emails`)">
             <td class="px-3 py-2.5 whitespace-nowrap text-xs tabular-nums">{{ format(new Date(e.sentAt), 'MMM d, yyyy') }}<br><span class="text-muted-foreground">{{ format(new Date(e.sentAt), 'h:mm a') }} · {{ e.sentBy?.name }}</span></td>
             <td class="px-3 py-2.5 text-xs"><span class="font-medium text-sm">{{ e.dealershipName }}</span><br><span class="text-muted-foreground">{{ e.contactName || '—' }} · {{ e.toEmail }}</span></td>
-            <td class="px-3 py-2.5 max-w-[260px]"><span class="line-clamp-2">{{ e.subject }}</span></td>
+            <td class="px-3 py-2.5 max-w-[260px]"><span class="line-clamp-2">{{ e.subject }}</span><button type="button" class="mt-1 inline-flex items-center gap-1 text-[11px] text-primary hover:underline" @click.stop="viewId = e.id; viewOpen = true"><Archive class="size-3" /> View as sent</button></td>
             <td class="px-3 py-2.5 text-xs text-muted-foreground">{{ e.templateName ? `${e.templateName} ${e.templateVersionLabel || `V${e.templateVersion}`}${e.subjectVariant ? ` · ${e.subjectVariant}` : ''}${e.templateEdited ? ' (edited)' : ''}` : '—' }}<br>{{ e.campaignName || '' }}</td>
             <td class="px-3 py-2.5 text-xs whitespace-nowrap">{{ e.followUpNumber ? `Follow-up #${e.followUpNumber}` : 'First email' }}</td>
             <td class="px-3 py-2.5 whitespace-nowrap">
@@ -98,5 +100,6 @@ function exportCsv() {
         </tbody>
       </table>
     </div>
+    <CrmEmailSentViewer v-model:open="viewOpen" :email-id="viewId" />
   </div>
 </template>

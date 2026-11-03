@@ -146,5 +146,10 @@ export async function recordAudit(db: Db, dealership: any, body: any, session: a
       refs: { auditId: res.insertedId.toString() },
     }, actor, 'audit')
   } catch (e) { console.error('[CRM] audit → interaction failed:', (e as Error).message) }
+  // Store this audit's analysis report exactly as it reads today (then vs now, history, evidence).
+  try {
+    const { snapshotAuditReport } = await import('./crm-reports')
+    await snapshotAuditReport(db, dealership, { _id: res.insertedId, ...doc })
+  } catch (e) { console.error('[CRM] audit report snapshot failed:', (e as Error).message) }
   return serializeAudit({ _id: res.insertedId, ...doc })
 }

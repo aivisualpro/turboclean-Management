@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { CrmEmail, EmailOutcomeKey } from '~/composables/useCrmEmail'
-import { Mail, Send, Reply, Inbox, MousePointerClick, MailOpen, CheckCheck, AlertTriangle, ChevronDown, Loader2, ThumbsUp, ThumbsDown, Minus, Megaphone, FileText, Info } from 'lucide-vue-next'
+import { Mail, Send, Reply, Inbox, MousePointerClick, MailOpen, CheckCheck, AlertTriangle, ChevronDown, Loader2, ThumbsUp, ThumbsDown, Minus, Megaphone, FileText, Info, Archive, FileDown } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { format, formatDistanceToNow } from 'date-fns'
 import { EMAIL_OUTCOMES, EMAIL_STATUS_STYLE, SENTIMENT_STYLE } from '~/constants/crm'
@@ -60,6 +60,10 @@ async function toggleOutcome(m: CrmEmail, k: EmailOutcomeKey) {
   try { await updateEmail(m.id, { outcomes: { [k]: !m.outcomes?.[k] } }); emit('changed') } catch (e: any) { toast.error(e?.data?.statusMessage || 'Could not update') } finally { busy.value = null }
 }
 const SENT_ICONS = { positive: ThumbsUp, neutral: Minus, negative: ThumbsDown } as const
+// The exact email as sent (stored HTML) — view, PDF, HTML
+const viewId = ref<string | null>(null)
+const viewOpen = ref(false)
+function viewAsSent(id: string) { viewId.value = id; viewOpen.value = true }
 </script>
 
 <template>
@@ -131,6 +135,11 @@ const SENT_ICONS = { positive: ThumbsUp, neutral: Minus, negative: ThumbsDown } 
             <div v-if="open.has(it.m.id)" class="mt-2 space-y-2">
               <p v-if="it.m.status === 'bounced'" class="text-[11px] text-rose-600 flex items-center gap-1"><AlertTriangle class="size-3" /> Bounced {{ it.m.bouncedAt ? format(new Date(it.m.bouncedAt), 'MMM d, h:mm a') : '' }}<span v-if="it.m.bounceReason"> — {{ it.m.bounceReason }}</span></p>
               <p v-if="it.m.status === 'failed'" class="text-[11px] text-rose-600">Not sent — {{ it.m.failedReason }}</p>
+              <div class="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="outline" class="h-7 gap-1.5 text-xs" @click="viewAsSent(it.m.id)"><Archive class="size-3.5" /> View as sent</Button>
+                <Button as="a" :href="`/api/crm/email/messages/${it.m.id}/archive?format=pdf&download=1`" size="sm" variant="ghost" class="h-7 gap-1.5 text-xs"><FileDown class="size-3.5" /> PDF</Button>
+                <span v-if="it.m.bodyFormat === 'html'" class="text-[11px] text-muted-foreground">Designed HTML email — the text below is its plain-text version.</span>
+              </div>
               <p class="text-sm whitespace-pre-wrap leading-relaxed rounded-lg bg-muted/30 px-3 py-2">{{ it.m.bodyText || bodies[it.m.id] || 'Loading…' }}</p>
               <div v-if="canEdit && it.m.repliedAt" class="flex flex-wrap items-center gap-1.5">
                 <span class="text-[11px] text-muted-foreground mr-1">Credit this email with:</span>
@@ -183,5 +192,6 @@ const SENT_ICONS = { positive: ThumbsUp, neutral: Minus, negative: ThumbsDown } 
     </section>
 
     <p class="text-[11px] text-muted-foreground flex items-start gap-1.5"><Info class="size-3.5 shrink-0 mt-px" /> Conversations, meetings, proposals and wins are credited automatically to the most recent replied email when the dealership reaches that stage (or you log that activity). You can adjust the credit above.</p>
+    <CrmEmailSentViewer v-model:open="viewOpen" :email-id="viewId" />
   </div>
 </template>
