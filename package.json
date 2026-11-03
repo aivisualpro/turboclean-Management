@@ -28,6 +28,7 @@
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
+    "prepare": "git config core.hooksPath .githooks && chmod +x .githooks/pre-commit || true",
     "lint": "eslint .",
     "format": "eslint --fix .",
     "typecheck": "vue-tsc --noEmit"

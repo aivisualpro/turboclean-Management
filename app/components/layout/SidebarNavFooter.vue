@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useSidebar } from '~/components/ui/sidebar'
+import appVersion from '~~/version.json'
 
 defineProps<{
   user: {
@@ -16,6 +17,9 @@ async function handleLogout() {
 }
 
 const showModalTheme = ref(false)
+
+// Bumped automatically once per push (scripts/bump-version.mjs)
+const versionLabel = `V${appVersion.version}`
 </script>
 
 <template>
@@ -27,14 +31,9 @@ const showModalTheme = ref(false)
             size="lg"
             class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
           >
-            <Avatar class="h-8 w-8 rounded-lg">
-              <AvatarFallback class="rounded-lg bg-primary/10 text-primary font-bold text-xs">
-                {{ user.name.split(' ').map((n) => n[0]).join('').slice(0, 2) }}
-              </AvatarFallback>
-            </Avatar>
             <div class="grid flex-1 text-left text-sm leading-tight">
               <span class="truncate font-semibold">{{ user.name }}</span>
-              <span class="truncate text-xs text-muted-foreground">{{ user.role }}</span>
+              <span class="truncate text-xs text-muted-foreground">{{ user.role }} ({{ versionLabel }})</span>
             </div>
             <Icon name="i-lucide-chevrons-up-down" class="ml-auto size-4" />
           </SidebarMenuButton>
@@ -46,14 +45,9 @@ const showModalTheme = ref(false)
         >
           <DropdownMenuLabel class="p-0 font-normal">
             <div class="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-              <Avatar class="h-8 w-8 rounded-lg">
-                <AvatarFallback class="rounded-lg bg-primary/10 text-primary font-bold text-xs">
-                  {{ user.name.split(' ').map((n) => n[0]).join('').slice(0, 2) }}
-                </AvatarFallback>
-              </Avatar>
               <div class="grid flex-1 text-left text-sm leading-tight">
                 <span class="truncate font-semibold">{{ user.name }}</span>
-                <span class="truncate text-xs text-muted-foreground">{{ user.role }}</span>
+                <span class="truncate text-xs text-muted-foreground">{{ user.role }} ({{ versionLabel }})</span>
               </div>
             </div>
           </DropdownMenuLabel>

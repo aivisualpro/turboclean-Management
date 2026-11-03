@@ -1,0 +1,4 @@
+#!/bin/sh
+# Bumps version.json once per push (rule in scripts/bump-version.mjs).
+# Never blocks a commit.
+node scripts/bump-version.mjs || true
