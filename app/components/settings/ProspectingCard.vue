@@ -89,8 +89,9 @@ function resetDefaults() { form.value = structuredClone(DEFAULTS) }
 </script>
 
 <template>
-  <div class="rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden">
-    <div class="border-b bg-muted/30 p-2 flex flex-wrap items-center gap-2">
+  <!-- Box fills its parent: header + footer fixed; the form column scrolls by itself, the map column stays put. -->
+  <div class="flex flex-col rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden">
+    <div class="shrink-0 border-b bg-muted/30 p-2 flex flex-wrap items-center gap-2">
       <div class="p-2 bg-primary/10 text-primary rounded-lg border border-primary/20">
         <Binoculars class="size-5" />
       </div>
@@ -104,11 +105,12 @@ function resetDefaults() { form.value = structuredClone(DEFAULTS) }
       </Badge>
     </div>
 
-    <div v-if="loading" class="grid h-64 place-items-center"><Loader2 class="size-5 animate-spin text-primary" /></div>
+    <div v-if="loading" class="grid flex-1 place-items-center"><Loader2 class="size-5 animate-spin text-primary" /></div>
 
-    <div v-else class="grid gap-2 p-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <!-- Form -->
-      <div class="space-y-2">
+    <!-- Desktop: two independent columns. Small screens: one column, the whole body scrolls. -->
+    <div v-else class="flex-1 min-h-0 overflow-y-auto lg:overflow-hidden grid gap-2 p-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)]">
+      <!-- Form (scrolls) -->
+      <div class="space-y-2 lg:min-h-0 lg:overflow-y-auto lg:pr-1 overscroll-contain">
         <div v-if="!apiKeyConfigured" class="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-200">
           Add <code class="rounded bg-background/60 px-1 font-mono">GOOGLE_PLACES_API_KEY</code> to <code class="font-mono">.env</code> (local) and Vercel → Settings → Environment Variables, then restart / redeploy. The key stays on the server.
         </div>
@@ -188,7 +190,7 @@ function resetDefaults() { form.value = structuredClone(DEFAULTS) }
       </div>
 
       <!-- Map preview -->
-      <div class="flex min-h-[320px] flex-col overflow-hidden rounded-lg border">
+      <div class="flex min-h-[320px] lg:min-h-0 lg:h-full flex-col overflow-hidden rounded-lg border">
         <ClientOnly>
           <CrmDiscoverMap
             v-if="coordsValid"
@@ -209,7 +211,7 @@ function resetDefaults() { form.value = structuredClone(DEFAULTS) }
       </div>
     </div>
 
-    <div class="border-t bg-muted/40 p-2 flex items-center justify-between gap-2">
+    <div class="shrink-0 border-t bg-muted/40 p-2 flex items-center justify-between gap-2">
       <Button variant="ghost" size="sm" class="h-8 gap-1.5 text-xs" :disabled="loading" @click="resetDefaults"><RotateCcw class="size-3.5" /> Reset to defaults</Button>
       <div class="flex items-center gap-2">
         <span v-if="isDirty && !loading" class="text-xs text-amber-600 dark:text-amber-400">Unsaved changes</span>

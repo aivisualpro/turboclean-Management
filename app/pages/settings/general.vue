@@ -87,8 +87,9 @@ async function saveSettings() {
 </script>
 
 <template>
+  <!-- Fixed layout: header (layout) + tab bar stay put; each tab's box fills the rest and scrolls inside itself. -->
   <div class="absolute inset-0 flex flex-col overflow-hidden">
-   <div class="flex-1 min-h-0 overflow-auto p-2 flex flex-col gap-2">
+   <div class="flex-1 min-h-0 overflow-hidden p-2 flex flex-col gap-2">
     <!-- Sections -->
     <nav class="shrink-0 flex w-full overflow-x-auto rounded-lg border bg-muted/40 p-0.5 gap-0.5" role="tablist" aria-label="Settings sections">
       <button
@@ -104,10 +105,10 @@ async function saveSettings() {
       <Loader2 class="size-6 animate-spin text-primary" />
     </div>
 
-    <div v-else-if="tab === 'automations'" class="shrink-0 space-y-2 animate-in fade-in duration-300">
-      <!-- Automations Card -->
-      <div class="rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden">
-        <div class="border-b bg-muted/30 p-5 flex items-center gap-3">
+    <div v-else-if="tab === 'automations'" class="flex-1 min-h-0 flex flex-col animate-in fade-in duration-300">
+      <!-- Automations Card: title + save bar fixed, settings scroll -->
+      <div class="flex-1 min-h-0 flex flex-col rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden">
+        <div class="shrink-0 border-b bg-muted/30 p-5 flex items-center gap-3">
           <div class="p-2 bg-primary/10 text-primary rounded-lg border border-primary/20 shadow-inner">
             <Sparkles class="size-5" />
           </div>
@@ -117,7 +118,7 @@ async function saveSettings() {
           </div>
         </div>
         
-        <div class="p-6 space-y-8 bg-gradient-to-br from-background to-muted/10">
+        <div class="flex-1 min-h-0 overflow-y-auto p-6 space-y-8 bg-gradient-to-br from-background to-muted/10">
           
           <!-- Daily Invoice Emails -->
           <div class="grid gap-6 sm:grid-cols-[1fr_300px] relative items-start">
@@ -246,7 +247,7 @@ async function saveSettings() {
 
         </div>
         
-        <div class="border-t bg-muted/40 p-4 px-6 flex justify-end">
+        <div class="shrink-0 border-t bg-muted/40 p-4 px-6 flex justify-end">
           <Button @click="saveSettings" :disabled="isSaving" class="gap-2 shadow-md relative overflow-hidden group">
             <span class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 pointer-events-none"></span>
             <Loader2 v-if="isSaving" class="size-4 animate-spin" />
@@ -259,8 +260,8 @@ async function saveSettings() {
     </div>
 
     <!-- Prospecting search area (used by "Search Web" on /crm/dealership) -->
-    <!-- shrink-0: a flex child with overflow-hidden would otherwise shrink to the viewport and clip instead of scrolling -->
-    <SettingsProspectingCard v-if="visited.has('prospecting')" v-show="tab === 'prospecting'" class="shrink-0 animate-in fade-in duration-300" />
+    <!-- Fills the remaining height; its two columns scroll independently inside the box -->
+    <SettingsProspectingCard v-if="visited.has('prospecting')" v-show="tab === 'prospecting'" class="flex-1 min-h-0 animate-in fade-in duration-300" />
    </div>
   </div>
 </template>
