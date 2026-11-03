@@ -28,6 +28,8 @@ const length = ref<'short' | 'standard' | 'rich'>('standard')
 const style = ref<'house' | 'fresh'>('house')
 const instruction = ref('')
 const streaming = ref(false)
+/** Provider notes while waiting ("gemini-… answered 503 — retrying in 4s"). */
+const aiNote = ref('')
 const liveText = ref('')
 const view = ref<'preview' | 'html'>('preview')
 const device = ref<'desktop' | 'mobile'>('desktop')
@@ -111,6 +113,7 @@ async function run(body: Record<string, any>, userText: string) {
   if (streaming.value) return
   turns.value.push({ who: 'you', text: userText })
   streaming.value = true
+  aiNote.value = ''
   liveText.value = ''
   liveHtml.value = ''
   ctrl = new AbortController()
@@ -136,6 +139,7 @@ async function run(body: Record<string, any>, userText: string) {
         if (ev === 'delta') liveText.value += d.text
         else if (ev === 'done') done = d
         else if (ev === 'failure') failure = d.message
+        else if (ev === 'note') aiNote.value = d.text
       }
     }
     if (failure) throw new Error(failure)
@@ -269,7 +273,7 @@ const libraryTemplates = computed(() => templates.value.filter(t => !t.archivedA
                   </div>
                 </li>
                 <li v-if="streaming" class="flex">
-                  <div class="rounded-2xl rounded-bl-sm bg-background border px-3 py-2.5 text-xs flex items-center gap-2"><Loader2 class="size-3.5 animate-spin text-emerald-600" /> {{ progressLabel }}</div>
+                  <div class="rounded-2xl rounded-bl-sm bg-background border px-3 py-2.5 text-xs flex items-center gap-2"><Loader2 class="size-3.5 animate-spin text-emerald-600" /> {{ progressLabel }}<span v-if="aiNote && !liveText" class="text-amber-600 dark:text-amber-400">· {{ aiNote }}</span></div>
                 </li>
               </ol>
             </div>

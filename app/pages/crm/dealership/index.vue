@@ -9,7 +9,9 @@ import {
   Plus, Search, Store, ShieldAlert, Download, RefreshCw, ChevronUp, ChevronDown,
   ChevronsUpDown, X, Filter, UserCircle2,
   CheckSquare, Tag, UserCheck, Loader2, ExternalLink, Briefcase, Trophy, SlidersHorizontal, Upload, Binoculars,
+  ScanSearch, Radar, Layers, Mail, CheckCircle2, CircleDashed,
 } from 'lucide-vue-next'
+import type { Batch as ScanBatch } from '~/composables/useBatchScan'
 import { toast } from 'vue-sonner'
 import { format, formatDistanceToNow } from 'date-fns'
 import { OPEN_STAGES, QUEUE_STAGES, CLOSED_STAGES, DEALERSHIP_STAGES, LEAD_SOURCES, LEAD_SOURCE_STYLE, STAGE_STYLE, STALLED_STAGE_DAYS, WON_STAGE } from '~/constants/crm'
@@ -28,7 +30,7 @@ const { pending } = await useAsyncData('crm-dealerships-bootstrap', async () => 
 }, { lazy: false })
 
 // ─── Column model — one value per column ───
-type ColKey = 'dealershipId' | 'name' | 'dealerGroup' | 'brands' | 'stage' | 'inStage' | 'leadSource' | 'city' | 'state' | 'zip' | 'phone' | 'website'
+type ColKey = 'dealershipId' | 'name' | 'dealerGroup' | 'brands' | 'stage' | 'inStage' | 'leadSource' | 'city' | 'state' | 'zip' | 'phone' | 'website' | 'scanPages'
   | 'territory' | 'lastTouch' | 'nextAction' | 'primaryContact' | 'primaryTitle' | 'primaryEmail' | 'contacts' | 'owner' | 'lastAudit' | 'missingPhotos' | 'inventory' | 'added' | 'updated'
 interface Col { key: ColKey, label: string, sortable?: boolean, default: boolean, align?: 'right' }
 const COLUMNS: Col[] = [
@@ -43,6 +45,7 @@ const COLUMNS: Col[] = [
   { key: 'zip', label: 'ZIP', sortable: true, default: false },
   { key: 'phone', label: 'Phone', default: true },
   { key: 'website', label: 'Website', default: false },
+  { key: 'scanPages', label: 'Scan pages', sortable: true, default: true, align: 'right' },
   { key: 'territory', label: 'Territory', sortable: true, default: false },
   { key: 'lastTouch', label: 'Last touch', sortable: true, default: true },
   { key: 'nextAction', label: 'Next action', sortable: true, default: true },
@@ -215,7 +218,7 @@ const QUICK: { key: typeof quick.value, label: string, tone?: string }[] = [
 
 const sortValue = (d: CrmDealership, k: ColKey): string | number => ({
   dealershipId: d.dealershipId, name: d.name, dealerGroup: d.dealerGroup, brands: (d.brands || []).join(', '), stage: DEALERSHIP_STAGES.indexOf(d.stage as any), inStage: stageAgeMs(d), lastTouch: d.interactionSummary?.last?.occurredAt || '', nextAction: d.interactionSummary?.nextAction?.date || (d.interactionSummary?.nextAction ? '9999-12-30' : '9999-12-31'),
-  leadSource: d.leadSource, city: d.city, state: d.state, zip: d.zip, phone: d.phone, website: d.website, territory: d.territory,
+  leadSource: d.leadSource, city: d.city, state: d.state, zip: d.zip, phone: d.phone, website: d.website, territory: d.territory, scanPages: scanPageCount(d),
   primaryContact: d.contactSummary?.primary?.fullName || '', primaryTitle: d.contactSummary?.primary?.jobTitle || '', primaryEmail: d.contactSummary?.primary?.email || '',
   contacts: d.contactSummary?.active || 0, owner: d.assignedUserName, added: d.createdAt, updated: d.updatedAt,
   lastAudit: d.auditSummary?.latest?.auditedAt || '', missingPhotos: d.auditSummary?.latest?.missingPhotoPct ?? -1, inventory: d.auditSummary?.latest?.totalVehicles ?? -1,
@@ -353,6 +356,40 @@ function exportCsv(onlySelected = false) {
   toast.success(`Exported ${data.length} dealerships`)
 }
 
+// ─── Scan pages & batch scanning (Mission Control) ───
+/** Pages the batch scanner will visit for a dealership: its saved scan pages, else the website itself. */
+function scanPageCount(d: CrmDealership) { return d.scanPages?.length || (d.website ? 1 : 0) }
+const showPages = ref(false)
+const pagesFor = ref<CrmDealership | null>(null)
+function editPages(d: CrmDealership) { pagesFor.value = d; showPages.value = true }
+
+const showBatch = ref(false)
+const batchIds = ref<string[]>([])
+const batchResumeId = ref<string | null>(null)
+const selectedScannable = computed(() => [...selected.value].filter(id => { const d = dealerships.value.find(x => x.id === id); return d && scanPageCount(d) > 0 }).length)
+function startBatch() {
+  const ids = [...selected.value]
+  if (!ids.length) return
+  if (!selectedScannable.value) return toast.error('None of the selected dealerships has a website or scan pages yet')
+  batchResumeId.value = null
+  batchIds.value = ids
+  showBatch.value = true
+}
+function resumeBatch(id: string) { batchIds.value = []; batchResumeId.value = id; showBatch.value = true }
+async function onBatchDone() { try { await Promise.all([fetchDealerships(), loadFacts(), loadBatches()]) } catch {} }
+
+// Recent batches (resume the unfinished ones from here — a closed Mission Control only pauses them).
+const batches = ref<ScanBatch[]>([])
+const batchesLoading = ref(false)
+const openBatches = computed(() => batches.value.filter(b => !b.finished))
+async function loadBatches() {
+  batchesLoading.value = true
+  try { batches.value = (await $fetch<{ batches: ScanBatch[] }>('/api/scanner/batches')).batches.slice(0, 12) } catch {} finally { batchesLoading.value = false }
+}
+onMounted(loadBatches)
+watch(showBatch, (v) => { if (!v) loadBatches() })
+const batchWhen = (iso: string) => formatDistanceToNow(new Date(iso), { addSuffix: true })
+
 
 // Keyboard: "/" focuses search, "n" new, Esc clears selection
 const searchEl = ref<any>(null)
@@ -449,6 +486,31 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
             </div>
           </PopoverContent>
         </Popover>
+        <DropdownMenu @update:open="(v: boolean) => v && loadBatches()">
+          <DropdownMenuTrigger as-child>
+            <Button variant="outline" size="sm" class="relative h-8 gap-1.5" :class="openBatches.length && 'border-rose-500/50 text-rose-600 hover:text-rose-600 dark:text-rose-400'" title="Scan batches — Mission Control">
+              <Radar class="size-4" :class="openBatches.length && 'animate-pulse'" /><span class="hidden xl:inline">Batches</span>
+              <span v-if="openBatches.length" class="rounded-full bg-rose-600 px-1.5 text-[10px] font-semibold leading-4 text-white tabular-nums">{{ openBatches.length }}</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" class="w-80">
+            <DropdownMenuLabel class="text-xs text-muted-foreground">Scan batches · Mission Control</DropdownMenuLabel>
+            <DropdownMenuItem v-if="batchesLoading && !batches.length" disabled><Loader2 class="size-4 animate-spin" /> Loading…</DropdownMenuItem>
+            <DropdownMenuItem v-else-if="!batches.length" disabled class="text-xs">No batches yet — select dealerships below and click <b class="mx-1">Scrape &amp; email</b>.</DropdownMenuItem>
+            <DropdownMenuItem v-for="b in batches" :key="b.id" class="flex items-start gap-2.5 py-2" @click="resumeBatch(b.id)">
+              <component :is="b.finished ? CheckCircle2 : CircleDashed" class="mt-0.5 size-4 shrink-0" :class="b.finished ? 'text-emerald-500' : 'text-rose-500 animate-spin [animation-duration:3s]'" />
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm font-medium">{{ b.name }}</span>
+                <span class="block text-[11px] text-muted-foreground tabular-nums">
+                  {{ b.counts.done }}/{{ b.counts.total }} scanned · {{ b.totals.vehicles }} vehicles
+                  <template v-if="b.totals.emailed"> · <Mail class="inline size-3" /> {{ b.totals.emailed }} emailed</template>
+                  · {{ batchWhen(b.createdAt) }}
+                </span>
+              </span>
+              <span class="shrink-0 text-[10px] font-semibold uppercase tracking-wider" :class="b.finished ? 'text-muted-foreground' : 'text-rose-600 dark:text-rose-400'">{{ b.finished ? 'Open' : 'Resume' }}</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button variant="outline" size="icon" class="size-8" title="Refresh" :disabled="refreshing" @click="refresh">
           <RefreshCw class="size-4" :class="refreshing && 'animate-spin'" />
         </Button>
@@ -515,6 +577,14 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
             </DropdownMenuContent>
           </DropdownMenu>
           <Button variant="outline" size="sm" class="h-7 gap-1.5 text-xs bg-background" @click="exportCsv(true)"><Download class="size-3.5" /> Export selected</Button>
+          <Button
+            v-if="canEdit" size="sm" class="h-7 gap-1.5 text-xs bg-rose-600 text-white shadow-sm hover:bg-rose-700 dark:bg-rose-600 dark:hover:bg-rose-500"
+            :disabled="bulkBusy" :title="selectedScannable < selected.size ? `${selected.size - selectedScannable} of the selected dealerships have no website or scan pages and will be skipped` : 'Scrape the selected dealerships in one go, then email them — Mission Control'"
+            @click="startBatch"
+          >
+            <ScanSearch class="size-3.5" /> Scrape &amp; email
+            <span v-if="selectedScannable < selected.size" class="rounded bg-white/20 px-1 text-[10px] tabular-nums">{{ selectedScannable }}/{{ selected.size }}</span>
+          </Button>
           <Loader2 v-if="bulkBusy" class="size-4 animate-spin text-primary" />
           <Button variant="ghost" size="sm" class="h-7 ml-auto text-xs" @click="clearSelection">Clear <kbd class="ml-1.5 font-mono text-[10px] opacity-60">Esc</kbd></Button>
         </div>
@@ -622,6 +692,20 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
                 <a v-if="d.website" :href="d.website" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-primary hover:underline underline-offset-2" @click.stop>{{ d.website.replace(/^https?:\/\//, '') }}<ExternalLink class="size-3 opacity-50" /></a>
                 <span v-else class="text-muted-foreground/50">—</span>
               </td>
+              <td v-else-if="c.key === 'scanPages'" class="px-3 border-b border-border/60 whitespace-nowrap text-right tabular-nums" :class="rowPad" @click.stop>
+                <button
+                  type="button" class="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium transition-colors"
+                  :class="d.scanPages?.length ? 'border-rose-500/30 bg-rose-500/5 text-rose-700 hover:bg-rose-500/10 dark:text-rose-300' : d.website ? 'border-border/70 text-muted-foreground hover:bg-accent hover:text-foreground' : 'border-dashed border-border/70 text-muted-foreground/60 hover:text-foreground'"
+                  :title="d.scanPages?.length ? (d.scanPages.map(p => p.label || p.url).join('\n')) : d.website ? 'No pages picked yet — the scanner will start at the website and find inventory pages itself. Click to pick exact pages.' : 'No website — add one on the dealership first'"
+                  :disabled="!canEdit && !d.scanPages?.length"
+                  @click="editPages(d)"
+                >
+                  <Layers class="size-3" />
+                  <template v-if="d.scanPages?.length">{{ d.scanPages.length }} page{{ d.scanPages.length === 1 ? '' : 's' }}</template>
+                  <template v-else-if="d.website">Auto</template>
+                  <template v-else>—</template>
+                </button>
+              </td>
               <td v-else-if="c.key === 'territory'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">{{ d.territory || '—' }}</td>
               <td v-else-if="c.key === 'primaryContact'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
                 <div v-if="d.contactSummary?.primary" class="flex items-center gap-2">
@@ -688,6 +772,8 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
 
     <ClientOnly>
       <CrmDiscoverDialog v-model:open="showDiscover" @imported="onDiscoverImported" />
+      <CrmScanPagesEditor v-model:open="showPages" :dealership="pagesFor" />
+      <CrmBatchScanner v-model:open="showBatch" :dealership-ids="batchIds" :batch-id="batchResumeId" @done="onBatchDone" />
     </ClientOnly>
 
     <Dialog v-model:open="showBulkLost">

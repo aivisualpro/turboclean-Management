@@ -38,6 +38,7 @@ export default defineEventHandler(async (event) => {
       const r = await streamClaude({
         system: STUDIO_SYSTEM, cacheSystem: true, brain: 'design', purpose: refining ? 'studio.refine' : 'studio.create',
         prompt: studioPrompt(body, MISSING_PHOTOS_HTML_V2), maxTokens: 20_000, timeoutMs: 600_000, signal: ctrl.signal,
+        onNote: note => emit('note', { text: note }),
       }, (delta) => {
         pending += delta
         // Batch small deltas so the browser repaints a few times a second, not per token.

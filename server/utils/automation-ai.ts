@@ -145,27 +145,79 @@ function geminiBlocked(data: any) {
   const reason = data?.promptFeedback?.blockReason || (data?.candidates?.[0]?.finishReason === 'SAFETY' ? 'SAFETY' : '')
   return reason ? `Gemini blocked the request (${reason})` : ''
 }
-async function askGemini(opts: AskOptions, model: string, signal: AbortSignal) {
-  const res = await fetch(geminiUrl(model, 'generateContent'), { method: 'POST', signal, headers: geminiHeaders(), body: JSON.stringify(await geminiBody(opts, opts.maxTokens ?? 800)) })
-  if (!res.ok) throw new Error(`Gemini API ${res.status}: ${(await res.text()).slice(0, 300)}`)
-  const data: any = await res.json()
-  const blocked = geminiBlocked(data)
-  if (blocked) throw new Error(blocked)
-  return { text: geminiText(data).trim(), model: String(data?.modelVersion || model), usage: geminiUsage(data) }
+/**
+ * Google answers 503 "high demand" / 429 / 500 quite often at peak times. Every Gemini call is
+ * retried with a short back-off, then on the fallback models (GEMINI_FALLBACK_MODELS, comma-separated,
+ * default "<model>-lite"). Streaming only retries while nothing has been written yet.
+ */
+const GEMINI_RETRY_WAITS = [1500, 4000, 8000]
+const geminiRetryable = (status: number) => status === 503 || status === 429 || status === 500 || status === 502 || status === 504
+export function geminiModels(primary: string) {
+  const extra = (process.env.GEMINI_FALLBACK_MODELS || '').split(',').map(s => s.trim()).filter(Boolean)
+  const auto = /-flash$/.test(primary) && !extra.length ? [`${primary}-lite`] : []
+  return [primary, ...extra, ...auto].filter((m, i, a) => a.indexOf(m) === i)
 }
-async function streamGemini(opts: AskOptions, model: string, signal: AbortSignal, onText: (d: string, full: string) => void) {
-  const res = await fetch(geminiUrl(model, 'streamGenerateContent'), { method: 'POST', signal, headers: geminiHeaders(), body: JSON.stringify(await geminiBody(opts, opts.maxTokens ?? 16_000)) })
-  if (!res.ok || !res.body) throw new Error(`Gemini API ${res.status}: ${(await res.text()).slice(0, 300)}`)
-  let full = '', last: any = null, served = model
-  for await (const chunk of sseEvents(res.body)) {
-    last = chunk
-    if (chunk?.modelVersion) served = chunk.modelVersion
-    const blocked = geminiBlocked(chunk)
-    if (blocked) throw new Error(blocked)
-    const t = geminiText(chunk)
-    if (t) { full += t; onText(t, full) }
+class GeminiHttpError extends Error { constructor(public status: number, body: string) { super(`Gemini API ${status}: ${body.slice(0, 300)}`) } }
+const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
+  const t = setTimeout(resolve, ms)
+  signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('Timed out')) }, { once: true })
+})
+function geminiFriendly(e: any, tried: string[], attempts: number) {
+  if (e instanceof GeminiHttpError && geminiRetryable(e.status)) {
+    const why = e.status === 429 ? 'rate limit (HTTP 429)' : `overloaded (HTTP ${e.status})`
+    return new Error(`Gemini is ${why} right now — tried ${attempts}× on ${tried.join(', ')}. Try again in a minute${tried.length === 1 ? ', or set GEMINI_FALLBACK_MODELS' : ''}.`)
   }
-  return { text: full, model: served, usage: geminiUsage(last) }
+  return e
+}
+/** Run `attempt(model)` with retries and model fallbacks. `started()` tells whether output already began (no retry then). */
+async function geminiWithRetries<T>(primary: string, signal: AbortSignal, attempt: (model: string) => Promise<T>, started: () => boolean, onRetry?: (note: string) => void) {
+  const models = geminiModels(primary)
+  let last: any = null, attempts = 0
+  for (const model of models) {
+    for (let i = 0; i <= GEMINI_RETRY_WAITS.length; i++) {
+      attempts++
+      try { return await attempt(model) }
+      catch (e: any) {
+        last = e
+        if (signal.aborted || started() || !(e instanceof GeminiHttpError) || !geminiRetryable(e.status)) throw geminiFriendly(e, models.slice(0, models.indexOf(model) + 1), attempts)
+        const wait = GEMINI_RETRY_WAITS[i]
+        if (wait === undefined) break
+        onRetry?.(`${model} answered ${e.status} — retrying in ${wait / 1000}s`)
+        await sleep(wait, signal)
+      }
+    }
+    onRetry?.(models.indexOf(model) < models.length - 1 ? `${model} unavailable — switching to ${models[models.indexOf(model) + 1]}` : `${model} unavailable`)
+  }
+  throw geminiFriendly(last, models, attempts)
+}
+async function askGemini(opts: AskOptions, model: string, signal: AbortSignal) {
+  const body = JSON.stringify(await geminiBody(opts, opts.maxTokens ?? 800))
+  return geminiWithRetries(model, signal, async (m) => {
+    const res = await fetch(geminiUrl(m, 'generateContent'), { method: 'POST', signal, headers: geminiHeaders(), body })
+    if (!res.ok) throw new GeminiHttpError(res.status, await res.text())
+    const data: any = await res.json()
+    const blocked = geminiBlocked(data)
+    if (blocked) throw new Error(blocked)
+    return { text: geminiText(data).trim(), model: String(data?.modelVersion || m), usage: geminiUsage(data) }
+  }, () => false)
+}
+async function streamGemini(opts: AskOptions & { onNote?: (note: string) => void }, model: string, signal: AbortSignal, onText: (d: string, full: string) => void) {
+  const body = JSON.stringify(await geminiBody(opts, opts.maxTokens ?? 16_000))
+  let full = ''
+  return geminiWithRetries(model, signal, async (m) => {
+    const res = await fetch(geminiUrl(m, 'streamGenerateContent'), { method: 'POST', signal, headers: geminiHeaders(), body })
+    if (!res.ok || !res.body) throw new GeminiHttpError(res.status, await res.text())
+    let last: any = null, served = m
+    for await (const chunk of sseEvents(res.body)) {
+      last = chunk
+      if (chunk?.modelVersion) served = chunk.modelVersion
+      const blocked = geminiBlocked(chunk)
+      if (blocked) throw new Error(blocked)
+      const t = geminiText(chunk)
+      if (t) { full += t; onText(t, full) }
+    }
+    return { text: full, model: served, usage: geminiUsage(last) }
+  }, () => full.length > 0, opts.onNote)
 }
 
 /** Parse a Server-Sent Events body into JSON data objects. */
@@ -188,6 +240,8 @@ async function* sseEvents(body: ReadableStream<Uint8Array>) {
   }
 }
 
+const isOverload = (e: any) => /^Gemini is (overloaded|rate limit)/.test(String(e?.message || ''))
+
 // ───────────────────────── Public API ─────────────────────────
 export async function askClaude(opts: AskOptions) {
   const provider = aiProvider()
@@ -202,6 +256,13 @@ export async function askClaude(opts: AskOptions) {
   }
   catch (e: any) {
     logCall({ provider, purpose: opts.purpose || 'other', brain: opts.brain || null, model, ms: Date.now() - t0, ok: false, error: String(e?.message || e).slice(0, 300) })
+    // Gemini overloaded and a Claude key is also configured → answer with Claude instead of failing.
+    if (provider === 'gemini' && isOverload(e) && anthropicKey() && !t.signal.aborted) {
+      const m2 = process.env.ANTHROPIC_MODEL || AI_DEFAULT_MODEL
+      const r = await askAnthropic(opts, m2, t.signal)
+      logCall({ provider: 'anthropic', purpose: opts.purpose || 'other', brain: opts.brain || null, model: r.model, ms: Date.now() - t0, ok: true, ...r.usage })
+      return { text: r.text, model: r.model }
+    }
     throw e
   }
   finally { t.clear() }
@@ -211,7 +272,7 @@ export async function askClaude(opts: AskOptions) {
  * Streaming call — `onText` receives each piece of text as the model writes it (Template Studio
  * shows the email building live). Resolves with the full text.
  */
-export async function streamClaude(opts: AskOptions & { signal?: AbortSignal }, onText: (delta: string, full: string) => void) {
+export async function streamClaude(opts: AskOptions & { signal?: AbortSignal, /** Retry / fallback notes ("gemini-… answered 503 — retrying in 4s") */ onNote?: (note: string) => void }, onText: (delta: string, full: string) => void) {
   const provider = aiProvider()
   if (!provider) throw new Error(AI_SETUP_HINT)
   const model = aiModel()
@@ -224,6 +285,13 @@ export async function streamClaude(opts: AskOptions & { signal?: AbortSignal }, 
   }
   catch (e: any) {
     logCall({ provider, purpose: opts.purpose || 'stream', brain: opts.brain || null, model, ms: Date.now() - t0, ok: false, error: String(e?.message || e).slice(0, 300) })
+    if (provider === 'gemini' && isOverload(e) && anthropicKey() && !t.signal.aborted) {
+      const m2 = process.env.ANTHROPIC_MODEL || AI_DEFAULT_MODEL
+      opts.onNote?.(`Gemini unavailable — switching to Claude (${m2})`)
+      const r = await streamAnthropic(opts, m2, t.signal, onText)
+      logCall({ provider: 'anthropic', purpose: opts.purpose || 'stream', brain: opts.brain || null, model: r.model, ms: Date.now() - t0, ok: true, ...r.usage })
+      return { text: r.text, model: r.model }
+    }
     throw e
   }
   finally { t.clear() }

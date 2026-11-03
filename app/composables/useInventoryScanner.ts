@@ -67,6 +67,52 @@ export const VERDICT_META: Record<PhotoVerdict, { label: string, short: string, 
 
 const errMsg = (e: any, fallback: string) => e?.data?.message || e?.data?.statusMessage || e?.statusMessage || e?.message || fallback
 
+/** Read a Server-Sent Events body, calling `on(event, data)` for each JSON event. */
+export async function readSse(body: ReadableStream<Uint8Array>, on: (name: string, data: any) => void) {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    let i: number
+    while ((i = buf.indexOf('\n\n')) !== -1) {
+      const block = buf.slice(0, i)
+      buf = buf.slice(i + 2)
+      let name = 'message'
+      let data = ''
+      for (const line of block.split('\n')) {
+        if (line.startsWith('event:')) name = line.slice(6).trim()
+        else if (line.startsWith('data:')) data += line.slice(5).trim()
+      }
+      if (data) { try { on(name, JSON.parse(data)) } catch {} }
+    }
+  }
+}
+
+/**
+ * Run one scan as a stream (used by the scanner dialog and by batch scans). Resolves with the scan
+ * id and whether the server said it finished; throws only when the scan could not start.
+ */
+export async function streamScanRun(body: Record<string, any>, on: (name: string, data: any) => void, signal?: AbortSignal) {
+  const res = await fetch('/api/scanner/run', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' }, body: JSON.stringify(body), signal, credentials: 'same-origin' })
+  if (!res.ok || !res.body) {
+    const b = await res.json().catch(() => null)
+    throw new Error(b?.message || b?.statusMessage || `The scan could not start (${res.status})`)
+  }
+  let scanId: string | null = null
+  let finished = false
+  let failure: string | null = null
+  await readSse(res.body, (name, data) => {
+    if (name === 'scan') scanId = data.id
+    else if (name === 'done') finished = true
+    else if (name === 'failure') { finished = true; failure = data.message }
+    on(name, data)
+  })
+  return { scanId, finished, failure }
+}
+
 export function useInventoryScanner() {
   const preview = ref<PagePreview | null>(null)
   const previewing = ref(false)

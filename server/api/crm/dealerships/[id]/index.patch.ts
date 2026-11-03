@@ -46,6 +46,15 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  // Inventory pages the scanner should cover for this dealership (used by Scrape and batch scans).
+  if ('scanPages' in body) {
+    const list = Array.isArray(body.scanPages) ? body.scanPages : []
+    const seen = new Set<string>()
+    $set.scanPages = list.map((p: any) => ({ url: normalizeUrl(typeof p === 'string' ? p : p?.url), label: str(typeof p === 'string' ? '' : p?.label, 80) }))
+      .filter((p: any) => { if (!p.url || seen.has(p.url) || !/^https?:\/\/[^\s/]+\.[^\s/]+/i.test(p.url)) return false; seen.add(p.url); return true })
+      .slice(0, 40)
+  }
+
   if ('estMonthlyValue' in body) {
     const v = body.estMonthlyValue === '' || body.estMonthlyValue === null ? null : Number(body.estMonthlyValue)
     if (v !== null && (!Number.isFinite(v) || v < 0)) throw createError({ statusCode: 400, statusMessage: 'Estimated value must be a positive number' })

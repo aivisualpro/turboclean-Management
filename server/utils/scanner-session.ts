@@ -247,7 +247,12 @@ export interface ScanDoc {
   status: ScanStatus
   stopRequested: boolean
   startUrl: string
+  /** Every inventory page to scan (each one is paginated on its own). */
+  urls: string[]
   allPages: boolean
+  /** Batch run: auto-save the audit when done and report back to the batch. */
+  batchId: string | null
+  autoSave: boolean
   progress: ScanProgress
   log: { at: string, text: string }[]
   vehicles: ScanVehicle[]
@@ -310,6 +315,7 @@ async function finalizeIfInterrupted(db: Db, doc: ScanDoc) {
     doc.error = doc.error || 'The scan was cut off before it found any vehicles'
     Object.assign(doc.progress, { phase: 'error', message: doc.error, finishedAt: now })
     await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { status: 'failed', error: doc.error, progress: doc.progress } }).catch(() => {})
+    if (doc.batchId) batchNote(db, doc, 'failed', { error: doc.error }).catch(() => {})
     return doc
   }
   doc.images = doc.images || []
@@ -329,6 +335,7 @@ async function finalizeIfInterrupted(db: Db, doc: ScanDoc) {
   doc.log = [...(doc.log || []), { at: now, text: 'The server cut this scan off — keeping the vehicles found so far; photos judged by address and text only' }].slice(-60)
   Object.assign(doc.progress, { phase: 'stopped', message: `Cut off early — ${sum.total} vehicles · ${sum.withoutReal} without a real photo (${sum.withoutRealPct ?? 0}%)`, finishedAt: now })
   await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { status: 'stopped', progress: doc.progress, log: doc.log, vehicles: doc.vehicles, images: doc.images, clusters: doc.clusters, heartbeatAt: now } }).catch(() => {})
+  if (doc.batchId) batchNote(db, doc, 'stopped', { summary: { total: sum.total, withoutReal: sum.withoutReal, withoutRealPct: sum.withoutRealPct, by: sum.by }, error: 'Cut off by the server' }).catch(() => {})
   return doc
 }
 
@@ -368,9 +375,11 @@ function vehicleKey(c: any) {
  */
 export async function createScan(db: Db, body: any, actor: SessionActor) {
   const d = await loadDealership(db, str(body?.dealershipId, 40))
-  const raw = str(body?.url, 2000) || d.website
+  const urlList = (Array.isArray(body?.urls) ? body.urls : []).map((u: any) => str(u, 2000)).filter(Boolean).slice(0, 30)
+  const raw = urlList[0] || str(body?.url, 2000) || d.website
   if (!raw) throw createError({ statusCode: 400, statusMessage: 'This dealership has no website — add one first' })
-  const url = safeUrl(raw)
+  const urls = (urlList.length ? urlList : [raw]).map(safeUrl)
+  const url = urls[0]!
   const dealershipId = String(d._id)
   const col = db.collection<ScanDoc>(SCANS_COLLECTION)
   const busy = await col.findOne({ dealershipId, scannerVersion: ENGINE_VERSION, status: 'running', heartbeatAt: { $gt: new Date(Date.now() - STALE_MS).toISOString() } })
@@ -381,13 +390,14 @@ export async function createScan(db: Db, body: any, actor: SessionActor) {
   const now = new Date().toISOString()
   const progress: ScanProgress = { phase: 'collecting', page: 0, vehicles: base?.vehicles.length || 0, advertised: base?.progress.advertised ?? null, analyzed: 0, toAnalyze: 0, message: 'Opening the website…', startedAt: now, finishedAt: null, pagesVisited: base ? [...base.progress.pagesVisited] : [] }
   const doc: ScanDoc = {
-    scannerVersion: ENGINE_VERSION, dealershipId, dealershipName: d.name || '', status: 'running', stopRequested: false, startUrl: url, allPages: body?.allPages !== false,
+    scannerVersion: ENGINE_VERSION, dealershipId, dealershipName: d.name || '', status: 'running', stopRequested: false, startUrl: url, urls, allPages: body?.allPages !== false,
+    batchId: str(body?.batchId, 40) || null, autoSave: !!body?.autoSave,
     progress, log: [], vehicles: base ? base.vehicles.map(v => ({ ...v })) : [], images: base ? base.images.map(i => ({ ...i })) : [], clusters: base ? base.clusters.map(c => ({ ...c })) : [],
     countStockAsMissing: base ? base.countStockAsMissing : true, auditId: null, error: null, heartbeatAt: now, createdAt: now, createdBy: { id: actor.id, name: actor.name },
   }
   if (base) {
     // Continue the same scan record so one audit covers both lists.
-    await col.updateOne({ _id: base._id }, { $set: { status: 'running', stopRequested: false, startUrl: url, progress, heartbeatAt: now, auditId: null, error: null } })
+    await col.updateOne({ _id: base._id }, { $set: { status: 'running', stopRequested: false, startUrl: url, urls, progress, heartbeatAt: now, auditId: null, error: null, batchId: doc.batchId, autoSave: doc.autoSave } })
     doc._id = base._id
     doc.log = base.log || []
   }
@@ -453,16 +463,23 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       framing = false
     }, 3000)
 
-    log(`Opening ${doc.startUrl.replace(/^https?:\/\//, '')}`)
-    setProgress({ message: 'Loading the inventory page…' })
-    await goto(tab, doc.startUrl, 25_000, log)
-
+    if (doc.batchId) batchNote(db, doc, 'running').catch(() => {})
     // ── Collect ──
     const seen = new Map(doc.vehicles.map(v => [v.key, v]))
     let advertised: number | null = doc.progress.advertised
     const better = (a: any, b: any) => (!a?.url && b?.url) || (a?.url && b?.url && a.url !== b.url && (a.nw || 0) === 0 && (b.nw || 0) > 0)
     const startCount = doc.vehicles.length
-    for (let page = 1; page <= MAX_PAGES && !stop; page++) {
+    const urls = doc.urls?.length ? doc.urls : [doc.startUrl]
+    let pageNo = 0
+    for (let u = 0; u < urls.length && !stop; u++) {
+    const startUrl = urls[u]!
+    const countBefore = doc.vehicles.length
+    log(urls.length > 1 ? `Inventory page ${u + 1} of ${urls.length}: ${startUrl.replace(/^https?:\/\/[^/]+/, '') || '/'}` : `Opening ${startUrl.replace(/^https?:\/\//, '')}`)
+    setProgress({ message: 'Loading the inventory page…' })
+    try { await goto(tab, startUrl, 25_000, log) }
+    catch (e: any) { if (urls.length > 1) { log(`Skipped: ${e?.message || e}`); continue } throw e }
+    for (let p = 1; p <= MAX_PAGES && !stop; p++) {
+      const page = ++pageNo
       setProgress({ page, message: page === 1 ? 'Loading every vehicle on this page…' : `Page ${page}: loading vehicles…` })
       let res: any = null
       let added = 0
@@ -510,11 +527,11 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       await collect()
       doc.progress.pagesVisited.push(res?.url || tab.url)
       log(`Page ${page}: ${pageCards} cards on screen, ${added} new — ${res?.strategy === 'known' ? 'recognised layout' : 'detected by structure'}`)
-      if (doc.vehicles.length === startCount && page === 1) throw createError({ statusCode: 422, statusMessage: 'No vehicle cards found', message: 'No vehicle cards found on this page. Pick the inventory / search results page (e.g. Used Inventory), then press Continue.' })
+      if (doc.vehicles.length === countBefore && p === 1) { log('No vehicle cards on this page — moving on'); break }
       if (!doc.allPages || doc.vehicles.length >= MAX_VEHICLES) break
-      if (Date.now() >= collectUntil) { log('Time limit for collecting reached — checking the photos found so far'); break }
-      if (added === 0 && page > 1) break
-      if (advertised && doc.vehicles.length >= advertised) break
+      if (Date.now() >= collectUntil) { log('Time limit for collecting reached — checking the photos found so far'); stop = stop || u < urls.length - 1; break }
+      if (added === 0 && p > 1) break
+      if (advertised && doc.vehicles.length - countBefore >= advertised) break
 
       const next = await evaluate<any>(tab, FIND_NEXT_JS).catch(() => null)
       if (!next) break
@@ -530,6 +547,10 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
         await waitForSettle(tab, 15_000)
       }
     }
+    // Each inventory page advertises its own total; the next one starts fresh.
+    advertised = null
+    }
+    if (doc.vehicles.length === startCount) throw createError({ statusCode: 422, statusMessage: 'No vehicle cards found', message: urls.length > 1 ? 'No vehicle cards were found on any of the pages — check the scan pages for this dealership.' : 'No vehicle cards found on this page. Pick the inventory / search results page (e.g. Used Inventory), then press Continue.' })
     // Keep what was collected even if the photo step is cut short.
     await col.updateOne({ _id: doc._id }, { $set: { vehicles: doc.vehicles, progress: doc.progress, heartbeatAt: new Date().toISOString() } }).catch(() => {})
 
@@ -543,7 +564,19 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     log(`Done in ${Math.round((Date.now() - t0) / 1000)}s`)
     await col.updateOne({ _id: doc._id }, { $set: { status: doc.status, progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, images: doc.images.map(stripImage), clusters: doc.clusters, heartbeatAt: new Date().toISOString() } })
     emit('progress', doc.progress)
-    emit('done', { id: String(doc._id), status: doc.status, summary: sum })
+    let auditId: string | null = null
+    if (doc.autoSave) {
+      try {
+        const r = await saveScan(db, String(doc._id), { id: doc.createdBy.id, name: doc.createdBy.name, email: '' })
+        auditId = r.audit?.id || null
+        doc.auditId = auditId
+        log('Saved to the CRM as an inventory audit')
+        emit('saved', { auditId })
+      }
+      catch (e: any) { log(`Could not save the audit: ${e?.message || e}`) }
+    }
+    emit('done', { id: String(doc._id), status: doc.status, summary: sum, auditId })
+    if (doc.batchId) batchNote(db, doc, doc.status === 'stopped' ? 'stopped' : 'done', { summary: { total: sum.total, withoutReal: sum.withoutReal, withoutRealPct: sum.withoutRealPct, by: sum.by }, auditId }).catch(() => {})
   }
   catch (e: any) {
     const message = e?.message || e?.statusMessage || 'Scan failed'
@@ -553,11 +586,18 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     await col.updateOne({ _id: doc._id }, { $set: { status: 'failed', error: message, progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, heartbeatAt: new Date().toISOString() } }).catch(() => {})
     emit('progress', doc.progress)
     emit('failure', { message })
+    if (doc.batchId) batchNote(db, doc, 'failed', { error: message }).catch(() => {})
   }
   finally {
     if (frameTimer) clearInterval(frameTimer)
     if (t) await closeTab(t)
   }
+}
+
+/** Report a batch item's state back to its batch (see scanner-batch.ts). */
+async function batchNote(db: Db, doc: ScanDoc, status: 'running' | 'done' | 'stopped' | 'failed', extra: Record<string, any> = {}) {
+  const { updateBatchItem } = await import('./scanner-batch')
+  await updateBatchItem(db, doc.batchId!, doc.dealershipId, { status, scanId: String(doc._id), ...extra })
 }
 
 const stripImage = (i: ImageInfo): ImageInfo => { const { bytes, thumb, ...rest } = i as any; return rest }

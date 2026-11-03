@@ -34,6 +34,8 @@ export interface CrmDealership {
   dealerGroup: string
   brands: string[]
   website: string
+  /** Inventory pages the scanner covers for this dealership (Scrape + batch scans). */
+  scanPages?: { url: string, label: string }[]
   address: string
   city: string
   state: string
