@@ -7,7 +7,7 @@ import { INTERACTION_TYPE_MAP } from '~/constants/crm'
 import { INTERACTION_ICONS } from '~/constants/crm-icons'
 import {
   Plus, Search, Store, ShieldAlert, Download, RefreshCw, ArrowUpRight, Globe, ChevronUp, ChevronDown,
-  ChevronsUpDown, X, Filter, UserCircle2, Columns3, Rows3,
+  ChevronsUpDown, X, Filter, UserCircle2,
   CheckSquare, Tag, UserCheck, Loader2, ExternalLink, Briefcase, Trophy, SlidersHorizontal, Upload,
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
@@ -57,14 +57,10 @@ const COLUMNS: Col[] = [
   { key: 'added', label: 'Added', sortable: true, default: false },
   { key: 'updated', label: 'Updated', sortable: true, default: true },
 ]
-const visibleCols = useLocalStorage<ColKey[]>('crm-dealership-cols-v5', COLUMNS.filter(c => c.default).map(c => c.key))
-const shownColumns = computed(() => COLUMNS.filter(c => visibleCols.value.includes(c.key)))
-function toggleCol(k: ColKey) {
-  if (k === 'name') return
-  visibleCols.value = visibleCols.value.includes(k) ? visibleCols.value.filter(x => x !== k) : [...visibleCols.value, k]
-}
-const density = useLocalStorage<'comfortable' | 'compact'>('crm-dealership-density', 'comfortable')
-const rowPad = computed(() => density.value === 'compact' ? 'py-1.5' : 'py-3')
+// Every column is always shown (no column picker on this page).
+const shownColumns = COLUMNS
+const density = ref<'comfortable' | 'compact'>('compact')
+const rowPad = computed(() => density.value === 'compact' ? 'py-1' : 'py-3')
 
 // ─── Filters & sort ───
 const search = ref('')
@@ -351,7 +347,6 @@ function exportCsv(onlySelected = false) {
   toast.success(`Exported ${data.length} dealerships`)
 }
 
-const fetchedAgo = computed(() => lastFetchedAt.value ? formatDistanceToNow(lastFetchedAt.value, { addSuffix: true }) : '')
 
 // Keyboard: "/" focuses search, "n" new, Esc clears selection
 const searchEl = ref<any>(null)
@@ -466,36 +461,16 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
     <div class="shrink-0 bg-background px-2 py-3 space-y-3">
       <div class="flex flex-wrap items-center gap-2">
         <!-- Quick views -->
-        <div class="inline-flex items-center rounded-lg border bg-muted/40 p-0.5" role="tablist" aria-label="Quick views">
+        <div class="flex w-full items-center overflow-x-auto rounded-lg border bg-muted/40 p-0.5 gap-0.5" role="tablist" aria-label="Quick views">
           <button
             v-for="qv in QUICK" :key="qv.key" type="button" role="tab" :aria-selected="quick === qv.key"
-            class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all"
+            class="inline-flex flex-1 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition-all"
             :class="quick === qv.key ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'"
             @click="quick = quick === qv.key ? 'all' : qv.key"
           >
             {{ qv.label }}
             <span class="rounded-full px-1.5 py-px text-[10px] tabular-nums leading-none" :class="[quick === qv.key ? 'bg-muted' : 'bg-transparent', qv.tone && quickCounts[qv.key] ? qv.tone : '']">{{ quickCounts[qv.key] }}</span>
           </button>
-        </div>
-
-        <div class="ml-auto flex items-center gap-1.5">
-          <p class="text-xs text-muted-foreground hidden lg:block mr-2">
-            <span class="font-semibold text-foreground tabular-nums">{{ filtered.length }}</span> of {{ dealerships.length }}
-            <span v-if="fetchedAgo" class="hidden xl:inline"> · synced {{ fetchedAgo }}</span>
-          </p>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <Button variant="outline" size="icon" class="size-8" :aria-label="density === 'compact' ? 'Comfortable rows' : 'Compact rows'" @click="density = density === 'compact' ? 'comfortable' : 'compact'"><Rows3 class="size-4" /></Button>
-            </TooltipTrigger>
-            <TooltipContent>{{ density === 'compact' ? 'Comfortable rows' : 'Compact rows' }}</TooltipContent>
-          </Tooltip>
-          <DropdownMenu>
-            <DropdownMenuTrigger as-child><Button variant="outline" size="sm" class="h-8 gap-1.5 text-xs"><Columns3 class="size-4" /> Columns</Button></DropdownMenuTrigger>
-            <DropdownMenuContent align="end" class="w-52">
-              <DropdownMenuLabel class="text-[11px] text-muted-foreground">Visible columns</DropdownMenuLabel>
-              <DropdownMenuCheckboxItem v-for="c in COLUMNS" :key="c.key" :model-value="visibleCols.includes(c.key)" :disabled="c.key === 'name'" @select.prevent="toggleCol(c.key)">{{ c.label }}</DropdownMenuCheckboxItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
       </div>
 
@@ -565,13 +540,13 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
         <Button v-else-if="canAdd" size="sm" class="mt-5 gap-2" @click="showForm = true"><Plus class="size-4" /> New dealership</Button>
       </div>
 
-      <table v-else class="crm-grid w-full text-sm border-separate border-spacing-0">
+      <table v-else class="crm-grid w-full text-[13px] leading-5 border-separate border-spacing-0">
         <thead class="sticky top-0 z-10">
           <tr class="text-[11px] uppercase tracking-wider">
-            <th class="w-10 px-3 border-b border-border py-2.5 text-left">
+            <th class="w-10 px-3 border-b border-border py-1.5 text-left">
               <Checkbox :model-value="allOnPageSelected ? true : (someOnPageSelected ? 'indeterminate' : false)" aria-label="Select loaded rows" class="border-white/60 data-[state=checked]:border-white" @update:model-value="togglePage" />
             </th>
-            <th v-for="c in shownColumns" :key="c.key" class="font-medium px-3 py-2.5 whitespace-nowrap border-b border-border" :class="c.align === 'right' ? 'text-right' : 'text-left'">
+            <th v-for="c in shownColumns" :key="c.key" class="font-medium px-3 py-1.5 whitespace-nowrap border-b border-border" :class="c.align === 'right' ? 'text-right' : 'text-left'">
               <button v-if="c.sortable" type="button" class="inline-flex items-center gap-1 uppercase tracking-wider hover:text-white transition-colors" :class="sortKey === c.key && 'text-white'" @click="toggleSort(c.key)">
                 {{ c.label }}
                 <ChevronUp v-if="sortKey === c.key && sortDir === 'asc'" class="size-3" />
@@ -599,12 +574,12 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
               </td>
               <td v-else-if="c.key === 'dealerGroup'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad"><span v-if="d.dealerGroup">{{ d.dealerGroup }}</span><span v-else class="text-muted-foreground/50">—</span></td>
               <td v-else-if="c.key === 'brands'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
-                <div v-if="d.brands?.length" class="flex items-center gap-1"><Badge v-for="b in d.brands" :key="b" variant="secondary" class="text-[10px] px-1.5 py-0 font-medium">{{ b }}</Badge></div>
+                <div v-if="d.brands?.length" class="flex items-center gap-1"><Badge v-for="b in d.brands" :key="b" variant="secondary" class="h-[18px] text-[10px] px-1.5 py-0 font-medium">{{ b }}</Badge></div>
                 <span v-else class="text-muted-foreground/50">—</span>
               </td>
               <td v-else-if="c.key === 'stage'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
                 <div class="flex items-center gap-1.5">
-                  <Badge variant="outline" class="gap-1.5 text-[11px] font-medium" :class="STAGE_STYLE[d.stage]?.badge"><span class="size-1.5 rounded-full" :class="STAGE_STYLE[d.stage]?.dot" />{{ d.stage }}</Badge>
+                  <Badge variant="outline" class="h-5 gap-1.5 py-0 text-[11px] font-medium" :class="STAGE_STYLE[d.stage]?.badge"><span class="size-1.5 rounded-full" :class="STAGE_STYLE[d.stage]?.dot" />{{ d.stage }}</Badge>
                   <NuxtLink v-if="d.dealerId" :to="`/dealers/${d.dealerId}/details`" class="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-400 hover:underline underline-offset-2" title="Open in Dealers" @click.stop><Briefcase class="size-3" /> Dealer</NuxtLink>
                 </div>
               </td>
