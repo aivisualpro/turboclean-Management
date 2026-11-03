@@ -12,9 +12,9 @@ export interface ScannerProgress { phase: 'collecting' | 'analyzing' | 'done' | 
 export type ScanStatus = 'running' | 'done' | 'stopped' | 'failed' | 'saved' | 'interrupted'
 export interface ScanMeta { id: string, dealershipId: string, status: ScanStatus, startUrl: string, allPages: boolean, progress: ScannerProgress, log: { at: string, text: string }[], error: string | null, auditId: string | null, createdAt: string, createdBy: { id: string, name: string }, savedAt: string | null, vehicles: number }
 export interface NavLink { label: string, href: string, kind: string }
-export interface Hotspot { x: number, y: number, w: number, h: number, href: string, label: string }
+export interface Hotspot { x: number, y: number, w: number, h: number, href: string, label: string, children?: { label: string, href: string }[] }
 export interface SitePage { label: string, href: string, kind: string, nav: boolean }
-export interface PagePreview { url: string, title: string, screenshot: string, width: number, height: number, pageHeight: number, navLinks: NavLink[], hotspots: Hotspot[], pages: SitePage[], detected: { cards: number, advertised: number | null, strategy: string | null } }
+export interface PagePreview { url: string, title: string, screenshot: string, width: number, height: number, pageHeight: number, httpStatus: number | null, navLinks: NavLink[], hotspots: Hotspot[], pages: SitePage[], detected: { cards: number, advertised: number | null, strategy: string | null } }
 export interface ScannedVehicle {
   key: string
   title: string
@@ -85,15 +85,18 @@ export function useInventoryScanner() {
 
   const status = () => $fetch<{ ok: boolean, kind: string, binary: string | null }>('/api/scanner/status')
 
+  let previewAbort: AbortController | null = null
   async function loadPreview(dealershipId: string, url?: string) {
     const seq = ++previewSeq
+    previewAbort?.abort()
+    previewAbort = new AbortController()
     previewing.value = true
     previewError.value = null
     try {
-      const p = await $fetch<PagePreview>('/api/scanner/preview', { method: 'POST', body: { dealershipId, url } })
+      const p = await $fetch<PagePreview>('/api/scanner/preview', { method: 'POST', body: { dealershipId, url }, signal: previewAbort.signal })
       if (seq === previewSeq) preview.value = p
     }
-    catch (e: any) { if (seq === previewSeq) previewError.value = errMsg(e, 'Could not open that page') }
+    catch (e: any) { if (seq === previewSeq && e?.name !== 'AbortError') previewError.value = errMsg(e, 'Could not open that page') }
     finally { if (seq === previewSeq) previewing.value = false }
   }
 

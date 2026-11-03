@@ -1,7 +1,7 @@
 /**
  * ZRZ Brain — the CRM's learning memory.
  *
- * Claude itself is not re-trained; instead the app keeps a living playbook that every AI call reads
+ * The model itself is not re-trained; instead the app keeps a living playbook that every AI call reads
  * (see automation-ai.ts `brain:`). The playbook gets better every day from what actually happens:
  *
  *  1. Signals (append-only, turboCleanBrainSignals) — recorded automatically whenever a person
@@ -304,9 +304,9 @@ export async function brainOverview(db: Db) {
     ]).toArray(),
     db.collection(BRAIN_COLLECTIONS.signals).aggregate([{ $group: { _id: '$kind', n: { $sum: 1 }, pending: { $sum: { $cond: ['$reflected', 0, 1] } } } }]).toArray(),
   ])
-  const { aiConfigured, aiModel } = await import('./automation-ai')
+  const { aiConfigured, aiLabel, aiModel, aiProvider } = await import('./automation-ai')
   return {
-    ai: { configured: aiConfigured(), model: aiModel() },
+    ai: { configured: aiConfigured(), model: aiModel(), provider: aiProvider(), label: aiLabel() },
     state: state ? { playbookVersion: state.playbookVersion || 0, lastReflectAt: state.lastReflectAt || null, lastSummary: state.lastSummary || '', lastModel: state.lastModel || null } : { playbookVersion: 0, lastReflectAt: null, lastSummary: '', lastModel: null },
     areas: BRAIN_AREAS,
     lessons,

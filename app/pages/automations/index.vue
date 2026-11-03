@@ -146,7 +146,7 @@ const showLog = ref(true)
       <!-- Setup notes -->
       <div v-if="!o.env.ai || !o.env.resend || o.env.schedulerDisabled" class="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs space-y-1">
         <p v-if="o.env.schedulerDisabled" class="flex items-start gap-2"><AlertTriangle class="size-4 text-amber-500 shrink-0" /> The scheduler is switched off on this server (AUTOMATION_SCHEDULER_DISABLED / CRM_AUTOMATIONS_DISABLED) — automations only run when you press “Run now”.</p>
-        <p v-if="!o.env.ai" class="flex items-start gap-2"><KeyRound class="size-4 text-amber-500 shrink-0" /> AI is not connected. Add <code class="px-1 rounded bg-muted">ANTHROPIC_API_KEY</code> to <code class="px-1 rounded bg-muted">.env</code> for AI-personalized drafts, reply suggestions and summaries. Until then the automations use your templates and keyword rules.</p>
+        <p v-if="!o.env.ai" class="flex items-start gap-2"><KeyRound class="size-4 text-amber-500 shrink-0" /> AI is not connected. Add <code class="px-1 rounded bg-muted">GOOGLE_GEMINI_API_KEY</code> (or <code class="px-1 rounded bg-muted">ANTHROPIC_API_KEY</code>) to <code class="px-1 rounded bg-muted">.env</code> for AI-personalized drafts, reply suggestions and summaries. Until then the automations use your templates and keyword rules.</p>
         <p v-if="!o.env.resend" class="flex items-start gap-2"><KeyRound class="size-4 text-amber-500 shrink-0" /> RESEND_API_KEY is missing — approved emails cannot be sent.</p>
       </div>
 
@@ -256,7 +256,7 @@ const showLog = ref(true)
           <section class="space-y-3">
             <h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Research & AI</h4>
             <label class="flex items-center justify-between gap-3 text-sm"><span>Move dealerships forward automatically<span class="block text-[11px] text-muted-foreground">Research Needed → Researched → Ready to Contact when the audit and an email contact are on file</span></span><Switch v-model="form.autoAdvanceStages" /></label>
-            <label class="flex items-center justify-between gap-3 text-sm"><span>Use AI {{ o?.env.ai ? `(${o?.env.aiModel})` : '(not connected)' }}<span class="block text-[11px] text-muted-foreground">AI only suggests — you approve every email and confirm every reply</span></span><Switch v-model="form.useAi" :disabled="!o?.env.ai" /></label>
+            <label class="flex items-center justify-between gap-3 text-sm"><span>Use AI {{ o?.env.ai ? `(${o?.env.aiLabel || o?.env.aiModel})` : '(not connected)' }}<span class="block text-[11px] text-muted-foreground">AI only suggests — you approve every email and confirm every reply</span></span><Switch v-model="form.useAi" :disabled="!o?.env.ai" /></label>
             <div class="space-y-1.5 w-1/2"><Label for="as-stale">Audit counts as stale after (days)</Label><Input id="as-stale" v-model="form.auditStaleDays" type="number" min="7" max="365" /></div>
           </section>
         </form>

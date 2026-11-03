@@ -19,6 +19,7 @@
 import type { Db } from 'mongodb'
 import type { SessionActor } from './crm'
 import { CRM_TIMEZONE } from './crm-stage'
+import { aiConfigured, aiLabel, aiModel } from './automation-ai'
 
 export const AUTOMATION_COLLECTIONS = {
   settings: 'turboCleanAutomationSettings',
@@ -82,7 +83,7 @@ export interface AutomationSettings {
   maxDraftsPerRun: number
   /** Move dealerships forward automatically (Research Needed → Researched → Ready to Contact). */
   autoAdvanceStages: boolean
-  /** Use the Claude API when ANTHROPIC_API_KEY is set. */
+  /** Use the AI (Gemini or Claude) when an API key is set. */
   useAi: boolean
   /** Audits older than this count as stale. */
   auditStaleDays: number
@@ -312,8 +313,9 @@ export async function logAutomation(db: Db, dealershipId: string, message: strin
 
 export function envStatus() {
   return {
-    ai: !!process.env.ANTHROPIC_API_KEY,
-    aiModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5',
+    ai: aiConfigured(),
+    aiLabel: aiLabel(),
+    aiModel: aiModel(),
     resend: !!process.env.RESEND_API_KEY,
     places: !!process.env.GOOGLE_PLACES_API_KEY,
     collectorToken: !!process.env.AUTOMATION_API_TOKEN,

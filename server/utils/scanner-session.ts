@@ -31,7 +31,6 @@ export const SCANS_COLLECTION = 'turboCleanScannerScans'
 export const ENGINE_VERSION = '2.0'
 const MAX_PAGES = 60
 const MAX_VEHICLES = 2500
-const MAX_CONCURRENT = 2
 /** A running scan that has not written a heartbeat for this long was cut off (deploy, timeout, crash). */
 const STALE_MS = 120_000
 
@@ -72,17 +71,55 @@ async function loadDealership(db: Db, dealershipId: string) {
 }
 
 // ───────────────────────── Browser tab ─────────────────────────
-interface Tab { browser: BrowserHandle, conn: CdpConnection, sid: string, loading: boolean, url: string }
+interface Tab { browser: BrowserHandle, conn: CdpConnection, sid: string, targetId: string, loading: boolean, url: string, status: number | null, mainFrameId: string }
+
+/**
+ * One warm browser per server instance, shared by previews and scans (each gets its own tab).
+ * Starting Chromium costs 2–4 s and every fresh start looks like a new bot to the dealer's site —
+ * reusing it makes clicking around the snapshot fast and far less likely to trip "too many requests".
+ * The browser closes after a short idle time.
+ */
+const WARM_IDLE_MS = 90_000
+const MAX_TABS = 3
+const pool: { browser: BrowserHandle | null, tabs: number, idleTimer: ReturnType<typeof setTimeout> | null, opening: Promise<BrowserHandle> | null } = g.__zrzScannerPool ||= { browser: null, tabs: 0, idleTimer: null, opening: null }
+
+async function warmBrowser(): Promise<BrowserHandle> {
+  if (pool.browser && !pool.browser.conn.closed) return pool.browser
+  if (pool.opening) return pool.opening
+  pool.opening = (async () => {
+    const b = await openBrowser()
+    live.add(b)
+    b.conn.once('disconnected', () => { live.delete(b); if (pool.browser === b) { pool.browser = null; pool.tabs = 0 } })
+    b.conn.send('Browser.setDownloadBehavior', { behavior: 'deny' }).catch(() => {})
+    pool.browser = b
+    pool.tabs = 0
+    return b
+  })()
+  try { return await pool.opening }
+  finally { pool.opening = null }
+}
+function scheduleIdleClose() {
+  if (pool.idleTimer) clearTimeout(pool.idleTimer)
+  pool.idleTimer = setTimeout(async () => {
+    if (pool.tabs > 0 || !pool.browser) return
+    const b = pool.browser
+    pool.browser = null
+    live.delete(b)
+    await b.close().catch(() => {})
+  }, WARM_IDLE_MS)
+}
 
 async function openTab(): Promise<Tab> {
-  if (live.size >= MAX_CONCURRENT) throw createError({ statusCode: 429, statusMessage: 'The scanner is busy', message: 'The scanner is busy with another scan — try again in a minute' })
-  const browser = await openBrowser()
-  live.add(browser)
+  if (pool.tabs >= MAX_TABS) throw createError({ statusCode: 429, statusMessage: 'The scanner is busy', message: 'The scanner is busy with other pages — wait a moment and try again' })
+  const browser = await warmBrowser()
+  pool.tabs++
+  if (pool.idleTimer) { clearTimeout(pool.idleTimer); pool.idleTimer = null }
+  let targetId = ''
   try {
     const { conn } = browser
-    const { targetId } = await conn.send('Target.createTarget', { url: 'about:blank' })
+    ;({ targetId } = await conn.send('Target.createTarget', { url: 'about:blank' }))
     const { sessionId: sid } = await conn.send('Target.attachToTarget', { targetId, flatten: true })
-    const t: Tab = { browser, conn, sid, loading: false, url: '' }
+    const t: Tab = { browser, conn, sid, targetId, loading: false, url: '', status: null, mainFrameId: '' }
     const version = await conn.send('Browser.getVersion')
     const ua = String(version.userAgent || '').replace(/HeadlessChrome/g, 'Chrome')
     await Promise.all([
@@ -94,19 +131,28 @@ async function openTab(): Promise<Tab> {
       conn.send('Emulation.setDeviceMetricsOverride', { width: SCANNER_VIEWPORT.width, height: SCANNER_VIEWPORT.height, deviceScaleFactor: 1, mobile: false }, sid),
       conn.send('Page.addScriptToEvaluateOnNewDocument', { source: SCANNER_BOOTSTRAP_JS }, sid),
     ])
-    conn.send('Browser.setDownloadBehavior', { behavior: 'deny' }).catch(() => {})
-    conn.on(`${sid}:Page.frameStartedLoading`, () => { t.loading = true })
+    const tree = await conn.send('Page.getFrameTree', {}, sid).catch(() => null)
+    t.mainFrameId = tree?.frameTree?.frame?.id || ''
+    conn.on(`${sid}:Page.frameStartedLoading`, (p: any) => { if (!t.mainFrameId || p.frameId === t.mainFrameId) { t.loading = true; t.status = null } })
     conn.on(`${sid}:Page.loadEventFired`, () => { t.loading = false })
-    conn.on(`${sid}:Page.frameNavigated`, (p: any) => { if (!p.frame?.parentId) t.url = p.frame.url })
+    conn.on(`${sid}:Page.frameNavigated`, (p: any) => { if (!p.frame?.parentId) { t.url = p.frame.url; t.mainFrameId = p.frame.id } })
     conn.on(`${sid}:Page.navigatedWithinDocument`, (p: any) => { t.url = p.url })
+    conn.on(`${sid}:Network.responseReceived`, (p: any) => { if (p.type === 'Document' && (!p.frameId || p.frameId === t.mainFrameId)) t.status = Number(p.response?.status) || null })
     conn.on(`${sid}:Page.javascriptDialogOpening`, () => { conn.send('Page.handleJavaScriptDialog', { accept: true }, sid).catch(() => {}) })
     return t
-  } catch (e) { await closeTab({ browser } as Tab); throw e }
+  }
+  catch (e) {
+    pool.tabs = Math.max(0, pool.tabs - 1)
+    if (targetId) browser.conn.send('Target.closeTarget', { targetId }).catch(() => {})
+    scheduleIdleClose()
+    throw e
+  }
 }
 
 async function closeTab(t: Tab) {
-  live.delete(t.browser)
-  await t.browser.close().catch(() => {})
+  pool.tabs = Math.max(0, pool.tabs - 1)
+  await t.conn.send('Target.closeTarget', { targetId: t.targetId }, undefined, 5000).catch(() => {})
+  scheduleIdleClose()
 }
 
 async function evaluate<T = any>(t: Tab, expression: string, timeoutMs = 30_000): Promise<T> {
@@ -121,11 +167,24 @@ async function waitForSettle(t: Tab, ms = 15_000) {
   await sleep(900)
 }
 
-async function goto(t: Tab, url: string, timeoutMs = 25_000) {
-  t.loading = true
-  const r = await t.conn.send('Page.navigate', { url }, t.sid, timeoutMs)
-  if (r?.errorText) throw createError({ statusCode: 502, statusMessage: 'Could not open the site', message: `Could not open ${url.replace(/^https?:\/\//, '')} (${r.errorText})` })
-  await waitForSettle(t, timeoutMs)
+/** Sites that say "too many requests" (429) or "busy" (503) get a polite pause and up to two retries. */
+const RATE_LIMIT_WAITS = [4000, 9000]
+async function goto(t: Tab, url: string, timeoutMs = 25_000, log?: (s: string) => void) {
+  for (let attempt = 0; ; attempt++) {
+    t.loading = true
+    t.status = null
+    const r = await t.conn.send('Page.navigate', { url }, t.sid, timeoutMs)
+    if (r?.errorText) throw createError({ statusCode: 502, statusMessage: 'Could not open the site', message: `Could not open ${url.replace(/^https?:\/\//, '')} (${r.errorText})` })
+    await waitForSettle(t, timeoutMs)
+    const limited = t.status === 429 || t.status === 503 || t.status === 509
+    if (!limited || attempt >= RATE_LIMIT_WAITS.length) {
+      if (limited) throw createError({ statusCode: 503, statusMessage: 'The website is rate-limiting us', message: `The dealer's website answered "too many requests" (HTTP ${t.status}) three times. Wait a minute, then try again.` })
+      return
+    }
+    const wait = RATE_LIMIT_WAITS[attempt]!
+    log?.(`The website answered HTTP ${t.status} (too many requests) — waiting ${Math.round(wait / 1000)} s and trying again`)
+    await sleep(wait)
+  }
 }
 
 // ───────────────────────── Preview ─────────────────────────
@@ -169,6 +228,7 @@ export async function previewSite(db: Db, dealershipId: string, urlInput: string
       width: SCANNER_VIEWPORT.width,
       height,
       pageHeight: fullH,
+      httpStatus: t.status,
       navLinks: Array.isArray(navLinks) ? navLinks : [],
       hotspots: Array.isArray(hot?.spots) ? hot.spots : [],
       pages: Array.isArray(hot?.pages) ? hot.pages : [],
@@ -395,7 +455,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
 
     log(`Opening ${doc.startUrl.replace(/^https?:\/\//, '')}`)
     setProgress({ message: 'Loading the inventory page…' })
-    await goto(tab, doc.startUrl)
+    await goto(tab, doc.startUrl, 25_000, log)
 
     // ── Collect ──
     const seen = new Map(doc.vehicles.map(v => [v.key, v]))
@@ -460,7 +520,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       if (!next) break
       if (next.kind === 'href') {
         log(`${next.label} → ${String(next.href).replace(/^https?:\/\/[^/]+/, '')}`)
-        await goto(tab, next.href).catch((e: any) => log(`Could not open the next page (${e?.message})`))
+        await goto(tab, next.href, 25_000, log).catch((e: any) => log(`Could not open the next page (${e?.message})`))
       }
       else {
         log(`Clicking “${next.label}”`)
@@ -636,6 +696,8 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
 
 /** Used on server shutdown / dev reload: no Chromium may outlive the server. */
 export async function closeAllScannerSessions() {
+  if (pool.idleTimer) clearTimeout(pool.idleTimer)
+  pool.browser = null; pool.tabs = 0
   await Promise.all([...live].map(b => b.close().catch(() => {})))
   live.clear()
 }

@@ -31,7 +31,7 @@ export interface AutomationSettings {
 export interface AutomationOverview {
   automations: AutomationJob[]
   settings: AutomationSettings
-  env: { ai: boolean, aiModel: string, resend: boolean, places: boolean, collectorToken: boolean, replyDomain: boolean, timeZone: string, schedulerDisabled: boolean }
+  env: { ai: boolean, aiModel: string, aiLabel?: string, resend: boolean, places: boolean, collectorToken: boolean, replyDomain: boolean, timeZone: string, schedulerDisabled: boolean }
   sending: { inWindow: boolean, nextWindow: string, sentToday: number, limit: number }
   needsYou: { draftsPending: number, draftsApproved: number, draftsFailed: number, repliesToConfirm: number, hot: number, needToday: number }
 }

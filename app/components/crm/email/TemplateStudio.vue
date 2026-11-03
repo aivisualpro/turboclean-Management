@@ -6,7 +6,7 @@ import { Sparkles, X, Wand2, Loader2, Square, Send, Eye, Code2, Undo2, Save, Ale
 import { toast } from 'vue-sonner'
 
 /**
- * Template Studio — describe an email, Claude designs it in the ZRZ OPS house style (streams live
+ * Template Studio — describe an email, the AI designs it in the ZRZ OPS house style (streams live
  * into the preview), then refine it in plain words ("shorter", "add the evidence list") until it is
  * right, and save it as a new template or as a new A/B version of an existing one.
  * Every brief and change request also teaches the brain ('design' area).
@@ -220,9 +220,9 @@ const libraryTemplates = computed(() => templates.value.filter(t => !t.archivedA
           <span class="size-8 rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-700 text-white flex items-center justify-center shadow-sm"><Sparkles class="size-4" /></span>
           <div class="min-w-0 leading-tight">
             <DialogTitle class="text-sm font-semibold">Template Studio</DialogTitle>
-            <DialogDescription class="text-[11px] text-muted-foreground truncate">{{ template ? `Designing a new version of “${template.name}”` : 'Describe an email — Claude designs it in your house style' }}</DialogDescription>
+            <DialogDescription class="text-[11px] text-muted-foreground truncate">{{ template ? `Designing a new version of “${template.name}”` : 'Describe an email — AI designs it in your house style' }}</DialogDescription>
           </div>
-          <span class="hidden md:inline-flex items-center gap-1.5 ml-3 rounded-full border bg-muted/40 px-2 h-6 text-[11px] text-muted-foreground"><Brain class="size-3.5 text-emerald-600" /> Uses your playbook · {{ config?.aiModel || 'Claude' }}</span>
+          <span class="hidden md:inline-flex items-center gap-1.5 ml-3 rounded-full border bg-muted/40 px-2 h-6 text-[11px] text-muted-foreground"><Brain class="size-3.5 text-emerald-600" /> Uses your playbook · {{ config?.aiLabel || config?.aiModel || 'AI' }}</span>
           <Button variant="ghost" size="icon" class="size-8 ml-auto" aria-label="Close" @click="close"><X class="size-4" /></Button>
         </header>
 
@@ -230,7 +230,7 @@ const libraryTemplates = computed(() => templates.value.filter(t => !t.archivedA
           <!-- Left: conversation -->
           <aside class="min-h-0 flex flex-col border-r bg-muted/20">
             <div class="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
-              <div v-if="!aiReady" class="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200 flex gap-2"><AlertTriangle class="size-4 shrink-0" /> AI is not connected on this server. Add <code>ANTHROPIC_API_KEY</code> to use Template Studio.</div>
+              <div v-if="!aiReady" class="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200 flex gap-2"><AlertTriangle class="size-4 shrink-0" /> AI is not connected on this server. Add <code>GOOGLE_GEMINI_API_KEY</code> (or <code>ANTHROPIC_API_KEY</code>) to use Template Studio.</div>
 
               <!-- Brief -->
               <template v-if="!drafts.length && !streaming">

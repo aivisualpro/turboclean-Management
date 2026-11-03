@@ -85,7 +85,7 @@ export interface EmailStatsRow {
   conversation: number, meeting: number, opportunity: number, proposal: number, won: number, dealershipsReached: number
 }
 export interface EmailStats { rows: EmailStatsRow[], unclassifiedReplies: number, unmatchedReplies: number, attributionDays: number }
-export interface EmailConfig { fromEmail: string, fromBrand: string, replyTracking: 'reply-address' | 'sender-match', webhookSigned: boolean, canSend: boolean, minSample: number, aiConfigured?: boolean, aiModel?: string }
+export interface EmailConfig { fromEmail: string, fromBrand: string, replyTracking: 'reply-address' | 'sender-match', webhookSigned: boolean, canSend: boolean, minSample: number, aiConfigured?: boolean, aiModel?: string, aiProvider?: 'gemini' | 'anthropic' | null, aiLabel?: string }
 
 export interface SendEmailInput {
   contactId?: string | null

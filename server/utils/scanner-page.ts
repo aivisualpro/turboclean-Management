@@ -286,16 +286,69 @@ export const HOTSPOTS_JS = (maxHeight: number) => `(() => {
   var host = location.hostname.replace(/^www\\./, '')
   var as = Array.prototype.slice.call(document.querySelectorAll('a[href]'))
   function text(a) { return (a.innerText || a.textContent || a.getAttribute('aria-label') || a.getAttribute('title') || (a.querySelector('img') && a.querySelector('img').alt) || '').replace(/\\s+/g, ' ').trim() }
+  var NAV = 'nav, header, [role="navigation"], .navbar, .nav, .menu, #menu, .header, [class*="nav"], [class*="menu"], [class*="header"], [id*="nav"], [id*="menu"], [id*="header"]'
+  function cleanHref(el) {
+    var raw = el.getAttribute('href') || ''
+    var h = el.href || ''
+    if (!/^https?:/.test(h) || /^(javascript:|#$)/i.test(raw.trim()) || raw.trim() === '' ) return ''
+    if (raw.trim().charAt(0) === '#') return ''
+    return h.split('#')[0]
+  }
+  // Sub-menu links of a menu item: the smallest ancestor (up to 4 levels, inside the nav) that holds
+  // other links — hidden drop-down / mega-menu panels included. Returns [{label, href}].
+  function shownOnRow(el, a) {
+    // Another visible link sitting on the same row as the item = a sibling menu item, not a sub-item.
+    var r = el.getBoundingClientRect(), ar = a.getBoundingClientRect()
+    if (r.width < 2 || r.height < 2) return false
+    var cs = window.getComputedStyle(el)
+    if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) === 0) return false
+    var cy = r.top + r.height / 2, cx = r.left + r.width / 2
+    var sameRow = cy >= ar.top - 2 && cy <= ar.bottom + 2
+    var sameCol = cx >= ar.left - 2 && cx <= ar.right + 2
+    return sameRow || sameCol
+  }
+  function submenu(a) {
+    if (!a.closest(NAV)) return []
+    var node = a.parentElement, best = null
+    for (var depth = 0; node && depth < 4; depth++, node = node.parentElement) {
+      if (node.matches && node.matches('nav, header, body, html')) break
+      var links = node.querySelectorAll('a[href]')
+      if (links.length > 1 && links.length <= 150) {
+        var sibling = false
+        for (var q = 0; q < links.length; q++) if (links[q] !== a && shownOnRow(links[q], a)) { sibling = true; break }
+        if (sibling) break
+        best = node; break
+      }
+    }
+    if (!best) return []
+    var out = [], seen = {}
+    var me = cleanHref(a)
+    var ls = best.querySelectorAll('a[href]')
+    for (var k = 0; k < ls.length && out.length < 60; k++) {
+      var l = ls[k]
+      if (l === a) continue
+      var hh = cleanHref(l)
+      var tt = text(l)
+      if (!hh || !tt || tt.length > 60 || hh === me || seen[hh]) continue
+      if (/^(tel|mailto|sms):/i.test(l.href) || /\\.(jpg|jpeg|png|gif|pdf|webp)(\\?|$)/i.test(hh)) continue
+      seen[hh] = 1
+      out.push({ label: tt, href: hh })
+    }
+    // A "menu" that is really the whole nav (every top-level item) is not a sub-menu.
+    return out.length >= 2 && out.length < 150 ? out : []
+  }
   for (var i = 0; i < as.length; i++) {
     var a = as[i]
     var href = a.href || ''
-    if (!/^https?:/.test(href) || /^javascript:/i.test(a.getAttribute('href') || '')) continue
+    var key = cleanHref(a)
     var t = text(a)
-    var key = href.split('#')[0]
+    var isMenuHead = !key && !!a.closest(NAV)
+    if (!key && !isMenuHead) continue
+    if (!/^https?:/.test(href) && !isMenuHead) continue
     // Site pages (visible or not): same site only, skip obvious non-page links.
     var h = ''
     try { h = new URL(href).hostname.replace(/^www\\./, '') } catch (e) { h = '' }
-    if (h && (h === host || h.endsWith('.' + host) || host.endsWith('.' + h)) && t && t.length <= 48 && !seenPage[key] && pages.length < 120 && !/\\.(jpg|jpeg|png|gif|pdf|webp)(\\?|$)/i.test(key) && !/^(tel|mailto|sms):/i.test(href) && !/(facebook|twitter|instagram|youtube|linkedin|tiktok)\\./i.test(h)) {
+    if (key && h && (h === host || h.endsWith('.' + host) || host.endsWith('.' + h)) && t && t.length <= 48 && !seenPage[key] && pages.length < 120 && !/\\.(jpg|jpeg|png|gif|pdf|webp)(\\?|$)/i.test(key) && !/^(tel|mailto|sms):/i.test(href) && !/(facebook|twitter|instagram|youtube|linkedin|tiktok)\\./i.test(h)) {
       seenPage[key] = 1
       var s = (t + ' ' + key).toLowerCase()
       var kind = /certified|cpo/.test(s) ? 'certified' : /pre-?owned|used/.test(s) ? 'used' : /\\bnew\\b|\\/new-|new-vehicles|new-inventory/.test(s) ? 'new' : /inventory|vehicles|showroom|search/.test(s) ? 'all' : 'other'
@@ -307,12 +360,17 @@ export const HOTSPOTS_JS = (maxHeight: number) => `(() => {
     if (!rects || !rects.length) continue
     var cs = window.getComputedStyle(a)
     if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) === 0) continue
+    var kids = null
     for (var r = 0; r < rects.length && spots.length < 600; r++) {
       var b = rects[r]
       if (b.width < 6 || b.height < 6) continue
       var y = b.top + sy, x = b.left + sx
       if (y > MAXH || y + b.height < 0 || x + b.width < 0) continue
-      spots.push({ x: Math.round(x), y: Math.round(y), w: Math.round(b.width), h: Math.round(b.height), href: key, label: t.slice(0, 80) })
+      if (kids === null) kids = submenu(a)
+      if (!key && !kids.length) continue
+      var spot = { x: Math.round(x), y: Math.round(y), w: Math.round(b.width), h: Math.round(b.height), href: key, label: t.slice(0, 80) }
+      if (kids.length) spot.children = kids
+      spots.push(spot)
     }
   }
   // Larger boxes first so small inner links sit on top in the overlay.

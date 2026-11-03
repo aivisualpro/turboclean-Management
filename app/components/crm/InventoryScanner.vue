@@ -285,7 +285,8 @@ const engineLabel = computed(() => engine.value === 'serverless' ? 'Cloud Chrome
               <div v-if="!scanning && !previewing" class="absolute top-3 left-1/2 -translate-x-1/2 max-w-[92%] rounded-full bg-black/75 text-white text-xs px-4 py-2 backdrop-blur shadow-lg flex items-center gap-2">
                 <MousePointerClick class="size-4 text-red-400 shrink-0" />
                 <span v-if="detected?.cards">Looks good — <b>{{ detected.cards }} vehicles</b> on this page. Scroll to check, then press <b class="text-red-300">Continue</b>.</span>
-                <span v-else>Click the <b>inventory menu</b> on the page below{{ (preview?.navLinks || []).length ? ', use a shortcut' : '' }}, or open <b>Pages</b> — then press <b class="text-red-300">Continue</b>.</span>
+                <span v-else-if="preview?.httpStatus && preview.httpStatus >= 400">The site answered <b>HTTP {{ preview.httpStatus }}</b>{{ preview.httpStatus === 429 ? ' (too many requests)' : '' }} — wait a moment and press reload, or open another page.</span>
+                <span v-else>Hover the <b>menu</b> on the page below (drop-downs open here too){{ (preview?.navLinks || []).length ? ', use a shortcut' : '' }}, or open <b>Pages</b> — then press <b class="text-red-300">Continue</b>.</span>
               </div>
               <!-- Last scan -->
               <div v-if="lastScan && !scanning && !previewing" class="absolute top-14 left-1/2 -translate-x-1/2 max-w-[92%] rounded-xl border border-white/10 bg-zinc-950/85 text-white text-xs pl-3 pr-1.5 py-1.5 backdrop-blur shadow-lg flex items-center gap-2.5">

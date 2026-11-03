@@ -1,17 +1,17 @@
 import { actorFromSession, getCrmDb } from '../../../../utils/crm'
 import { getUserSession } from '../../../../utils/auth'
-import { aiConfigured, streamClaude } from '../../../../utils/automation-ai'
+import { AI_SETUP_HINT, aiConfigured, streamClaude } from '../../../../utils/automation-ai'
 import { parseStudio, sanitizeEmailHtml, STUDIO_SYSTEM, studioPrompt, unknownFields } from '../../../../utils/template-studio'
 
 /**
  * POST /api/crm/email/templates/studio — Template Studio (Server-Sent Events).
  * Body: { brief, goal?, length?, style? } to design a new email, or { html, instruction, name, subject } to refine one.
- * Events: delta {text} (as Claude writes) · done {name, category, subject, notes, html, unknownFields, model} · failure {message} · ping.
+ * Events: delta {text} (as the model writes) · done {name, category, subject, notes, html, unknownFields, model} · failure {message} · ping.
  */
 export default defineEventHandler(async (event) => {
   const session = await getUserSession(event)
   if (!session) throw createError({ statusCode: 401, statusMessage: 'Sign in first' })
-  if (!aiConfigured()) throw createError({ statusCode: 400, statusMessage: 'AI is not connected', message: 'Add ANTHROPIC_API_KEY to the server environment to use Template Studio.' })
+  if (!aiConfigured()) throw createError({ statusCode: 400, statusMessage: 'AI is not connected', message: `${AI_SETUP_HINT} Then Template Studio can design emails.` })
   const actor = actorFromSession(session)
   const body = (await readBody(event)) || {}
   const refining = !!(body.html && body.instruction)
