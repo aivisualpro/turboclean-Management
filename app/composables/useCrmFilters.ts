@@ -40,6 +40,8 @@ export const FILTER_FIELDS: FilterField[] = [
   { key: 'state', label: 'State', type: 'enum', options: US_STATES, group: 'Dealership' },
   { key: 'city', label: 'City', type: 'text', group: 'Dealership' },
   { key: 'dealerGroup', label: 'Dealer group', type: 'text', group: 'Dealership' },
+  { key: 'route', label: 'Route / day', type: 'text', group: 'Dealership' },
+  { key: 'territory', label: 'Territory / market', type: 'text', group: 'Dealership' },
   { key: 'stage', label: 'Stage', type: 'enum', options: DEALERSHIP_STAGES, group: 'Dealership' },
   { key: 'leadSource', label: 'Lead source', type: 'enum', options: LEAD_SOURCES, group: 'Dealership' },
   { key: 'owner', label: 'Owner', type: 'text', group: 'Dealership' },
@@ -76,6 +78,8 @@ function value(field: string, d: CrmDealership, f: DealershipFacts | undefined):
     case 'state': return d.state || ''
     case 'city': return d.city || ''
     case 'dealerGroup': return d.dealerGroup || ''
+    case 'route': return d.route || ''
+    case 'territory': return d.territory || ''
     case 'stage': return d.stage
     case 'leadSource': return d.leadSource
     case 'owner': return d.assignedUserName || ''

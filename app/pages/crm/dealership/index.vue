@@ -9,7 +9,7 @@ import {
   Plus, Search, Store, ShieldAlert, Download, RefreshCw, ChevronUp, ChevronDown,
   ChevronsUpDown, X, Filter, UserCircle2,
   CheckSquare, Tag, UserCheck, Loader2, ExternalLink, Briefcase, Trophy, SlidersHorizontal, Upload, Binoculars,
-  ScanSearch, Radar, Layers, Mail, CheckCircle2, CircleDashed,
+  ScanSearch, Radar, Layers, Mail, CheckCircle2, CircleDashed, Route, Grid3x3,
 } from 'lucide-vue-next'
 import type { Batch as ScanBatch } from '~/composables/useBatchScan'
 import { toast } from 'vue-sonner'
@@ -30,12 +30,13 @@ const { pending } = await useAsyncData('crm-dealerships-bootstrap', async () => 
 }, { lazy: false })
 
 // ─── Column model — one value per column ───
-type ColKey = 'dealershipId' | 'name' | 'dealerGroup' | 'brands' | 'stage' | 'inStage' | 'leadSource' | 'city' | 'state' | 'zip' | 'phone' | 'website' | 'scanPages'
+type ColKey = 'dealershipId' | 'name' | 'dealerGroup' | 'route' | 'brands' | 'stage' | 'inStage' | 'leadSource' | 'city' | 'state' | 'zip' | 'phone' | 'website' | 'scanPages'
   | 'territory' | 'lastTouch' | 'nextAction' | 'primaryContact' | 'primaryTitle' | 'primaryEmail' | 'contacts' | 'owner' | 'lastAudit' | 'missingPhotos' | 'inventory' | 'added' | 'updated'
 interface Col { key: ColKey, label: string, sortable?: boolean, default: boolean, align?: 'right' }
 const COLUMNS: Col[] = [
   { key: 'name', label: 'Dealership', sortable: true, default: true },
   { key: 'dealerGroup', label: 'Dealer group', sortable: true, default: true },
+  { key: 'route', label: 'Route', sortable: true, default: true },
   { key: 'brands', label: 'Brands', default: true },
   { key: 'stage', label: 'Stage', sortable: true, default: true },
   { key: 'inStage', label: 'In stage', sortable: true, default: true, align: 'right' },
@@ -79,6 +80,7 @@ const brand = ref('all')
 const group = ref('all')
 const city = ref('all')
 const territory = ref('all')
+const routeF = ref(String(route.query.route || 'all'))
 const nextActionF = ref<'all' | 'overdue' | 'today' | 'upcoming' | 'none'>('all')
 const lastTouchF = ref<'all' | '7' | '30' | 'older30' | 'never'>('all')
 const auditF = ref<'all' | 'audited' | 'not' | 'gt10' | 'gt20'>('all')
@@ -104,12 +106,14 @@ const brandOptions = computed(() => uniq(dealerships.value.flatMap(d => d.brands
 const groupOptions = computed(() => uniq(dealerships.value.map(d => d.dealerGroup)))
 const cityOptions = computed(() => uniq(dealerships.value.filter(d => state.value === 'all' || d.state === state.value).map(d => d.city)))
 const territoryOptions = computed(() => uniq(dealerships.value.map(d => d.territory)))
+const routeOptions = computed(() => uniq(dealerships.value.map(d => d.route || '')).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })))
 const daysSince = (iso?: string | null) => iso ? (Date.now() - new Date(iso).getTime()) / 86_400_000 : null
 function matchesMore(d: CrmDealership) {
   if (brand.value !== 'all' && !(d.brands || []).includes(brand.value)) return false
   if (group.value !== 'all' && (group.value === '__none' ? !!d.dealerGroup : d.dealerGroup !== group.value)) return false
   if (city.value !== 'all' && d.city !== city.value) return false
   if (territory.value !== 'all' && d.territory !== territory.value) return false
+  if (routeF.value !== 'all' && (d.route || '') !== (routeF.value === '__none' ? '' : routeF.value)) return false
   if (nextActionF.value !== 'all') {
     const na = d.interactionSummary?.nextAction
     const st = dueState(na?.date)
@@ -154,6 +158,7 @@ const activeChips = computed(() => {
   if (state.value !== 'all') c.push({ key: 'state', label: `State: ${state.value}`, clear: () => { state.value = 'all'; city.value = 'all' } })
   if (city.value !== 'all') c.push({ key: 'city', label: `City: ${city.value}`, clear: () => { city.value = 'all' } })
   if (territory.value !== 'all') c.push({ key: 'territory', label: `Territory: ${territory.value}`, clear: () => { territory.value = 'all' } })
+  if (routeF.value !== 'all') c.push({ key: 'route', label: `Route: ${routeF.value === '__none' ? 'No route' : routeF.value}`, clear: () => { routeF.value = 'all' } })
   if (brand.value !== 'all') c.push({ key: 'brand', label: `Brand: ${brand.value}`, clear: () => { brand.value = 'all' } })
   if (group.value !== 'all') c.push({ key: 'group', label: `Group: ${group.value === '__none' ? 'Independent' : group.value}`, clear: () => { group.value = 'all' } })
   if (nextActionF.value !== 'all') c.push({ key: 'na', label: `Next action: ${lbl(OPT.nextAction, nextActionF.value)}`, clear: () => { nextActionF.value = 'all' } })
@@ -218,7 +223,7 @@ const QUICK: { key: typeof quick.value, label: string, tone?: string }[] = [
 
 const sortValue = (d: CrmDealership, k: ColKey): string | number => ({
   dealershipId: d.dealershipId, name: d.name, dealerGroup: d.dealerGroup, brands: (d.brands || []).join(', '), stage: DEALERSHIP_STAGES.indexOf(d.stage as any), inStage: stageAgeMs(d), lastTouch: d.interactionSummary?.last?.occurredAt || '', nextAction: d.interactionSummary?.nextAction?.date || (d.interactionSummary?.nextAction ? '9999-12-30' : '9999-12-31'),
-  leadSource: d.leadSource, city: d.city, state: d.state, zip: d.zip, phone: d.phone, website: d.website, territory: d.territory, scanPages: scanPageCount(d),
+  leadSource: d.leadSource, city: d.city, state: d.state, zip: d.zip, phone: d.phone, website: d.website, territory: d.territory, route: d.route || '', scanPages: scanPageCount(d),
   primaryContact: d.contactSummary?.primary?.fullName || '', primaryTitle: d.contactSummary?.primary?.jobTitle || '', primaryEmail: d.contactSummary?.primary?.email || '',
   contacts: d.contactSummary?.active || 0, owner: d.assignedUserName, added: d.createdAt, updated: d.updatedAt,
   lastAudit: d.auditSummary?.latest?.auditedAt || '', missingPhotos: d.auditSummary?.latest?.missingPhotoPct ?? -1, inventory: d.auditSummary?.latest?.totalVehicles ?? -1,
@@ -243,7 +248,7 @@ const filtered = computed(() => {
     if (conditions.value.length && !matchAll(conditions.value, d, factsById.value.get(d.id))) return false
     if (!matchesMore(d)) return false
     if (!needle) return true
-    return [d.dealershipId, d.name, d.dealerGroup, d.city, d.state, d.zip, d.territory, d.assignedUserName, d.phone, d.website,
+    return [d.dealershipId, d.name, d.dealerGroup, d.city, d.state, d.zip, d.territory, d.route, d.assignedUserName, d.phone, d.website,
       ...(d.brands || []), d.contactSummary?.primary?.fullName, d.contactSummary?.primary?.email].filter(Boolean).join(' ').toLowerCase().includes(needle)
   })
   const dir = sortDir.value === 'asc' ? 1 : -1
@@ -261,7 +266,7 @@ function toggleSort(k: ColKey) {
 const filterCount = computed(() => activeChips.value.length + conditions.value.length)
 const activeFilterCount = computed(() => filterCount.value + (quick.value !== 'all' ? 1 : 0))
 function resetPanelFilters() {
-  stage.value = leadSource.value = state.value = assignee.value = brand.value = group.value = city.value = territory.value = 'all'
+  stage.value = leadSource.value = state.value = assignee.value = brand.value = group.value = city.value = territory.value = routeF.value = 'all'
   nextActionF.value = 'all'; lastTouchF.value = 'all'; auditF.value = 'all'; contactsF.value = 'all'; addedF.value = 'all'
   conditions.value = []
 }
@@ -346,8 +351,8 @@ function exportCsv(onlySelected = false) {
   const data = onlySelected ? filtered.value.filter(d => selected.value.has(d.id)) : filtered.value
   if (!data.length) return toast.error('Nothing to export')
   const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`
-  const head = ['Dealership ID', 'Name', 'Dealer Group', 'Brands', 'Website', 'Address', 'City', 'State', 'ZIP', 'Phone', 'Territory', 'Assigned To', 'Stage', 'Stage Since', 'Days In Stage', 'Last Touch', 'Last Touch Type', 'Interactions', 'Next Action', 'Next Action Date', 'Lead Source', 'Primary Contact', 'Primary Title', 'Primary Email', 'Primary Phone', 'Active Contacts', 'Former Contacts', 'Last Audit', 'Inventory', 'Missing Photos %', 'Audits', 'Added', 'Updated']
-  const lines = data.map(d => [d.dealershipId, d.name, d.dealerGroup, (d.brands || []).join(' / '), d.website, d.address, d.city, d.state, d.zip, d.phone, d.territory, d.assignedUserName, d.stage, (d.stageChangedAt || d.createdAt)?.slice(0, 10), (stageAgeMs(d) / 86_400_000).toFixed(1), d.interactionSummary?.last?.occurredAt?.slice(0, 10), d.interactionSummary?.last?.typeLabel, d.interactionSummary?.count ?? 0, d.interactionSummary?.nextAction?.text, d.interactionSummary?.nextAction?.date, d.leadSource,
+  const head = ['Dealership ID', 'Name', 'Dealer Group', 'Brands', 'Website', 'Address', 'City', 'State', 'ZIP', 'Phone', 'Territory', 'Route', 'Assigned To', 'Stage', 'Stage Since', 'Days In Stage', 'Last Touch', 'Last Touch Type', 'Interactions', 'Next Action', 'Next Action Date', 'Lead Source', 'Primary Contact', 'Primary Title', 'Primary Email', 'Primary Phone', 'Active Contacts', 'Former Contacts', 'Last Audit', 'Inventory', 'Missing Photos %', 'Audits', 'Added', 'Updated']
+  const lines = data.map(d => [d.dealershipId, d.name, d.dealerGroup, (d.brands || []).join(' / '), d.website, d.address, d.city, d.state, d.zip, d.phone, d.territory, d.route, d.assignedUserName, d.stage, (d.stageChangedAt || d.createdAt)?.slice(0, 10), (stageAgeMs(d) / 86_400_000).toFixed(1), d.interactionSummary?.last?.occurredAt?.slice(0, 10), d.interactionSummary?.last?.typeLabel, d.interactionSummary?.count ?? 0, d.interactionSummary?.nextAction?.text, d.interactionSummary?.nextAction?.date, d.leadSource,
     d.contactSummary?.primary?.fullName, d.contactSummary?.primary?.jobTitle, d.contactSummary?.primary?.email, d.contactSummary?.primary?.mobile || d.contactSummary?.primary?.phone,
     d.contactSummary?.active ?? 0, d.contactSummary?.inactive ?? 0, d.auditSummary?.latest?.auditedAt?.slice(0, 10), d.auditSummary?.latest?.totalVehicles, d.auditSummary?.latest?.missingPhotoPct, d.auditSummary?.count ?? 0, d.createdAt?.slice(0, 10), d.updatedAt?.slice(0, 10)].map(esc).join(','))
   const blob = new Blob([[head.map(esc).join(','), ...lines].join('\n')], { type: 'text/csv;charset=utf-8;' })
@@ -388,6 +393,17 @@ async function loadBatches() {
 }
 onMounted(loadBatches)
 watch(showBatch, (v) => { if (!v) loadBatches() })
+// ─── Quick edit (spreadsheet mode) ───
+const gridMode = ref(route.query.edit === '1')
+const gridRef = ref<{ dirty: boolean } | null>(null)
+function toggleGrid() {
+  if (gridMode.value && gridRef.value?.dirty && !confirm('You have unsaved changes in quick edit. Leave and lose them?')) return
+  gridMode.value = !gridMode.value
+  if (gridMode.value) { loadUsers(); clearSelection() }
+}
+async function onGridSaved() { try { await Promise.all([fetchDealerships(), loadFacts()]) } catch {} }
+onKeyStroke('e', (e) => { if (!isTyping(e) && canEdit.value && !showForm.value && !showDiscover.value && !gridMode.value) { e.preventDefault(); toggleGrid() } })
+
 const batchWhen = (iso: string) => formatDistanceToNow(new Date(iso), { addSuffix: true })
 
 
@@ -446,6 +462,10 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
                   <Select v-model="city"><SelectTrigger class="h-8 w-full text-xs"><SelectValue /></SelectTrigger>
                     <SelectContent class="max-h-72"><SelectItem value="all">All cities</SelectItem><SelectItem v-for="c in cityOptions" :key="c" :value="c">{{ c }}</SelectItem></SelectContent></Select>
                 </label>
+                <label class="space-y-1"><span class="text-[11px] font-medium text-muted-foreground">Route / day</span>
+                  <Select v-model="routeF"><SelectTrigger class="h-8 w-full text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent class="max-h-72"><SelectItem value="all">All routes</SelectItem><SelectItem value="__none">No route</SelectItem><SelectItem v-for="r in routeOptions" :key="r" :value="r">{{ r }}</SelectItem></SelectContent></Select>
+                </label>
                 <label class="space-y-1"><span class="text-[11px] font-medium text-muted-foreground">Territory</span>
                   <Select v-model="territory"><SelectTrigger class="h-8 w-full text-xs"><SelectValue /></SelectTrigger>
                     <SelectContent class="max-h-72"><SelectItem value="all">All territories</SelectItem><SelectItem v-for="t in territoryOptions" :key="t" :value="t">{{ t }}</SelectItem></SelectContent></Select>
@@ -486,6 +506,12 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
             </div>
           </PopoverContent>
         </Popover>
+        <Button
+          v-if="canEdit" :variant="gridMode ? 'default' : 'outline'" size="sm" class="h-8 gap-1.5" :class="!gridMode && 'border-emerald-500/50 text-emerald-700 hover:bg-emerald-500/10 hover:text-emerald-700 dark:text-emerald-400'"
+          title="Quick edit — edit the list like a spreadsheet (E)" @click="toggleGrid"
+        >
+          <Grid3x3 class="size-4" /><span class="hidden lg:inline">{{ gridMode ? 'Exit quick edit' : 'Quick edit' }}</span>
+        </Button>
         <DropdownMenu @update:open="(v: boolean) => v && loadBatches()">
           <DropdownMenuTrigger as-child>
             <Button variant="outline" size="sm" class="relative h-8 gap-1.5" :class="openBatches.length && 'border-rose-500/50 text-rose-600 hover:text-rose-600 dark:text-rose-400'" title="Scan batches — Mission Control">
@@ -557,7 +583,7 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
 
       <!-- Bulk action bar -->
       <Transition name="slide">
-        <div v-if="selected.size" class="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
+        <div v-if="selected.size && !gridMode" class="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
           <CheckSquare class="size-4 text-primary" />
           <span class="text-sm font-medium tabular-nums">{{ selected.size }} selected</span>
           <Separator orientation="vertical" class="h-4 mx-1" />
@@ -594,7 +620,12 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
     <!-- Grid + footer: one bordered box, 8px from the page edges -->
     <div class="flex-1 min-h-0 flex flex-col px-2 pb-2">
     <div class="crm-grid-box flex-1 min-h-0 flex flex-col overflow-hidden rounded-lg border-2 border-primary bg-background">
-    <div ref="scroller" class="flex-1 min-h-0 overflow-auto">
+    <div v-if="gridMode" class="relative flex-1 min-h-0">
+      <ClientOnly>
+        <CrmDealershipGrid ref="gridRef" :rows="filtered" :users="users" :can-edit="canEdit" :can-add="canAdd" @close="toggleGrid" @saved="onGridSaved" />
+      </ClientOnly>
+    </div>
+    <div v-else ref="scroller" class="flex-1 min-h-0 overflow-auto">
       <!-- Loading -->
       <div v-if="(isLoading || pending) && dealerships.length === 0" class="divide-y">
         <div v-for="i in 10" :key="i" class="flex items-center gap-4 px-6 py-3.5">
@@ -707,6 +738,10 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
                 </button>
               </td>
               <td v-else-if="c.key === 'territory'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">{{ d.territory || '—' }}</td>
+              <td v-else-if="c.key === 'route'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad" @click.stop>
+                <button v-if="d.route" type="button" class="inline-flex items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/5 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 hover:bg-sky-500/10 dark:text-sky-300" :title="`Show only ${d.route}`" @click="routeF = routeF === d.route ? 'all' : d.route!"><Route class="size-3" />{{ d.route }}</button>
+                <span v-else class="text-muted-foreground/50">—</span>
+              </td>
               <td v-else-if="c.key === 'primaryContact'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
                 <div v-if="d.contactSummary?.primary" class="flex items-center gap-2">
                   <span class="font-medium">{{ d.contactSummary.primary.fullName }}</span>
@@ -760,7 +795,7 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
     </div>
 
     <!-- Footer (part of the table box) -->
-    <div v-if="filtered.length" class="shrink-0 border-t-2 border-primary bg-muted/40 px-2 py-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+    <div v-if="filtered.length && !gridMode" class="shrink-0 border-t-2 border-primary bg-muted/40 px-2 py-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
       <span class="tabular-nums">Showing <span class="font-medium text-foreground">{{ rangeLabel }}</span></span>
       <span v-if="hasMore" class="text-muted-foreground/80">· scroll to load more</span>
       <span v-if="selected.size" class="tabular-nums">· {{ selected.size }} selected</span>

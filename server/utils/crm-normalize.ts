@@ -68,6 +68,13 @@ export function normalizeCity(v: unknown) {
   return s
 }
 
+/** Route / visit day: "DAY 1" → "Day 1", "day-2" → "Day 2", otherwise trimmed as typed. */
+export function normalizeRoute(v: unknown) {
+  const s = String(v ?? '').trim().replace(/\s+/g, ' ').slice(0, 80)
+  const m = s.match(/^day\s*-?\s*(\d{1,3})$/i)
+  return m ? `Day ${Number(m[1])}` : s
+}
+
 /** https://www.Smith-Toyota.com/new → smith-toyota.com */
 export function websiteKey(v: unknown) {
   const s = String(v ?? '').trim().toLowerCase()

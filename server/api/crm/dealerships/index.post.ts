@@ -5,7 +5,7 @@ import {
 import { recordStageChange } from '../../../utils/crm-stage'
 import { getUserSession } from '../../../utils/auth'
 import { duplicateDealershipError, findDealershipDuplicates } from '../../../utils/crm-duplicates'
-import { normalizeBrands, normalizeCity, normalizePhone, normalizeState } from '../../../utils/crm-normalize'
+import { normalizeBrands, normalizeCity, normalizePhone, normalizeRoute, normalizeState } from '../../../utils/crm-normalize'
 
 export default defineEventHandler(async (event) => {
   const session = await getUserSession(event)
@@ -36,6 +36,7 @@ export default defineEventHandler(async (event) => {
     zip: str(body.zip, 20),
     phone: normalizePhone(body.phone),
     territory: str(body.territory, 120),
+    route: normalizeRoute(body.route),
     assignedUserId: str(body.assignedUserId, 64),
     assignedUserName: str(body.assignedUserName, 120),
     leadSource: body.leadSource || 'Manual research',

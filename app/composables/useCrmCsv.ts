@@ -35,6 +35,7 @@ export const IMPORT_FIELDS: { key: string, label: string, required?: boolean, al
   { key: 'brands', label: 'Brands', aliases: ['brand', 'brands', 'make', 'makes', 'franchise', 'franchises'] },
   { key: 'dealerGroup', label: 'Dealer group', aliases: ['group', 'dealergroup', 'parentgroup'] },
   { key: 'territory', label: 'Territory / market', aliases: ['territory', 'market', 'region'] },
+  { key: 'route', label: 'Route / day', aliases: ['route', 'routeday', 'day', 'visitday', 'routegroup'] },
   { key: 'leadSource', label: 'Lead source', aliases: ['leadsource', 'source'] },
   { key: 'notes', label: 'Notes', aliases: ['notes', 'note', 'comments'] },
   { key: 'contactFirstName', label: 'Contact first name', aliases: ['firstname', 'contactfirstname', 'first', 'fname'] },

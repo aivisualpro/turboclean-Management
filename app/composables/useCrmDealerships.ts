@@ -42,6 +42,8 @@ export interface CrmDealership {
   zip: string
   phone: string
   territory: string
+  /** Visit route / day ("Day 1") — which trip this dealership belongs to. */
+  route?: string
   assignedUserId: string
   assignedUserName: string
   leadSource: string

@@ -7,11 +7,11 @@ import { NURTURE_STAGE, applyParkingFields } from '../../../../utils/crm-followu
 import { convertDealershipToDealer } from '../../../../utils/crm-convert'
 import { getUserSession } from '../../../../utils/auth'
 import { syncOpenLoss } from '../../../../utils/crm-lost'
-import { normalizeBrands, normalizeCity, normalizePhone, normalizeState } from '../../../../utils/crm-normalize'
+import { normalizeBrands, normalizeCity, normalizePhone, normalizeRoute, normalizeState } from '../../../../utils/crm-normalize'
 import { duplicateDealershipError, findDealershipDuplicates } from '../../../../utils/crm-duplicates'
 
 const EDITABLE = ['name', 'dealerGroup', 'brands', 'website', 'address', 'city', 'state', 'zip', 'phone',
-  'territory', 'assignedUserId', 'assignedUserName', 'leadSource', 'leadSourceDetail', 'stage', 'notes', 'tags'] as const
+  'territory', 'route', 'assignedUserId', 'assignedUserName', 'leadSource', 'leadSourceDetail', 'stage', 'notes', 'tags'] as const
 
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')!
@@ -32,6 +32,7 @@ export default defineEventHandler(async (event) => {
       case 'tags': $set[k] = Array.isArray(v) ? v.map((x: any) => str(x, 60)).filter(Boolean) : []; break
       case 'state': $set.state = normalizeState(v).slice(0, 60); break
       case 'city': $set.city = normalizeCity(v); break
+      case 'route': $set.route = normalizeRoute(v); break
       case 'phone': $set.phone = normalizePhone(v); break
       case 'website': $set.website = normalizeUrl(v); break
       case 'leadSource': if (!LEAD_SOURCES.includes(v)) throw createError({ statusCode: 400, statusMessage: 'Unknown lead source' }); $set.leadSource = v; break

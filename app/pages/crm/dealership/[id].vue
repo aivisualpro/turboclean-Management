@@ -83,6 +83,7 @@ const basicInfo = computed(() => {
     { label: 'State', value: d.state },
     { label: 'ZIP', value: d.zip },
     { label: 'Territory / market', value: d.territory },
+    { label: 'Route / day', value: d.route },
     { label: 'Assigned salesperson', value: d.assignedUserName },
     { label: 'Lead source', value: d.leadSource + (d.leadSourceDetail ? ` — ${d.leadSourceDetail}` : '') },
     { label: 'Date added', value: format(new Date(d.createdAt), 'PPP') },

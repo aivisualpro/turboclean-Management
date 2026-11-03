@@ -3,12 +3,16 @@ import type { CrmDealership, DealershipInput } from '~/composables/useCrmDealers
 import { Building2, Globe, MapPin, Phone, Target, UserCircle2, X, Loader2, Sparkles } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { DEALERSHIP_STAGES, DEFAULT_STAGE, LEAD_SOURCES, STAGE_STYLE, US_STATES, WON_STAGE } from '~/constants/crm'
+import { CASCADE_FIELDS } from '~/composables/useCascade'
 
 const isOpen = defineModel<boolean>('open', { default: false })
 const props = defineProps<{ dealership?: CrmDealership | null }>()
 const emit = defineEmits<{ saved: [d: CrmDealership] }>()
 
-const { createDealership, updateDealership } = useCrmDealerships()
+const { dealerships, createDealership, updateDealership } = useCrmDealerships()
+/** Renaming a shared value (group, route, territory, city) → offer to rename it on the other dealerships too. */
+const cascade = useCascade()
+const routeOptions = computed(() => [...new Set(dealerships.value.map(d => d.route).filter(Boolean))].sort((a, b) => a!.localeCompare(b!, undefined, { numeric: true })) as string[])
 
 interface UserOpt { id: string, name: string, email: string }
 const users = ref<UserOpt[]>([])
@@ -22,7 +26,7 @@ async function loadUsers() {
 
 const blank = (): DealershipInput => ({
   name: '', dealerGroup: '', brands: [], website: '', address: '', city: '', state: '', zip: '', phone: '',
-  territory: '', assignedUserId: '', assignedUserName: '', leadSource: 'Manual research', leadSourceDetail: '',
+  territory: '', route: '', assignedUserId: '', assignedUserName: '', leadSource: 'Manual research', leadSourceDetail: '',
   stage: DEFAULT_STAGE, notes: '', tags: [], estMonthlyValue: null,
 })
 const form = ref<DealershipInput>(blank())
@@ -94,6 +98,10 @@ async function submit(allowDuplicate = false) {
     toast.success(isEdit.value ? 'Dealership updated' : `${saved.dealershipId} · ${saved.name} added`)
     emit('saved', saved)
     isOpen.value = false
+    if (isEdit.value) {
+      const before: any = props.dealership
+      cascade.offer(CASCADE_FIELDS.filter(f => String(before?.[f] || '').trim() !== String((saved as any)[f] || '').trim()).map(f => ({ field: f, from: before?.[f] || '', to: (saved as any)[f] || '', id: saved.id })))
+    }
   } catch (err: any) {
     const dups = err?.data?.data?.duplicates
     if (err?.statusCode === 409 && dups?.length) duplicates.value = dups
@@ -204,6 +212,12 @@ async function submit(allowDuplicate = false) {
               <Label for="ds-territory">Territory / market</Label>
               <Input id="ds-territory" v-model="form.territory" placeholder="Central Texas" />
             </div>
+            <div class="space-y-1.5">
+              <Label for="ds-route">Route / day</Label>
+              <Input id="ds-route" v-model="form.route" list="ds-route-options" placeholder="Day 1" />
+              <datalist id="ds-route-options"><option v-for="r in routeOptions" :key="r" :value="r" /></datalist>
+              <p class="text-[11px] text-muted-foreground">Which trip this dealership is visited on. Same name = same route.</p>
+            </div>
           </div>
         </section>
 
@@ -290,4 +304,5 @@ async function submit(allowDuplicate = false) {
       </SheetFooter>
     </SheetContent>
   </Sheet>
+  <CrmCascadeDialog :cascade="cascade" />
 </template>

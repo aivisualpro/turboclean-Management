@@ -7,7 +7,7 @@ import type { Db } from 'mongodb'
 import { CRM_COLLECTIONS, DEFAULT_STAGE, LEAD_SOURCES, logActivity, nextDealershipId, normalizeUrl, str, CONTACT_ROLES } from './crm'
 import type { SessionActor } from './crm'
 import { duplicateScan, findDealershipDuplicates } from './crm-duplicates'
-import { isKnownBrand, isStateCode, nameKey, normalizeBrands, normalizeCity, normalizePhone, normalizeState, phoneKey, websiteKey } from './crm-normalize'
+import { isKnownBrand, isStateCode, nameKey, normalizeBrands, normalizeCity, normalizePhone, normalizeRoute, normalizeState, phoneKey, websiteKey } from './crm-normalize'
 import { buildFacts } from './crm-facts'
 
 // ───────────────────────── Health scan ─────────────────────────
@@ -73,7 +73,7 @@ export async function exportCsv(db: Db, kind: 'dealerships' | 'contacts' | 'acti
     const f = new Map(facts.map(x => [x.id, x]))
     return toCsv([
       ['Dealership ID', d => d.dealershipId], ['Name', d => d.name], ['Dealer group', d => d.dealerGroup], ['Brands', d => d.brands], ['Website', d => d.website],
-      ['Address', d => d.address], ['City', d => d.city], ['State', d => d.state], ['ZIP', d => d.zip], ['Phone', d => d.phone], ['Territory', d => d.territory],
+      ['Address', d => d.address], ['City', d => d.city], ['State', d => d.state], ['ZIP', d => d.zip], ['Phone', d => d.phone], ['Territory', d => d.territory], ['Route', d => d.route || ''],
       ['Stage', d => d.stage], ['Owner', d => d.assignedUserName], ['Lead source', d => d.leadSource], ['Lead source detail', d => d.leadSourceDetail],
       ['Est. monthly value', d => d.estMonthlyValue ?? ''], ['Lost reason', d => d.lostReason || ''], ['Revisit date', d => d.revisitDate || ''],
       ['Missing photo %', d => f.get(d._id.toString())?.missingPhotoPct ?? ''], ['Vehicles', d => f.get(d._id.toString())?.totalVehicles ?? ''],
@@ -102,7 +102,7 @@ export async function exportCsv(db: Db, kind: 'dealerships' | 'contacts' | 'acti
 }
 
 // ───────────────────────── CSV import (dealerships + optional primary contact) ─────────────────────────
-export const IMPORT_FIELDS = ['name', 'dealerGroup', 'brands', 'website', 'address', 'city', 'state', 'zip', 'phone', 'territory', 'leadSource', 'notes', 'contactFirstName', 'contactLastName', 'contactRole', 'contactJobTitle', 'contactEmail', 'contactPhone'] as const
+export const IMPORT_FIELDS = ['name', 'dealerGroup', 'brands', 'website', 'address', 'city', 'state', 'zip', 'phone', 'territory', 'route', 'leadSource', 'notes', 'contactFirstName', 'contactLastName', 'contactRole', 'contactJobTitle', 'contactEmail', 'contactPhone'] as const
 
 export async function importDealerships(db: Db, rows: any[], opts: { dryRun?: boolean, ownerId?: string, ownerName?: string }, actor: SessionActor | null) {
   if (!Array.isArray(rows) || !rows.length) throw createError({ statusCode: 400, statusMessage: 'No rows to import' })
@@ -125,7 +125,7 @@ export async function importDealerships(db: Db, rows: any[], opts: { dryRun?: bo
     const leadSource = (LEAD_SOURCES as readonly string[]).find(s => s.toLowerCase() === String(r.leadSource || '').trim().toLowerCase()) || 'Manual research'
     const doc = {
       dealershipId: await nextDealershipId(db), name, dealerGroup: str(r.dealerGroup, 200), brands: normalizeBrands(r.brands), website: candidate.website,
-      address: str(r.address, 300), city: candidate.city, state, zip: str(r.zip, 20), phone: candidate.phone, territory: str(r.territory, 120),
+      address: str(r.address, 300), city: candidate.city, state, zip: str(r.zip, 20), phone: candidate.phone, territory: str(r.territory, 120), route: normalizeRoute(r.route),
       assignedUserId: str(opts.ownerId, 64), assignedUserName: str(opts.ownerName, 120), leadSource, leadSourceDetail: 'CSV import',
       stage: DEFAULT_STAGE, stageChangedAt: now, stageChangedBy: actor, notes: str(r.notes, 5000), tags: [], estMonthlyValue: null,
       createdAt: now, createdBy: actor, updatedAt: now, archivedAt: null as string | null,
