@@ -24,37 +24,48 @@ export const SCROLL_STEP_JS = `(() => {
 
 /** Links that look like inventory pages — offered as one-click shortcuts in the scanner toolbar. */
 export const NAV_LINKS_JS = `(() => {
+  // Shortcut chips: the site's own inventory pages, judged by the link's wording (the menu text),
+  // preferring real menu / header links. In-page anchors, specials, finance etc. are skipped.
   var out = [], seen = {}
   var host = location.hostname.replace(/^www\\./, '')
+  var here = location.href.split('#')[0]
   var as = Array.prototype.slice.call(document.querySelectorAll('a[href]'))
-  for (var i = 0; i < as.length && out.length < 40; i++) {
+  var BAD = /special|skip|finance|financ|service|parts|lease|offer|deal|why|about|contact|research|compare|saved|favou?rite|detail|vdp|blog|review|trade|appraisal|credit|tire|sell|value|wishlist|cart|login|sign|career|hour|direction|map|privacy|schedule|accessor|order|payment|calculator|quote|brochure|protection|warranty|recall|rebate|incentive|shop-by|body-style|model/
+  for (var i = 0; i < as.length; i++) {
     var a = as[i]
+    var raw = a.getAttribute('href') || ''
     var href = a.href || ''
-    if (!/^https?:/.test(href)) continue
+    if (!/^https?:/.test(href) || /^(#|javascript:|tel:|mailto:)/i.test(raw)) continue
+    var key = href.split('#')[0]
+    if (key === here) continue
     var h = ''
     try { h = new URL(href).hostname.replace(/^www\\./, '') } catch (e) { continue }
-    if (h !== host) continue
-    var t = (a.innerText || a.textContent || a.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim()
+    if (h !== host && !h.endsWith('.' + host) && !host.endsWith('.' + h)) continue
+    var t = (a.innerText || a.textContent || a.getAttribute('aria-label') || a.getAttribute('title') || '').replace(/\\s+/g, ' ').trim()
     if (!t || t.length > 40) continue
+    var tl = t.toLowerCase(), hl = key.toLowerCase()
+    if (BAD.test(tl) || /special|skip|finance|service|parts|lease|offer|blog|review|trade|appraisal|credit|tire|saved|favorite|compare|research|detail|vdp|why-|about|contact|value|sell|quote/.test(hl)) continue
     var kind = null
-    var s = (t + ' ' + href).toLowerCase()
-    if (/certified|cpo/.test(s)) kind = 'certified'
-    else if (/pre-?owned|used/.test(s)) kind = 'used'
-    else if (/\\bnew\\b|new-/.test(s)) kind = 'new'
-    else if (/inventory|showroom|vehicles/.test(s)) kind = 'all'
+    if (/certified|cpo/.test(tl)) kind = 'certified'
+    else if (/pre-?owned|\\bused\\b|second-?hand/.test(tl)) kind = 'used'
+    else if (/\\bnew\\b/.test(tl)) kind = 'new'
+    else if (/inventory|vehicles|showroom|all cars|view all|search/.test(tl)) kind = 'all'
     if (!kind) continue
-    if (!/inventory|vehicles|cars|searchnew|searchused|for-sale|showroom|new|used|pre-owned|certified/.test(href.toLowerCase())) continue
-    if (/specials|finance|service|parts|lease|offers|about|contact|blog|review|trade|appraisal|credit|tire|saved|favorite|compare|research|detail|vdp/.test(href.toLowerCase()) || /^(saved|view[_ ]details|details|compare)$/i.test(t)) continue
-    var key = href.split('#')[0]
-    if (seen[key]) continue
-    seen[key] = 1
-    out.push({ label: t, href: key, kind: kind })
+    // "New" / "Used" alone must still point at an inventory-looking page.
+    var inv = /inventory|vehicles|cars|trucks|suv|showroom|search|for-sale|pre-?owned|used|certified|cpo|new/.test(tl + ' ' + hl)
+    if (!inv) continue
+    var inNav = !!a.closest('nav, header, [role="navigation"], [class*="nav"], [class*="menu"], [class*="header"], [id*="nav"], [id*="menu"], [id*="header"]')
+    var score = (inNav ? 4 : 0) + (/inventory|vehicles/.test(tl) ? 3 : 0) + (/^(view|see|shop|browse|search)\\b/.test(tl) ? 1 : 0) - (/\\b(trucks?|vans?|suvs?|sedans?|coupes?|hybrid|electric|ev)\\b/.test(tl) && !/inventory/.test(tl) ? 2 : 0)
+    if (seen[key]) { if (score > seen[key].score) { seen[key].score = score; seen[key].label = t; seen[key].kind = kind } continue }
+    seen[key] = { label: t, href: key, kind: kind, score: score }
+    out.push(seen[key])
   }
   var rank = { used: 0, certified: 1, new: 2, all: 3 }
-  out.sort(function (a, b) { return rank[a.kind] - rank[b.kind] || a.label.length - b.label.length })
+  out.sort(function (a, b) { return b.score - a.score || rank[a.kind] - rank[b.kind] || a.label.length - b.label.length })
   var byKind = {}, res = []
-  for (var j = 0; j < out.length; j++) { var k = out[j].kind; byKind[k] = (byKind[k] || 0) + 1; if (byKind[k] <= 2) res.push(out[j]) }
-  return res.slice(0, 6)
+  for (var j = 0; j < out.length; j++) { var k = out[j].kind; byKind[k] = (byKind[k] || 0) + 1; if (byKind[k] <= 2 && res.length < 6) res.push({ label: out[j].label, href: out[j].href, kind: out[j].kind }) }
+  res.sort(function (a, b) { return rank[a.kind] - rank[b.kind] })
+  return res
 })()`
 
 /**
@@ -261,6 +272,55 @@ export const FIND_NEXT_JS = `(() => {
   if (next) return result(next, 'Next page')
   if (more) return result(more, 'Load more')
   return null
+})()`
+
+/**
+ * Clickable areas for the snapshot: every visible link with its position on the page (document
+ * pixels), so the popup can turn a screenshot into a "click to open that page" map. Also a fuller
+ * list of the site's pages (menu links, including ones hidden in drop-down menus) for a Pages menu.
+ */
+export const HOTSPOTS_JS = (maxHeight: number) => `(() => {
+  var MAXH = ${Math.max(900, Math.round(maxHeight))}
+  var sy = window.scrollY || 0, sx = window.scrollX || 0
+  var spots = [], pages = [], seenPage = {}
+  var host = location.hostname.replace(/^www\\./, '')
+  var as = Array.prototype.slice.call(document.querySelectorAll('a[href]'))
+  function text(a) { return (a.innerText || a.textContent || a.getAttribute('aria-label') || a.getAttribute('title') || (a.querySelector('img') && a.querySelector('img').alt) || '').replace(/\\s+/g, ' ').trim() }
+  for (var i = 0; i < as.length; i++) {
+    var a = as[i]
+    var href = a.href || ''
+    if (!/^https?:/.test(href) || /^javascript:/i.test(a.getAttribute('href') || '')) continue
+    var t = text(a)
+    var key = href.split('#')[0]
+    // Site pages (visible or not): same site only, skip obvious non-page links.
+    var h = ''
+    try { h = new URL(href).hostname.replace(/^www\\./, '') } catch (e) { h = '' }
+    if (h && (h === host || h.endsWith('.' + host) || host.endsWith('.' + h)) && t && t.length <= 48 && !seenPage[key] && pages.length < 120 && !/\\.(jpg|jpeg|png|gif|pdf|webp)(\\?|$)/i.test(key) && !/^(tel|mailto|sms):/i.test(href) && !/(facebook|twitter|instagram|youtube|linkedin|tiktok)\\./i.test(h)) {
+      seenPage[key] = 1
+      var s = (t + ' ' + key).toLowerCase()
+      var kind = /certified|cpo/.test(s) ? 'certified' : /pre-?owned|used/.test(s) ? 'used' : /\\bnew\\b|\\/new-|new-vehicles|new-inventory/.test(s) ? 'new' : /inventory|vehicles|showroom|search/.test(s) ? 'all' : 'other'
+      var inNav = !!a.closest('nav, header, [role="navigation"], .navbar, .nav, .menu, #menu, .header, [class*="nav"], [class*="menu"], [class*="header"]')
+      pages.push({ label: t, href: key, kind: kind, nav: inNav })
+    }
+    // Hotspots: visible, inside the captured area.
+    var rects = a.getClientRects()
+    if (!rects || !rects.length) continue
+    var cs = window.getComputedStyle(a)
+    if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) === 0) continue
+    for (var r = 0; r < rects.length && spots.length < 600; r++) {
+      var b = rects[r]
+      if (b.width < 6 || b.height < 6) continue
+      var y = b.top + sy, x = b.left + sx
+      if (y > MAXH || y + b.height < 0 || x + b.width < 0) continue
+      spots.push({ x: Math.round(x), y: Math.round(y), w: Math.round(b.width), h: Math.round(b.height), href: key, label: t.slice(0, 80) })
+    }
+  }
+  // Larger boxes first so small inner links sit on top in the overlay.
+  spots.sort(function (a, b) { return (b.w * b.h) - (a.w * a.h) })
+  var rank = { used: 0, certified: 1, new: 2, all: 3, other: 4 }
+  function weak(p) { return /special|why|value|skip|offer|deal|trade|finance|research/i.test(p.label + ' ' + p.href) ? 1 : 0 }
+  pages.sort(function (a, b) { return rank[a.kind] - rank[b.kind] || weak(a) - weak(b) || Number(b.nav) - Number(a.nav) || a.label.length - b.label.length })
+  return { spots: spots, pages: pages }
 })()`
 
 /**

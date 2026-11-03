@@ -9,7 +9,14 @@ const props = defineProps<{
   src: string | null
   viewport: { width: number, height: number }
   dim?: boolean
+  /** Link areas on the snapshot (document pixels) — clicking one opens that page. */
+  hotspots?: { x: number, y: number, w: number, h: number, href: string, label: string }[]
+  /** Natural size of the snapshot image (document pixels). */
+  pageSize?: { width: number, height: number }
+  clickable?: boolean
 }>()
+const emit = defineEmits<{ navigate: [href: string], hover: [href: string | null] }>()
+const pct = (n: number, of: number) => `${(n / Math.max(1, of)) * 100}%`
 
 const wrap = ref<HTMLDivElement | null>(null)
 const scroller = ref<HTMLDivElement | null>(null)
@@ -35,11 +42,27 @@ defineExpose({ scrollToTop: () => scroller.value?.scrollTo({ top: 0, behavior: '
 </script>
 
 <template>
-  <div ref="wrap" class="scanner-viewport relative size-full flex items-start justify-center overflow-hidden select-none" :class="mode === 'live' && 'items-center'">
+  <div ref="wrap" class="scanner-viewport relative size-full flex items-start justify-center overflow-hidden select-none" :class="mode === 'live' && 'items-center'" @mouseleave="emit('hover', null)">
     <!-- Full-page snapshot -->
     <div v-if="mode === 'page'" class="relative h-full rounded-md overflow-hidden ring-1 ring-white/10 bg-white shadow-[0_30px_80px_-20px_rgba(0,0,0,0.6)]" :style="{ width: `${pageW}px` }">
       <div ref="scroller" class="size-full overflow-y-auto overscroll-contain [scrollbar-width:thin]">
-        <img v-if="src" :src="src" alt="Snapshot of the dealer website" class="block w-full h-auto pointer-events-none transition-opacity duration-300" :class="dim && 'opacity-40'" draggable="false">
+        <div class="relative">
+          <img v-if="src" :src="src" alt="Snapshot of the dealer website" class="block w-full h-auto pointer-events-none transition-opacity duration-300" :class="dim && 'opacity-40'" draggable="false">
+          <!-- Click map: every link on the page, placed exactly where it is on the snapshot -->
+          <template v-if="src && clickable && pageSize && hotspots?.length">
+            <a
+              v-for="(h, i) in hotspots"
+              :key="i"
+              :href="h.href"
+              :title="h.label ? `${h.label} — ${h.href}` : h.href"
+              class="absolute block rounded-sm outline-none ring-emerald-500 hover:ring-2 hover:bg-emerald-400/15 focus-visible:ring-2 cursor-pointer"
+              :style="{ left: pct(h.x, pageSize.width), top: pct(h.y, pageSize.height), width: pct(h.w, pageSize.width), height: pct(h.h, pageSize.height) }"
+              @click.prevent="emit('navigate', h.href)"
+              @mouseenter="emit('hover', h.href)"
+              @mouseleave="emit('hover', null)"
+            />
+          </template>
+        </div>
       </div>
       <slot name="overlay" />
     </div>

@@ -23,7 +23,7 @@ import type { SessionActor } from './crm'
 import { CRM_COLLECTIONS, str } from './crm'
 import { isServerless, openBrowser, SCANNER_VIEWPORT } from './scanner-cdp'
 import type { BrowserHandle, CdpConnection } from './scanner-cdp'
-import { ANALYZE_FN_JS, EXTRACT_JS, FIND_NEXT_JS, NAV_LINKS_JS, SCANNER_BOOTSTRAP_JS, SCROLL_STEP_JS } from './scanner-page'
+import { ANALYZE_FN_JS, EXTRACT_JS, FIND_NEXT_JS, HOTSPOTS_JS, NAV_LINKS_JS, SCANNER_BOOTSTRAP_JS, SCROLL_STEP_JS } from './scanner-page'
 import { classify, downloadImage, finalVerdict, listRules, RULES_COLLECTION, summarize, VERDICT_LABEL } from './scanner-images'
 import type { ImageCluster, ImageInfo, PhotoVerdict, ScanVehicle } from './scanner-images'
 
@@ -160,6 +160,8 @@ export async function previewSite(db: Db, dealershipId: string, urlInput: string
       shot = await t.conn.send('Page.captureScreenshot', { format: 'jpeg', quality: 45, captureBeyondViewport: true, clip: { x: 0, y: 0, width: SCANNER_VIEWPORT.width, height, scale: 1 } }, t.sid, 30_000)
     }
     const finalUrl = (await evaluate<string>(t, 'location.href').catch(() => '')) || t.url || url
+    // Link positions → the snapshot becomes clickable; menu links → a Pages list.
+    const hot = await evaluate<{ spots: any[], pages: any[] }>(t, HOTSPOTS_JS(height), 15_000).catch(() => ({ spots: [], pages: [] }))
     return {
       url: finalUrl,
       title: String(title || ''),
@@ -168,6 +170,8 @@ export async function previewSite(db: Db, dealershipId: string, urlInput: string
       height,
       pageHeight: fullH,
       navLinks: Array.isArray(navLinks) ? navLinks : [],
+      hotspots: Array.isArray(hot?.spots) ? hot.spots : [],
+      pages: Array.isArray(hot?.pages) ? hot.pages : [],
       detected: { cards: cards?.cards?.length || 0, advertised: cards?.total || null, strategy: cards?.strategy || null },
     }
   }
@@ -230,7 +234,42 @@ export async function getScan(db: Db, id: string) {
   if (!ObjectId.isValid(id)) throw createError({ statusCode: 400, statusMessage: 'Invalid scan' })
   const doc = await db.collection<ScanDoc>(SCANS_COLLECTION).findOne({ _id: new ObjectId(id) as any })
   if (!doc || doc.scannerVersion !== ENGINE_VERSION) throw createError({ statusCode: 404, statusMessage: 'Scan not found' })
-  return doc as ScanDoc
+  return finalizeIfInterrupted(db, doc as ScanDoc)
+}
+
+/**
+ * A scan whose server process was cut off (deploy, time limit, crash) still has the vehicles it
+ * collected. Turn it into a usable "stopped" result: photos it did not get to are judged by their
+ * web address and card text only.
+ */
+async function finalizeIfInterrupted(db: Db, doc: ScanDoc) {
+  if (statusOf(doc) !== 'interrupted') return doc
+  const now = new Date().toISOString()
+  if (!doc.vehicles?.length) {
+    doc.status = 'failed'
+    doc.error = doc.error || 'The scan was cut off before it found any vehicles'
+    Object.assign(doc.progress, { phase: 'error', message: doc.error, finishedAt: now })
+    await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { status: 'failed', error: doc.error, progress: doc.progress } }).catch(() => {})
+    return doc
+  }
+  doc.images = doc.images || []
+  doc.clusters = doc.clusters || []
+  // Give every vehicle an image entry (no download) so URL / text rules can run.
+  const byUrl = new Map(doc.images.map(i => [i.url, i]))
+  for (const v of doc.vehicles) {
+    const u = v.image?.url
+    if (!u) continue
+    let i = byUrl.get(u)
+    if (!i) { i = { id: `i${doc.images.length + 1}`, url: u, ok: false, error: 'Not checked (scan was cut off)' }; doc.images.push(i); byUrl.set(u, i) }
+    v.imageId = i.id
+  }
+  await reclassify(db, doc)
+  const sum = summarize(doc.vehicles, doc.clusters, { countStockAsMissing: doc.countStockAsMissing })
+  doc.status = 'stopped'
+  doc.log = [...(doc.log || []), { at: now, text: 'The server cut this scan off — keeping the vehicles found so far; photos judged by address and text only' }].slice(-60)
+  Object.assign(doc.progress, { phase: 'stopped', message: `Cut off early — ${sum.total} vehicles · ${sum.withoutReal} without a real photo (${sum.withoutRealPct ?? 0}%)`, finishedAt: now })
+  await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { status: 'stopped', progress: doc.progress, log: doc.log, vehicles: doc.vehicles, images: doc.images, clusters: doc.clusters, heartbeatAt: now } }).catch(() => {})
+  return doc
 }
 
 const hasResults = (doc: ScanDoc) => ['done', 'stopped', 'saved'].includes(doc.status) && doc.vehicles.length > 0
@@ -243,7 +282,7 @@ export function scanPayload(doc: ScanDoc) {
 /** Most recent scan for a dealership (running or finished). */
 export async function latestScan(db: Db, dealershipId: string) {
   const doc = await db.collection<ScanDoc>(SCANS_COLLECTION).find({ dealershipId, scannerVersion: ENGINE_VERSION }).sort({ createdAt: -1 }).limit(1).next()
-  return doc ? scanPayload(doc as ScanDoc) : { scan: null, results: null }
+  return doc ? scanPayload(await finalizeIfInterrupted(db, doc as ScanDoc)) : { scan: null, results: null }
 }
 
 export async function requestStop(db: Db, id: string) {
@@ -319,7 +358,8 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     if (!force && Date.now() - lastPersist < 3000) return
     lastPersist = Date.now()
     try {
-      const r = await col.findOneAndUpdate({ _id: doc._id }, { $set: { progress: doc.progress, log: doc.log.slice(-60), heartbeatAt: new Date().toISOString() } }, { projection: { stopRequested: 1 }, returnDocument: 'after' })
+      // Vehicles go with every heartbeat, so a scan cut off by the server keeps what it found.
+      const r = await col.findOneAndUpdate({ _id: doc._id }, { $set: { progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, heartbeatAt: new Date().toISOString() } }, { projection: { stopRequested: 1 }, returnDocument: 'after' })
       if ((r as any)?.stopRequested && !stop) { stop = true; log('Stopping — checking the photos found so far…') }
     } catch {}
   }
@@ -341,17 +381,17 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     // Live view: a small frame every ~2.5 s while collecting (non-interactive), capped in total size.
     let frameBytes = 0
     let framing = false
-    const FRAME_CAP = 2_500_000
+    const FRAME_CAP = 4_000_000
     frameTimer = setInterval(async () => {
       if (framing || frameBytes > FRAME_CAP || doc.progress.phase !== 'collecting' || opts.isClosed()) return
       framing = true
       try {
-        const shot = await tab.conn.send('Page.captureScreenshot', { format: 'jpeg', quality: 45, clip: { x: 0, y: 0, width: SCANNER_VIEWPORT.width, height: SCANNER_VIEWPORT.height, scale: 2 / 3 }, fromSurface: true }, tab.sid, 8000)
+        const shot = await tab.conn.send('Page.captureScreenshot', { format: 'jpeg', quality: 40 }, tab.sid, 8000)
         frameBytes += shot.data.length
         emit('frame', { data: shot.data, w: SCANNER_VIEWPORT.width, h: SCANNER_VIEWPORT.height, ts: Date.now() })
       } catch {}
       framing = false
-    }, 2500)
+    }, 3000)
 
     log(`Opening ${doc.startUrl.replace(/^https?:\/\//, '')}`)
     setProgress({ message: 'Loading the inventory page…' })

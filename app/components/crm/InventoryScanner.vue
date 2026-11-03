@@ -4,7 +4,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { VERDICT_META } from '~/composables/useInventoryScanner'
 import {
   ScanSearch, X, ArrowLeft, ArrowRight, RotateCw, Lock, Globe, ChevronDown, Loader2, Square, MonitorPlay, LayoutGrid, CheckCircle2,
-  AlertTriangle, Car, Images, ScanLine, Save, PlusSquare, ExternalLink, Cloud, FileStack, Sparkles, History, Eye, CircleSlash,
+  AlertTriangle, Car, Images, ScanLine, Save, PlusSquare, ExternalLink, Cloud, FileStack, Sparkles, History, Eye, CircleSlash, MousePointerClick, List, Search,
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
@@ -88,12 +88,16 @@ async function cont(opts: { allPages?: boolean, append?: boolean } = {}) {
   tab.value = 'site'
   try {
     await sc.run(props.dealership.id, { url: preview.value?.url || undefined, allPages: opts.allPages !== false, appendTo: opts.append ? results.value?.scanId : null })
-    if (error.value) toast.error(error.value)
-    else if (results.value) { tab.value = 'results'; toast.success('Scan complete', { description: `${results.value.summary.total} vehicles · ${results.value.summary.withoutReal} without a real photo (${results.value.summary.withoutRealPct ?? 0}%)` }) }
+    if (!open.value) return
+    if (results.value) {
+      tab.value = 'results'
+      const cut = scan.value?.status === 'stopped' && /cut off/i.test(progress.value?.message || '')
+      toast[cut ? 'warning' : 'success'](cut ? 'Scan was cut off — showing what it found' : 'Scan complete', { description: `${results.value.summary.total} vehicles · ${results.value.summary.withoutReal} without a real photo (${results.value.summary.withoutRealPct ?? 0}%)` })
+    }
+    else if (error.value) toast.error(error.value)
+    else toast.error(progress.value?.message || 'The scan ended without results')
   } catch (e: any) { toast.error(e?.message || 'Could not start the scan') }
 }
-// A scan that finished while we were polling (stream dropped / started in another window).
-watch(() => scan.value?.status, (s, prev) => { if (prev === 'running' && (s === 'done' || s === 'stopped') && results.value && open.value) tab.value = 'results' })
 async function stop() { await sc.stop(); toast('Stopping…', { description: 'The photos found so far are still checked and kept.' }) }
 
 const saving = ref(false)
@@ -135,6 +139,19 @@ const lastLog = computed(() => log.value[log.value.length - 1]?.text || '')
 const kindIcon = (k: string) => k === 'used' || k === 'certified' ? Car : k === 'new' ? Sparkles : Globe
 const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(new Date(iso), { addSuffix: true }) : '' } catch { return '' } }
 
+const hoverHref = ref<string | null>(null)
+const pageQuery = ref('')
+const PAGE_KIND_LABEL: Record<string, string> = { used: 'Pre-owned / used', certified: 'Certified', new: 'New', all: 'All inventory', other: 'Other pages' }
+const pageGroups = computed(() => {
+  const q = pageQuery.value.trim().toLowerCase()
+  const list = (preview.value?.pages || []).filter(p => !q || `${p.label} ${p.href}`.toLowerCase().includes(q))
+  const groups: { kind: string, label: string, items: typeof list }[] = []
+  for (const kind of ['used', 'certified', 'new', 'all', 'other']) {
+    const items = list.filter(p => p.kind === kind).slice(0, kind === 'other' ? 40 : 12)
+    if (items.length) groups.push({ kind, label: PAGE_KIND_LABEL[kind]!, items })
+  }
+  return groups
+})
 const liveSrc = computed(() => frame.value ? `data:image/jpeg;base64,${frame.value.data}` : null)
 const viewMode = computed<'page' | 'live'>(() => scanning.value && liveSrc.value ? 'live' : 'page')
 const viewSrc = computed(() => viewMode.value === 'live' ? liveSrc.value : preview.value?.screenshot || null)
@@ -190,9 +207,22 @@ const engineLabel = computed(() => engine.value === 'serverless' ? 'Cloud Chrome
               <div v-if="previewing" class="absolute left-3 right-3 bottom-0 h-0.5 overflow-hidden rounded-full"><div class="h-full w-1/3 bg-primary animate-[scanner-load_1.1s_ease-in-out_infinite]" /></div>
             </div>
           </form>
-          <div class="hidden xl:flex items-center gap-1 max-w-[34%] overflow-hidden">
+          <div class="hidden xl:flex items-center gap-1 max-w-[30%] overflow-hidden">
             <button v-for="l in preview?.navLinks || []" :key="l.href" type="button" class="shrink-0 rounded-full border bg-background px-2.5 h-7 text-[11px] font-medium inline-flex items-center gap-1 hover:bg-muted disabled:opacity-50" :class="preview?.url === l.href && 'border-primary text-primary'" :disabled="scanning || previewing" :title="l.href" @click="show(l.href)"><component :is="kindIcon(l.kind)" class="size-3" /> {{ l.label }}</button>
           </div>
+          <DropdownMenu v-if="preview?.pages?.length" @update:open="(o: boolean) => { if (!o) pageQuery = '' }">
+            <DropdownMenuTrigger as-child><Button variant="outline" class="h-8 gap-1.5 text-xs" :disabled="scanning || previewing" title="Every page linked from this site's menus"><List class="size-3.5" /> Pages <span class="text-muted-foreground tabular-nums">{{ preview.pages.length }}</span></Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-80 p-0">
+              <div class="p-2 border-b"><div class="relative"><Search class="size-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><Input v-model="pageQuery" placeholder="Find a page…" class="h-8 pl-8 text-xs" @keydown.stop /></div></div>
+              <div class="max-h-[60vh] overflow-y-auto py-1">
+                <template v-for="g in pageGroups" :key="g.kind">
+                  <DropdownMenuLabel class="text-[10px] uppercase tracking-wider text-muted-foreground">{{ g.label }}</DropdownMenuLabel>
+                  <DropdownMenuItem v-for="pg in g.items" :key="pg.href" class="text-xs gap-2" :title="pg.href" @click="show(pg.href)"><component :is="kindIcon(pg.kind)" class="size-3.5 text-muted-foreground shrink-0" /><span class="truncate">{{ pg.label }}</span><span class="ml-auto text-[10px] text-muted-foreground truncate max-w-28">{{ pg.href.replace(/^https?:\/\/[^/]+/, '') || '/' }}</span></DropdownMenuItem>
+                </template>
+                <p v-if="!pageGroups.length" class="px-3 py-6 text-xs text-muted-foreground text-center">No page matches.</p>
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <span v-if="scanning" class="hidden lg:inline-flex items-center gap-1.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 px-2 h-7 text-[11px] font-semibold"><span class="relative flex size-2"><span class="absolute inline-flex size-full rounded-full bg-red-500 opacity-60 animate-ping" /><span class="relative inline-flex size-2 rounded-full bg-red-500" /></span> SCANNING</span>
           <span v-else-if="previewing" class="hidden lg:inline-flex items-center gap-1.5 rounded-full bg-muted text-muted-foreground px-2 h-7 text-[11px] font-medium"><Loader2 class="size-3 animate-spin" /> Opening…</span>
           <span v-else-if="detected && detected.cards" class="hidden lg:inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 px-2 h-7 text-[11px] font-semibold tabular-nums" title="Vehicle cards the scanner can see on this page"><Car class="size-3.5" /> {{ detected.cards }} on this page<template v-if="detected.advertised"> · {{ detected.advertised }} in stock</template></span>
@@ -239,7 +269,7 @@ const engineLabel = computed(() => engine.value === 'serverless' ? 'Cloud Chrome
 
           <!-- Website -->
           <div v-if="phase === 'ready' && preview" v-show="tab === 'site'" class="absolute inset-0 p-3 bg-[radial-gradient(ellipse_at_top,#27272a,#09090b)]">
-            <CrmScannerViewport :mode="viewMode" :src="viewSrc" :viewport="{ width: 1440, height: 900 }" :dim="previewing">
+            <CrmScannerViewport :mode="viewMode" :src="viewSrc" :viewport="{ width: 1440, height: 900 }" :dim="previewing" :hotspots="preview?.hotspots" :page-size="preview ? { width: preview.width, height: preview.height } : undefined" :clickable="!scanning && !previewing" @navigate="show($event)" @hover="hoverHref = $event">
               <template #overlay>
                 <div v-if="previewing" class="absolute inset-0 flex items-start justify-center pt-24 pointer-events-none">
                   <div class="rounded-full bg-black/75 text-white text-xs px-4 py-2 backdrop-blur shadow-lg flex items-center gap-2"><Loader2 class="size-4 animate-spin" /> Opening the page…</div>
@@ -253,9 +283,9 @@ const engineLabel = computed(() => engine.value === 'serverless' ? 'Cloud Chrome
 
               <!-- Coach mark -->
               <div v-if="!scanning && !previewing" class="absolute top-3 left-1/2 -translate-x-1/2 max-w-[92%] rounded-full bg-black/75 text-white text-xs px-4 py-2 backdrop-blur shadow-lg flex items-center gap-2">
-                <Eye class="size-4 text-red-400 shrink-0" />
+                <MousePointerClick class="size-4 text-red-400 shrink-0" />
                 <span v-if="detected?.cards">Looks good — <b>{{ detected.cards }} vehicles</b> on this page. Scroll to check, then press <b class="text-red-300">Continue</b>.</span>
-                <span v-else>Pick the <b>inventory list</b> — {{ (preview?.navLinks || []).length ? 'use the shortcuts above' : 'paste its address above' }} — then press <b class="text-red-300">Continue</b>.</span>
+                <span v-else>Click the <b>inventory menu</b> on the page below{{ (preview?.navLinks || []).length ? ', use a shortcut' : '' }}, or open <b>Pages</b> — then press <b class="text-red-300">Continue</b>.</span>
               </div>
               <!-- Last scan -->
               <div v-if="lastScan && !scanning && !previewing" class="absolute top-14 left-1/2 -translate-x-1/2 max-w-[92%] rounded-xl border border-white/10 bg-zinc-950/85 text-white text-xs pl-3 pr-1.5 py-1.5 backdrop-blur shadow-lg flex items-center gap-2.5">
@@ -320,7 +350,8 @@ const engineLabel = computed(() => engine.value === 'serverless' ? 'Cloud Chrome
         <!-- Status bar -->
         <div v-if="phase === 'ready'" class="shrink-0 h-6 px-3 border-t bg-muted/40 text-[10px] text-muted-foreground flex items-center gap-3">
           <span class="truncate">{{ preview?.title || shownUrl }}</span>
-          <span v-if="preview && !scanning" class="hidden md:inline shrink-0">· snapshot of the page (scroll to look around) — the scan itself browses every page for you</span>
+          <span v-if="hoverHref" class="truncate text-foreground">→ {{ hoverHref }}</span>
+          <span v-else-if="preview && !scanning" class="hidden md:inline shrink-0">· links on the page are clickable — the scan itself browses every inventory page for you</span>
           <a v-if="preview?.url" :href="preview.url" target="_blank" rel="noopener" class="ml-auto inline-flex items-center gap-1 hover:text-foreground shrink-0">Open in my browser <ExternalLink class="size-3" /></a>
         </div>
       </DialogContent>

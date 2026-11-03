@@ -12,7 +12,9 @@ export interface ScannerProgress { phase: 'collecting' | 'analyzing' | 'done' | 
 export type ScanStatus = 'running' | 'done' | 'stopped' | 'failed' | 'saved' | 'interrupted'
 export interface ScanMeta { id: string, dealershipId: string, status: ScanStatus, startUrl: string, allPages: boolean, progress: ScannerProgress, log: { at: string, text: string }[], error: string | null, auditId: string | null, createdAt: string, createdBy: { id: string, name: string }, savedAt: string | null, vehicles: number }
 export interface NavLink { label: string, href: string, kind: string }
-export interface PagePreview { url: string, title: string, screenshot: string, width: number, height: number, pageHeight: number, navLinks: NavLink[], detected: { cards: number, advertised: number | null, strategy: string | null } }
+export interface Hotspot { x: number, y: number, w: number, h: number, href: string, label: string }
+export interface SitePage { label: string, href: string, kind: string, nav: boolean }
+export interface PagePreview { url: string, title: string, screenshot: string, width: number, height: number, pageHeight: number, navLinks: NavLink[], hotspots: Hotspot[], pages: SitePage[], detected: { cards: number, advertised: number | null, strategy: string | null } }
 export interface ScannedVehicle {
   key: string
   title: string
@@ -117,16 +119,22 @@ export function useInventoryScanner() {
     return p
   }
 
-  /** Poll a stored scan until it finishes (a scan started elsewhere, or after the stream dropped). */
-  function watchStored(id: string) {
+  /** Poll a stored scan until it finishes (a scan started elsewhere, or after the stream dropped). Resolves when done. */
+  function watchStored(id: string): Promise<void> {
     stopPolling()
     running.value = true
-    poll = setInterval(async () => {
-      try {
-        const p = await refresh(id)
-        if (p && p.scan.status !== 'running') { stopPolling(); running.value = false }
-      } catch { /* keep trying */ }
-    }, 3000)
+    return new Promise((resolve) => {
+      let failures = 0
+      poll = setInterval(async () => {
+        if (disposed) { stopPolling(); running.value = false; resolve(); return }
+        try {
+          const p = await refresh(id)
+          failures = 0
+          if (p && p.scan.status !== 'running') { stopPolling(); running.value = false; resolve() }
+        }
+        catch { if (++failures > 20) { stopPolling(); running.value = false; error.value = 'Lost contact with the server — reopen the scanner to see the last scan'; resolve() } }
+      }, 3000)
+    })
   }
   function stopPolling() { if (poll) clearInterval(poll); poll = null }
 
@@ -194,9 +202,11 @@ export function useInventoryScanner() {
     }
     finally { clearInterval(watchdog) }
     if (!scanId || disposed) { running.value = false; return }
-    // Load the stored scan (results, final progress). If the stream dropped mid-scan, keep polling.
-    const p = await refresh(scanId).catch(() => null)
-    if (p?.scan.status === 'running' && !finished) { watchStored(scanId); return }
+    // Load the stored scan (results, final progress). If the stream dropped mid-scan, poll until it ends.
+    let p = await refresh(scanId).catch(() => null)
+    if (!p) { for (let i = 0; i < 5 && !p; i++) { await new Promise(r => setTimeout(r, 2000)); p = await refresh(scanId).catch(() => null) } }
+    if (p?.scan.status === 'running' && !finished) await watchStored(scanId)
+    else if (!p) error.value = error.value || 'The scan finished but its results could not be loaded — reopen the scanner to see them'
     running.value = false
   }
 
