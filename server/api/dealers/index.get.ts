@@ -95,7 +95,17 @@ export default defineEventHandler(async (event) => {
           ),
           createdAt: doc.createdAt?.toISOString() || doc._id.getTimestamp().toISOString(),
           updatedAt: doc.updatedAt?.toISOString() || doc._id.getTimestamp().toISOString(),
-          notes: doc.notes || ''
+          notes: doc.notes || '',
+          DuplicateStock: !!doc.DuplicateStock,
+          crmDealershipId: doc.crmDealershipId || '',
+          crmDealershipCode: doc.crmDealershipCode || '',
+          leadSource: doc.leadSource || '',
+          dealerGroup: doc.dealerGroup || '',
+          brands: Array.isArray(doc.brands) ? doc.brands : [],
+          website: doc.website || '',
+          territory: doc.territory || '',
+          assignedUserName: doc.assignedUserName || '',
+          convertedFromCrmAt: doc.convertedFromCrmAt ? new Date(doc.convertedFromCrmAt).toISOString() : '',
         }
       }),
       meta: {

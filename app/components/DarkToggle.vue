@@ -1,12 +1,13 @@
 <script setup lang="ts">
 const color = useColorMode()
+const isDark = computed(() => color.value === 'dark')
 </script>
 
 <template>
   <DropdownMenu>
     <DropdownMenuTrigger as-child>
       <Button variant="ghost" size="icon" title="Toggle Color Scheme" aria-label="button dark toggle">
-        <div class="i-ph-sun-dim-duotone dark:i-ph-moon-stars-duotone" />
+        <Icon :name="isDark ? 'i-lucide-moon-star' : 'i-lucide-sun'" size="18" />
       </Button>
     </DropdownMenuTrigger>
     <DropdownMenuContent>
@@ -16,7 +17,7 @@ const color = useColorMode()
           :class="{ 'bg-accent text-accent-foreground': color.preference === 'light' }"
           @click="color.preference = 'light'"
         >
-          <Icon name="i-ph-sun-dim-duotone" size="16" />
+          <Icon name="i-lucide-sun" size="16" />
           <span>Light</span>
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -24,7 +25,7 @@ const color = useColorMode()
           :class="{ 'bg-accent text-accent-foreground': color.preference === 'dark' }"
           @click="color.preference = 'dark'"
         >
-          <Icon name="i-ph-moon-stars-duotone" size="16" />
+          <Icon name="i-lucide-moon-star" size="16" />
           <span>Dark</span>
         </DropdownMenuItem>
         <DropdownMenuItem

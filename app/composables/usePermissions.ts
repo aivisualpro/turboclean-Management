@@ -9,10 +9,17 @@ export function usePermissions() {
 
   // Check if a workspace has a specific module enabled
   // If user has NO workspace assigned (empty permissions), show everything (Admin default)
+  // Admins always see everything, regardless of workspace configuration.
+  const isAdminRole = computed(() => user.value?.role === 'Admin')
+
   function isModuleEnabled(moduleId: string): boolean {
     const perms = permissions.value
     // No workspace assigned → show all
     if (!perms || Object.keys(perms).length === 0) return true
+    if (isAdminRole.value) return true
+    // Module added after this workspace was last saved (key absent) → visible
+    // until an admin explicitly configures it in Workspaces & Permissions.
+    if (!(moduleId in perms)) return true
     return perms[moduleId]?.enabled === true
   }
 
@@ -20,6 +27,8 @@ export function usePermissions() {
   function isTabEnabled(moduleId: string, tabName: string): boolean {
     const perms = permissions.value
     if (!perms || Object.keys(perms).length === 0) return true
+    if (isAdminRole.value) return true
+    if (!(moduleId in perms)) return true
     if (!perms[moduleId]?.enabled) return false
     // If no tabs defined, all tabs are allowed
     if (!perms[moduleId]?.tabs || perms[moduleId]?.tabs.length === 0) return true
@@ -34,7 +43,20 @@ export function usePermissions() {
     'Dealers': 'dealers',
     'Work Orders': 'work_orders',
     'Invoices': 'invoices',
-    'Tasks': 'tasks',
+    'Dealership': 'crm_dealership',
+    'Pipeline': 'crm_dealership',
+    'Today': 'crm_dealership',
+    'Email': 'crm_dealership',
+    'Lost deals': 'crm_dealership',
+    'Won deals': 'crm_dealership',
+    'Time & ROI': 'crm_dealership',
+    'CRM Dashboard': 'crm_dealership',
+    'Analytics': 'crm_dealership',
+    'Data quality': 'crm_dealership',
+    'Automation Center': 'automations',
+    'Approval Queue': 'automations',
+    'Priorities': 'automations',
+    'Insights': 'automations',
     'Workspaces': '_settings', // always visible
     'General Settings': 'general_settings',
   }
@@ -46,7 +68,8 @@ export function usePermissions() {
     { id: 'dealers', route: '/dealers' },
     { id: 'work_orders', route: '/sales/work-orders' },
     { id: 'invoices', route: '/sales/invoices' },
-    { id: 'tasks', route: '/tasks' },
+    { id: 'crm_dealership', route: '/crm/dealership' },
+    { id: 'automations', route: '/automations' },
     { id: 'general_settings', route: '/settings/general' },
   ]
 
@@ -88,6 +111,8 @@ export function usePermissions() {
     const perms = permissions.value
     // No workspace → all actions allowed (admin default)
     if (!perms || Object.keys(perms).length === 0) return true
+    if (isAdminRole.value) return true
+    if (!(moduleId in perms)) return true
     // Module not enabled → no actions allowed
     if (!perms[moduleId]?.enabled) return false
     // If no tabs defined → all actions allowed

@@ -4,7 +4,7 @@ import {
   Plus, Search, Download, Upload, FileDown, FileUp, Trash2,
   Building2, MapPin, Phone, Mail, Users, CheckCircle2, Clock,
   XCircle, PhoneForwarded, ArrowUpRight, Briefcase, TrendingUp,
-  LayoutGrid, LayoutList, ShieldCheck,
+  LayoutGrid, LayoutList, ShieldCheck, Trophy,
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { formatDistanceToNow } from 'date-fns'
@@ -189,10 +189,12 @@ function handleEdit(dealer: Dealer) {
   showForm.value = true
 }
 
+const deleteTarget = ref<Dealer | null>(null)
+const showDelete = ref(false)
 function handleDelete(id: string) {
-  deleteDealer(id)
+  deleteTarget.value = dealers.value.find(d => d.id === id) || null
+  showDelete.value = !!deleteTarget.value
   selectedDealer.value = undefined
-  toast.success('Dealer deleted')
 }
 
 function handleStatusChange(id: string, status: DealerStatus) {
@@ -358,7 +360,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
 </script>
 
 <template>
-  <div class="-m-4 lg:-m-6 h-[calc(100dvh-54px-3rem)]">
+  <div class="absolute inset-0">
     <TooltipProvider :delay-duration="0">
       <div class="h-full flex flex-col overflow-hidden">
         <!-- Header Actions Teleported -->
@@ -424,7 +426,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
 
         <!-- Main Content Area -->
         <div class="flex-1 overflow-auto">
-          <div class="p-4 lg:p-6 space-y-6">
+          <div class="p-2 space-y-6">
 
             <!-- ═══════════════ STAT CARDS ═══════════════ -->
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -569,6 +571,12 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
                         <Briefcase class="size-2.5" />
                         {{ d.services.length }} service{{ d.services.length !== 1 ? 's' : '' }}
                       </Badge>
+
+                      <!-- Won via CRM -->
+                      <Badge v-if="d.crmDealershipCode" variant="outline" class="text-[10px] px-2 py-0.5 gap-1 whitespace-nowrap bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20" :title="`Won via CRM · ${d.leadSource || 'lead source unknown'}`">
+                        <Trophy class="size-2.5" />
+                        Won via CRM
+                      </Badge>
                     </div>
 
                     <!-- Row 2: Contacts -->
@@ -709,6 +717,7 @@ const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', c
 
     <!-- Dialogs -->
     <DealersDealerForm v-model:open="showForm" :dealer="editingDealer" @saved="selectedDealer = undefined" />
+    <DealersDeleteDialog v-model:open="showDelete" :dealer="deleteTarget" />
     <DealersDealerImport v-model:open="showImportDealers" />
     <DealersDealerServicesImport v-model:open="showImportServices" />
   </div>

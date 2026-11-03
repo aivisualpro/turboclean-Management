@@ -68,7 +68,7 @@ async function saveSettings() {
 </script>
 
 <template>
-  <div class="h-full flex flex-col p-4 sm:p-6 sm:max-w-4xl mx-auto w-full">
+  <div class="h-full flex flex-col p-2 sm:max-w-4xl mx-auto w-full">
     <div v-if="loading" class="flex-1 flex items-center justify-center">
       <Loader2 class="size-6 animate-spin text-primary" />
     </div>

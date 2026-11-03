@@ -57,10 +57,37 @@ const totalServices = computed(() => props.dealer.services?.length || 0)
 const totalServiceValue = computed(() => props.dealer.services?.reduce((sum, s) => sum + (s.total || 0), 0) || 0)
 const contactCount = computed(() => props.dealer.contacts?.length || 0)
 const primaryContact = computed(() => props.dealer.contacts?.[0] || null)
+const wonViaCrm = computed(() => !!props.dealer.crmDealershipCode)
+const fmtDateTime = (d?: string) => d ? new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'
 </script>
 
 <template>
   <div class="h-full overflow-auto">
+    <!-- CRM origin — shown only for dealers won through CRM › Dealership -->
+    <div v-if="wonViaCrm" class="mb-4 relative overflow-hidden rounded-xl border border-emerald-500/25 bg-emerald-500/[0.05]">
+      <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_left,theme(colors.emerald.500/12),transparent_55%)]" />
+      <div class="relative px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="size-9 rounded-lg bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center shrink-0"><Icon name="i-lucide-trophy" class="size-4 text-emerald-600 dark:text-emerald-400" /></div>
+          <div class="min-w-0">
+            <p class="text-sm font-semibold text-emerald-800 dark:text-emerald-300">Won via CRM</p>
+            <p class="text-[11px] text-emerald-900/70 dark:text-emerald-200/70">Promoted {{ fmtDateTime(dealer.convertedFromCrmAt) }}</p>
+          </div>
+        </div>
+        <dl class="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs">
+          <div><dt class="text-[10px] uppercase tracking-wider text-muted-foreground">CRM record</dt><dd class="font-mono font-medium">{{ dealer.crmDealershipCode }}</dd></div>
+          <div v-if="dealer.leadSource"><dt class="text-[10px] uppercase tracking-wider text-muted-foreground">Lead source</dt><dd class="font-medium">{{ dealer.leadSource }}</dd></div>
+          <div v-if="dealer.dealerGroup"><dt class="text-[10px] uppercase tracking-wider text-muted-foreground">Dealer group</dt><dd class="font-medium">{{ dealer.dealerGroup }}</dd></div>
+          <div v-if="dealer.brands?.length"><dt class="text-[10px] uppercase tracking-wider text-muted-foreground">Brands</dt><dd class="font-medium">{{ dealer.brands.join(', ') }}</dd></div>
+          <div v-if="dealer.territory"><dt class="text-[10px] uppercase tracking-wider text-muted-foreground">Territory</dt><dd class="font-medium">{{ dealer.territory }}</dd></div>
+          <div v-if="dealer.assignedUserName"><dt class="text-[10px] uppercase tracking-wider text-muted-foreground">Won by</dt><dd class="font-medium">{{ dealer.assignedUserName }}</dd></div>
+        </dl>
+        <Button variant="outline" size="sm" class="h-8 gap-1.5 ml-auto bg-background" @click="navigateTo(`/crm/dealership/${dealer.crmDealershipId}`)">
+          <Icon name="i-lucide-history" class="size-3.5" /> Sales history
+        </Button>
+      </div>
+    </div>
+
     <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
       <!-- General Info Card -->
       <div class="border rounded-xl bg-card shadow-sm overflow-hidden">

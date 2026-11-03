@@ -223,3 +223,244 @@ button,
 [type="button"] {
   @apply cursor-pointer;
 }
+
+/* Boxes (cards and bordered card surfaces): 2px border in the selected theme colour.
+   Unlayered on purpose so it wins over per-box border utilities everywhere. */
+[data-slot="card"],
+.bg-card.border {
+  border-width: 2px;
+  border-color: var(--primary);
+}
+
+/* ───────── Spacing: every container padding is 8px, on every route ─────────
+   Unlayered so it wins over the padding utilities (10–32px) used in pages, cards, dialogs and tables.
+   Controls (buttons, inputs, select triggers, badges) keep their own padding; large empty-state
+   spacing (py-10 and up) and explicit 0 paddings are untouched. */
+:is(.p-2\.5, .p-3, .p-3\.5, .p-4, .p-5, .p-6, .p-7, .p-8, .sm\:p-2\.5, .sm\:p-3, .sm\:p-3\.5, .sm\:p-4, .sm\:p-5, .sm\:p-6, .sm\:p-7, .sm\:p-8, .md\:p-2\.5, .md\:p-3, .md\:p-3\.5, .md\:p-4, .md\:p-5, .md\:p-6, .md\:p-7, .md\:p-8, .lg\:p-2\.5, .lg\:p-3, .lg\:p-3\.5, .lg\:p-4, .lg\:p-5, .lg\:p-6, .lg\:p-7, .lg\:p-8, .xl\:p-2\.5, .xl\:p-3, .xl\:p-3\.5, .xl\:p-4, .xl\:p-5, .xl\:p-6, .xl\:p-7, .xl\:p-8, .\32 xl\:p-2\.5, .\32 xl\:p-3, .\32 xl\:p-3\.5, .\32 xl\:p-4, .\32 xl\:p-5, .\32 xl\:p-6, .\32 xl\:p-7, .\32 xl\:p-8):not(button, input, textarea, select, a, [data-slot="button"], [data-slot="badge"], [data-slot="input"], [data-slot$="trigger"]) {
+  padding: 8px;
+}
+:is(.px-2\.5, .px-3, .px-3\.5, .px-4, .px-5, .px-6, .px-7, .px-8, .sm\:px-2\.5, .sm\:px-3, .sm\:px-3\.5, .sm\:px-4, .sm\:px-5, .sm\:px-6, .sm\:px-7, .sm\:px-8, .md\:px-2\.5, .md\:px-3, .md\:px-3\.5, .md\:px-4, .md\:px-5, .md\:px-6, .md\:px-7, .md\:px-8, .lg\:px-2\.5, .lg\:px-3, .lg\:px-3\.5, .lg\:px-4, .lg\:px-5, .lg\:px-6, .lg\:px-7, .lg\:px-8, .xl\:px-2\.5, .xl\:px-3, .xl\:px-3\.5, .xl\:px-4, .xl\:px-5, .xl\:px-6, .xl\:px-7, .xl\:px-8, .\32 xl\:px-2\.5, .\32 xl\:px-3, .\32 xl\:px-3\.5, .\32 xl\:px-4, .\32 xl\:px-5, .\32 xl\:px-6, .\32 xl\:px-7, .\32 xl\:px-8):not(button, input, textarea, select, a, [data-slot="button"], [data-slot="badge"], [data-slot="input"], [data-slot$="trigger"]) {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+:is(.py-2\.5, .py-3, .py-3\.5, .py-4, .py-5, .py-6, .py-7, .py-8, .sm\:py-2\.5, .sm\:py-3, .sm\:py-3\.5, .sm\:py-4, .sm\:py-5, .sm\:py-6, .sm\:py-7, .sm\:py-8, .md\:py-2\.5, .md\:py-3, .md\:py-3\.5, .md\:py-4, .md\:py-5, .md\:py-6, .md\:py-7, .md\:py-8, .lg\:py-2\.5, .lg\:py-3, .lg\:py-3\.5, .lg\:py-4, .lg\:py-5, .lg\:py-6, .lg\:py-7, .lg\:py-8, .xl\:py-2\.5, .xl\:py-3, .xl\:py-3\.5, .xl\:py-4, .xl\:py-5, .xl\:py-6, .xl\:py-7, .xl\:py-8, .\32 xl\:py-2\.5, .\32 xl\:py-3, .\32 xl\:py-3\.5, .\32 xl\:py-4, .\32 xl\:py-5, .\32 xl\:py-6, .\32 xl\:py-7, .\32 xl\:py-8):not(button, input, textarea, select, a, [data-slot="button"], [data-slot="badge"], [data-slot="input"], [data-slot$="trigger"]) {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+:is(.pt-2\.5, .pt-3, .pt-3\.5, .pt-4, .pt-5, .pt-6, .pt-7, .pt-8, .sm\:pt-2\.5, .sm\:pt-3, .sm\:pt-3\.5, .sm\:pt-4, .sm\:pt-5, .sm\:pt-6, .sm\:pt-7, .sm\:pt-8, .md\:pt-2\.5, .md\:pt-3, .md\:pt-3\.5, .md\:pt-4, .md\:pt-5, .md\:pt-6, .md\:pt-7, .md\:pt-8, .lg\:pt-2\.5, .lg\:pt-3, .lg\:pt-3\.5, .lg\:pt-4, .lg\:pt-5, .lg\:pt-6, .lg\:pt-7, .lg\:pt-8, .xl\:pt-2\.5, .xl\:pt-3, .xl\:pt-3\.5, .xl\:pt-4, .xl\:pt-5, .xl\:pt-6, .xl\:pt-7, .xl\:pt-8, .\32 xl\:pt-2\.5, .\32 xl\:pt-3, .\32 xl\:pt-3\.5, .\32 xl\:pt-4, .\32 xl\:pt-5, .\32 xl\:pt-6, .\32 xl\:pt-7, .\32 xl\:pt-8):not(button, input, textarea, select, a, [data-slot="button"], [data-slot="badge"], [data-slot="input"], [data-slot$="trigger"]) {
+  padding-top: 8px;
+}
+:is(.pb-2\.5, .pb-3, .pb-3\.5, .pb-4, .pb-5, .pb-6, .pb-7, .pb-8, .sm\:pb-2\.5, .sm\:pb-3, .sm\:pb-3\.5, .sm\:pb-4, .sm\:pb-5, .sm\:pb-6, .sm\:pb-7, .sm\:pb-8, .md\:pb-2\.5, .md\:pb-3, .md\:pb-3\.5, .md\:pb-4, .md\:pb-5, .md\:pb-6, .md\:pb-7, .md\:pb-8, .lg\:pb-2\.5, .lg\:pb-3, .lg\:pb-3\.5, .lg\:pb-4, .lg\:pb-5, .lg\:pb-6, .lg\:pb-7, .lg\:pb-8, .xl\:pb-2\.5, .xl\:pb-3, .xl\:pb-3\.5, .xl\:pb-4, .xl\:pb-5, .xl\:pb-6, .xl\:pb-7, .xl\:pb-8, .\32 xl\:pb-2\.5, .\32 xl\:pb-3, .\32 xl\:pb-3\.5, .\32 xl\:pb-4, .\32 xl\:pb-5, .\32 xl\:pb-6, .\32 xl\:pb-7, .\32 xl\:pb-8):not(button, input, textarea, select, a, [data-slot="button"], [data-slot="badge"], [data-slot="input"], [data-slot$="trigger"]) {
+  padding-bottom: 8px;
+}
+:is(.pl-2\.5, .pl-3, .pl-3\.5, .pl-4, .pl-5, .pl-6, .pl-7, .pl-8, .sm\:pl-2\.5, .sm\:pl-3, .sm\:pl-3\.5, .sm\:pl-4, .sm\:pl-5, .sm\:pl-6, .sm\:pl-7, .sm\:pl-8, .md\:pl-2\.5, .md\:pl-3, .md\:pl-3\.5, .md\:pl-4, .md\:pl-5, .md\:pl-6, .md\:pl-7, .md\:pl-8, .lg\:pl-2\.5, .lg\:pl-3, .lg\:pl-3\.5, .lg\:pl-4, .lg\:pl-5, .lg\:pl-6, .lg\:pl-7, .lg\:pl-8, .xl\:pl-2\.5, .xl\:pl-3, .xl\:pl-3\.5, .xl\:pl-4, .xl\:pl-5, .xl\:pl-6, .xl\:pl-7, .xl\:pl-8, .\32 xl\:pl-2\.5, .\32 xl\:pl-3, .\32 xl\:pl-3\.5, .\32 xl\:pl-4, .\32 xl\:pl-5, .\32 xl\:pl-6, .\32 xl\:pl-7, .\32 xl\:pl-8):not(button, input, textarea, select, a, [data-slot="button"], [data-slot="badge"], [data-slot="input"], [data-slot$="trigger"]) {
+  padding-left: 8px;
+}
+:is(.pr-2\.5, .pr-3, .pr-3\.5, .pr-4, .pr-5, .pr-6, .pr-7, .pr-8, .sm\:pr-2\.5, .sm\:pr-3, .sm\:pr-3\.5, .sm\:pr-4, .sm\:pr-5, .sm\:pr-6, .sm\:pr-7, .sm\:pr-8, .md\:pr-2\.5, .md\:pr-3, .md\:pr-3\.5, .md\:pr-4, .md\:pr-5, .md\:pr-6, .md\:pr-7, .md\:pr-8, .lg\:pr-2\.5, .lg\:pr-3, .lg\:pr-3\.5, .lg\:pr-4, .lg\:pr-5, .lg\:pr-6, .lg\:pr-7, .lg\:pr-8, .xl\:pr-2\.5, .xl\:pr-3, .xl\:pr-3\.5, .xl\:pr-4, .xl\:pr-5, .xl\:pr-6, .xl\:pr-7, .xl\:pr-8, .\32 xl\:pr-2\.5, .\32 xl\:pr-3, .\32 xl\:pr-3\.5, .\32 xl\:pr-4, .\32 xl\:pr-5, .\32 xl\:pr-6, .\32 xl\:pr-7, .\32 xl\:pr-8):not(button, input, textarea, select, a, [data-slot="button"], [data-slot="badge"], [data-slot="input"], [data-slot$="trigger"]) {
+  padding-right: 8px;
+}
+@media (width >= 40rem) {
+  .sm\:p-0 {
+    padding: 0;
+  }
+  .sm\:px-0 {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .sm\:py-0 {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  .sm\:pt-0 {
+    padding-top: 0;
+  }
+  .sm\:pb-0 {
+    padding-bottom: 0;
+  }
+  .sm\:pl-0 {
+    padding-left: 0;
+  }
+  .sm\:pr-0 {
+    padding-right: 0;
+  }
+}
+@media (width >= 48rem) {
+  .md\:p-0 {
+    padding: 0;
+  }
+  .md\:px-0 {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .md\:py-0 {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  .md\:pt-0 {
+    padding-top: 0;
+  }
+  .md\:pb-0 {
+    padding-bottom: 0;
+  }
+  .md\:pl-0 {
+    padding-left: 0;
+  }
+  .md\:pr-0 {
+    padding-right: 0;
+  }
+}
+@media (width >= 64rem) {
+  .lg\:p-0 {
+    padding: 0;
+  }
+  .lg\:px-0 {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .lg\:py-0 {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  .lg\:pt-0 {
+    padding-top: 0;
+  }
+  .lg\:pb-0 {
+    padding-bottom: 0;
+  }
+  .lg\:pl-0 {
+    padding-left: 0;
+  }
+  .lg\:pr-0 {
+    padding-right: 0;
+  }
+}
+@media (width >= 80rem) {
+  .xl\:p-0 {
+    padding: 0;
+  }
+  .xl\:px-0 {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .xl\:py-0 {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  .xl\:pt-0 {
+    padding-top: 0;
+  }
+  .xl\:pb-0 {
+    padding-bottom: 0;
+  }
+  .xl\:pl-0 {
+    padding-left: 0;
+  }
+  .xl\:pr-0 {
+    padding-right: 0;
+  }
+}
+@media (width >= 96rem) {
+  .\32 xl\:p-0 {
+    padding: 0;
+  }
+  .\32 xl\:px-0 {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .\32 xl\:py-0 {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  .\32 xl\:pt-0 {
+    padding-top: 0;
+  }
+  .\32 xl\:pb-0 {
+    padding-bottom: 0;
+  }
+  .\32 xl\:pl-0 {
+    padding-left: 0;
+  }
+  .\32 xl\:pr-0 {
+    padding-right: 0;
+  }
+}
+
+/* ───────── App shell: boxed sidebar + boxed main area, theme-coloured ─────────
+   Sidebar and main content are separate rounded boxes with a 2px border in the theme colour,
+   8px apart and 8px from the window edge. The page header is a tinted bar inside the main box. */
+[data-slot="sidebar-wrapper"] {
+  background: var(--background);
+}
+[data-slot="sidebar"] > .fixed {
+  padding: 8px;
+  border: 0;
+}
+[data-sidebar="sidebar"] {
+  background: var(--background);
+  border: 2px solid var(--primary);
+  border-radius: 0.75rem;
+  box-shadow: none;
+  overflow: hidden;
+}
+[data-slot="sidebar-inset"] {
+  margin: 8px;
+  height: calc(100svh - 16px);
+  border: 2px solid var(--primary);
+  border-radius: 0.75rem;
+  box-shadow: none;
+  overflow: hidden;
+}
+@media (width >= 48rem) {
+  /* sidebar visible (expanded or icon rail): its own 8px padding is the gap */
+  .peer[data-slot="sidebar"]:not([data-collapsible="offcanvas"]) ~ [data-slot="sidebar-inset"] {
+    margin-left: 0;
+  }
+}
+.app-header {
+  background: color-mix(in oklab, var(--primary) 26%, var(--background));
+  border: 0;
+}
+
+/* Active sidebar item: solid theme colour */
+[data-sidebar="menu-button"][data-active="true"],
+[data-sidebar="menu-button"][data-active="true"]:hover,
+[data-sidebar="menu-sub-button"][data-active="true"],
+[data-sidebar="menu-sub-button"][data-active="true"]:hover {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  box-shadow: none;
+  border-color: transparent;
+}
+
+/* Tabs / segmented switchers: boxed in the theme colour, active tab solid theme colour */
+[data-slot="tabs-list"],
+:is(.bg-muted\/40, .bg-muted\/50, .bg-muted\/60):has(> button.bg-background, > [role="tab"]) {
+  background: var(--background);
+  border: 2px solid var(--primary);
+}
+[data-slot="tabs-trigger"][data-state="active"],
+[role="tab"][aria-selected="true"],
+:is(.bg-muted\/40, .bg-muted\/50, .bg-muted\/60) > button.bg-background {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  box-shadow: none;
+}
+
+/* ───────── Spacing: every gap between boxes / items is 8px, on every route ───────── */
+:is(.gap-3, .gap-3\.5, .gap-4, .gap-5, .gap-6, .gap-7, .gap-8, .gap-10, .sm\:gap-3, .sm\:gap-3\.5, .sm\:gap-4, .sm\:gap-5, .sm\:gap-6, .sm\:gap-7, .sm\:gap-8, .sm\:gap-10, .md\:gap-3, .md\:gap-3\.5, .md\:gap-4, .md\:gap-5, .md\:gap-6, .md\:gap-7, .md\:gap-8, .md\:gap-10, .lg\:gap-3, .lg\:gap-3\.5, .lg\:gap-4, .lg\:gap-5, .lg\:gap-6, .lg\:gap-7, .lg\:gap-8, .lg\:gap-10, .xl\:gap-3, .xl\:gap-3\.5, .xl\:gap-4, .xl\:gap-5, .xl\:gap-6, .xl\:gap-7, .xl\:gap-8, .xl\:gap-10, .\32 xl\:gap-3, .\32 xl\:gap-3\.5, .\32 xl\:gap-4, .\32 xl\:gap-5, .\32 xl\:gap-6, .\32 xl\:gap-7, .\32 xl\:gap-8, .\32 xl\:gap-10):not(button, input, textarea, select, a, [data-slot="button"], [data-slot="badge"], [data-slot$="trigger"]) {
+  gap: 8px;
+}
+:is(.gap-x-3, .gap-x-3\.5, .gap-x-4, .gap-x-5, .gap-x-6, .gap-x-7, .gap-x-8, .gap-x-10, .sm\:gap-x-3, .sm\:gap-x-3\.5, .sm\:gap-x-4, .sm\:gap-x-5, .sm\:gap-x-6, .sm\:gap-x-7, .sm\:gap-x-8, .sm\:gap-x-10, .md\:gap-x-3, .md\:gap-x-3\.5, .md\:gap-x-4, .md\:gap-x-5, .md\:gap-x-6, .md\:gap-x-7, .md\:gap-x-8, .md\:gap-x-10, .lg\:gap-x-3, .lg\:gap-x-3\.5, .lg\:gap-x-4, .lg\:gap-x-5, .lg\:gap-x-6, .lg\:gap-x-7, .lg\:gap-x-8, .lg\:gap-x-10, .xl\:gap-x-3, .xl\:gap-x-3\.5, .xl\:gap-x-4, .xl\:gap-x-5, .xl\:gap-x-6, .xl\:gap-x-7, .xl\:gap-x-8, .xl\:gap-x-10, .\32 xl\:gap-x-3, .\32 xl\:gap-x-3\.5, .\32 xl\:gap-x-4, .\32 xl\:gap-x-5, .\32 xl\:gap-x-6, .\32 xl\:gap-x-7, .\32 xl\:gap-x-8, .\32 xl\:gap-x-10):not(button, input, textarea, select, a, [data-slot="button"], [data-slot="badge"], [data-slot$="trigger"]) {
+  column-gap: 8px;
+}
+:is(.gap-y-3, .gap-y-3\.5, .gap-y-4, .gap-y-5, .gap-y-6, .gap-y-7, .gap-y-8, .gap-y-10, .sm\:gap-y-3, .sm\:gap-y-3\.5, .sm\:gap-y-4, .sm\:gap-y-5, .sm\:gap-y-6, .sm\:gap-y-7, .sm\:gap-y-8, .sm\:gap-y-10, .md\:gap-y-3, .md\:gap-y-3\.5, .md\:gap-y-4, .md\:gap-y-5, .md\:gap-y-6, .md\:gap-y-7, .md\:gap-y-8, .md\:gap-y-10, .lg\:gap-y-3, .lg\:gap-y-3\.5, .lg\:gap-y-4, .lg\:gap-y-5, .lg\:gap-y-6, .lg\:gap-y-7, .lg\:gap-y-8, .lg\:gap-y-10, .xl\:gap-y-3, .xl\:gap-y-3\.5, .xl\:gap-y-4, .xl\:gap-y-5, .xl\:gap-y-6, .xl\:gap-y-7, .xl\:gap-y-8, .xl\:gap-y-10, .\32 xl\:gap-y-3, .\32 xl\:gap-y-3\.5, .\32 xl\:gap-y-4, .\32 xl\:gap-y-5, .\32 xl\:gap-y-6, .\32 xl\:gap-y-7, .\32 xl\:gap-y-8, .\32 xl\:gap-y-10):not(button, input, textarea, select, a, [data-slot="button"], [data-slot="badge"], [data-slot$="trigger"]) {
+  row-gap: 8px;
+}
+:is(.space-y-3, .space-y-3\.5, .space-y-4, .space-y-5, .space-y-6, .space-y-7, .space-y-8, .space-y-10, .sm\:space-y-3, .sm\:space-y-3\.5, .sm\:space-y-4, .sm\:space-y-5, .sm\:space-y-6, .sm\:space-y-7, .sm\:space-y-8, .sm\:space-y-10, .md\:space-y-3, .md\:space-y-3\.5, .md\:space-y-4, .md\:space-y-5, .md\:space-y-6, .md\:space-y-7, .md\:space-y-8, .md\:space-y-10, .lg\:space-y-3, .lg\:space-y-3\.5, .lg\:space-y-4, .lg\:space-y-5, .lg\:space-y-6, .lg\:space-y-7, .lg\:space-y-8, .lg\:space-y-10, .xl\:space-y-3, .xl\:space-y-3\.5, .xl\:space-y-4, .xl\:space-y-5, .xl\:space-y-6, .xl\:space-y-7, .xl\:space-y-8, .xl\:space-y-10, .\32 xl\:space-y-3, .\32 xl\:space-y-3\.5, .\32 xl\:space-y-4, .\32 xl\:space-y-5, .\32 xl\:space-y-6, .\32 xl\:space-y-7, .\32 xl\:space-y-8, .\32 xl\:space-y-10) > :not(:last-child) {
+  margin-block-start: 0;
+  margin-block-end: 8px;
+}
+:is(.space-x-3, .space-x-3\.5, .space-x-4, .space-x-5, .space-x-6, .space-x-7, .space-x-8, .space-x-10, .sm\:space-x-3, .sm\:space-x-3\.5, .sm\:space-x-4, .sm\:space-x-5, .sm\:space-x-6, .sm\:space-x-7, .sm\:space-x-8, .sm\:space-x-10, .md\:space-x-3, .md\:space-x-3\.5, .md\:space-x-4, .md\:space-x-5, .md\:space-x-6, .md\:space-x-7, .md\:space-x-8, .md\:space-x-10, .lg\:space-x-3, .lg\:space-x-3\.5, .lg\:space-x-4, .lg\:space-x-5, .lg\:space-x-6, .lg\:space-x-7, .lg\:space-x-8, .lg\:space-x-10, .xl\:space-x-3, .xl\:space-x-3\.5, .xl\:space-x-4, .xl\:space-x-5, .xl\:space-x-6, .xl\:space-x-7, .xl\:space-x-8, .xl\:space-x-10, .\32 xl\:space-x-3, .\32 xl\:space-x-3\.5, .\32 xl\:space-x-4, .\32 xl\:space-x-5, .\32 xl\:space-x-6, .\32 xl\:space-x-7, .\32 xl\:space-x-8, .\32 xl\:space-x-10) > :not(:last-child) {
+  margin-inline-start: 0;
+  margin-inline-end: 8px;
+}

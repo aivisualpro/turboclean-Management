@@ -5,7 +5,6 @@ const routeToModule: { prefix: string; moduleId: string }[] = [
   { prefix: '/dealers', moduleId: 'dealers' },
   { prefix: '/sales/work-orders', moduleId: 'work_orders' },
   { prefix: '/sales/invoices', moduleId: 'invoices' },
-  { prefix: '/tasks', moduleId: 'tasks' },
 ]
 
 function getModuleForRoute(path: string): string | null {

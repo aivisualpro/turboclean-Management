@@ -64,7 +64,7 @@ function handleDelete() {
 </script>
 
 <template>
-  <div class="-m-4 lg:-m-6 h-[calc(100dvh-54px-3rem)]">
+  <div class="absolute inset-0">
     <div class="h-full flex flex-col bg-background/50 border rounded-xl overflow-hidden backdrop-blur supports-[backdrop-filter]:bg-background/50">
       
       <div class="h-full flex flex-col relative overflow-hidden">

@@ -81,7 +81,7 @@ const colorMode = useColorMode()
           :class="{ '!border-primary border-2 !bg-primary/10': colorMode.preference === 'light' }"
           @click="colorMode.preference = 'light'"
         >
-          <Icon name="i-ph-sun-dim-duotone" size="16" />
+          <Icon name="i-lucide-sun" size="16" />
           <span class="text-xs capitalize">Light</span>
         </Button>
         <Button
@@ -90,7 +90,7 @@ const colorMode = useColorMode()
           :class="{ '!border-primary border-2 !bg-primary/10': colorMode.preference === 'dark' }"
           @click="colorMode.preference = 'dark'"
         >
-          <Icon name="i-ph-moon-stars-duotone" size="16" />
+          <Icon name="i-lucide-moon-star" size="16" />
           <span class="text-xs capitalize">Dark</span>
         </Button>
         <Button

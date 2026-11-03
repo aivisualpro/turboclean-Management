@@ -16,27 +16,31 @@ const fallbackTitle = computed(() => {
 })
 
 const displayTitle = computed(() => headerState.title || fallbackTitle.value)
+
+// CRM time tracker — available on every page for anyone with CRM access.
+const { isModuleEnabled } = usePermissions()
+const { user } = useAuth()
+const showTimer = computed(() => !!user.value && isModuleEnabled('crm_dealership'))
 </script>
 
 <template>
-  <header class="sticky top-0 md:peer-data-[variant=inset]:top-2 z-10 h-(--header-height) flex items-center gap-4 border-b bg-background px-4 md:px-6 md:rounded-tl-xl md:rounded-tr-xl">
-    <div class="flex items-center gap-4 min-w-0">
+  <header class="app-header sticky top-0 z-10 h-11 shrink-0 m-2 mb-0 flex items-center gap-3 rounded-lg px-2">
+    <div class="flex items-center gap-3 min-w-0">
       <SidebarTrigger />
       <Separator orientation="vertical" class="h-4" />
       <div class="flex items-center gap-2.5 min-w-0">
         <Icon v-if="headerState.icon" :name="headerState.icon" class="size-5 shrink-0 text-primary" />
-        <div class="min-w-0">
-          <h1 class="text-sm font-semibold leading-tight truncate">
-            {{ displayTitle }}
-          </h1>
-          <p v-if="headerState.description" class="text-xs text-muted-foreground leading-tight truncate hidden md:block">
-            {{ headerState.description }}
-          </p>
-        </div>
+        <!-- Title only: route descriptions are never shown in the header. -->
+        <h1 class="text-lg font-semibold leading-none truncate">
+          {{ displayTitle }}
+        </h1>
       </div>
     </div>
     <div id="page-header-actions" class="ml-auto flex items-center gap-2">
       <slot />
     </div>
+    <ClientOnly>
+      <CrmTimer v-if="showTimer" />
+    </ClientOnly>
   </header>
 </template>

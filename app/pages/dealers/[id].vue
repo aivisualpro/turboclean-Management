@@ -101,11 +101,12 @@ function handleEdit() {
   }
 }
 
+const showDelete = ref(false)
 function handleDelete() {
-  if (dealer.value) {
-    deleteDealer(dealer.value.id)
-    navigateTo('/dealers')
-  }
+  if (dealer.value) showDelete.value = true
+}
+function onDeleted() {
+  navigateTo('/dealers')
 }
 
 function handleStatusChange(status: DealerStatus) {
@@ -237,5 +238,6 @@ const canDelete = computed(() => isActionAllowed('dealers', 'Delete'))
 
     <!-- Edit Dialog -->
     <DealersDealerForm v-model:open="showForm" :dealer="editingDealer" />
+    <DealersDeleteDialog v-model:open="showDelete" :dealer="dealer" @deleted="onDeleted" />
   </div>
 </template>

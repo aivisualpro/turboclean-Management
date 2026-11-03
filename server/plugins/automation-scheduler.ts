@@ -51,6 +51,30 @@ export default defineNitroPlugin(() => {
         console.error('[Automation Scheduler] Invoice automations tick failed:', e?.message)
       }
 
+      // ── CRM daily backup (once per day, claim-based) ──
+      try {
+        const { db } = await connectToDatabase()
+        const { runDailyBackup } = await import('../utils/crm-dataquality')
+        const b = await runDailyBackup(db)
+        if (b) console.log(`[Automation Scheduler] CRM daily backup saved (${Math.round(b.bytes / 1024)} KB)`)
+      }
+      catch (e: any) {
+        console.error('[Automation Scheduler] CRM backup failed:', e?.message)
+      }
+
+      // ── CRM Automations (Automations menu): replies, sending, research, drafts, follow-ups, scoring, strategy ──
+      if (process.env.CRM_AUTOMATIONS_DISABLED !== '1') {
+        try {
+          const db = await (await import('../utils/crm')).getCrmDb()
+          const { runDueAutomations } = await import('../utils/automation')
+          const ran = await runDueAutomations(db)
+          for (const r of ran) console.log(`[Automation Scheduler] CRM ${r.key} → ${r.status}: ${r.summary}`)
+        }
+        catch (e: any) {
+          console.error('[Automation Scheduler] CRM automations tick failed:', e?.message)
+        }
+      }
+
       // ── Monthly automations (existing self-gating endpoint) ──
       try {
         const res: any = await (globalThis as any).$fetch('/api/cron/process-monthly')

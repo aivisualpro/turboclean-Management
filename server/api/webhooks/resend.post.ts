@@ -1,11 +1,32 @@
 import { connectToDatabase } from '../../utils/mongodb'
 import { Resend } from 'resend'
 
+import { applyEmailEvent, ingestInboundEmail, verifyResendSignature } from '../../utils/crm-email'
+
+/**
+ * Resend webhook.
+ *  - email.sent / delivered / delivery_delayed / bounced / complained / opened / clicked
+ *      → CRM email tracking (ignored when the message is not a CRM email)
+ *  - email.received
+ *      → CRM reply tracking first (reply+<id>@, In-Reply-To, sender = emailed contact);
+ *        anything that is not CRM mail keeps the original invoice-mailbox handling below.
+ * Set RESEND_WEBHOOK_SECRET to enforce Svix signature verification.
+ */
 export default defineEventHandler(async (event) => {
   try {
-    const payload = await readBody(event)
+    const raw = (await readRawBody(event, 'utf8')) || ''
+    const headers = getHeaders(event) as Record<string, string | undefined>
+    if (!(await verifyResendSignature(headers, raw))) {
+      setResponseStatus(event, 401)
+      return { success: false, error: 'Invalid signature' }
+    }
+    const payload = raw ? JSON.parse(raw) : {}
 
-    // Check if it's an email received event
+    if (payload?.type && payload.type !== 'email.received') {
+      const { db } = await connectToDatabase()
+      const handled = await applyEmailEvent(db, payload)
+      return { success: true, message: handled ? 'CRM email event recorded' : 'Ignored event' }
+    }
     if (payload?.type !== 'email.received') {
       return { success: true, message: 'Ignored non-email event' }
     }
@@ -18,16 +39,30 @@ export default defineEventHandler(async (event) => {
     // 1. Fetch the full email from Resend API (webhook only sends metadata, not HTML body)
     let fetchedHtml = ''
     let fetchedText = ''
+    let fetchedHeaders: any = null
     if (emailData.email_id && process.env.RESEND_API_KEY) {
       try {
-        const fullEmail = await resend.emails.get(emailData.email_id)
-        if (fullEmail.data) {
+        const api: any = resend.emails
+        const fullEmail = api.receiving?.get ? await api.receiving.get(emailData.email_id) : await resend.emails.get(emailData.email_id)
+        if (fullEmail?.data) {
           fetchedHtml = (fullEmail.data as any).html || ''
           fetchedText = (fullEmail.data as any).text || ''
+          fetchedHeaders = (fullEmail.data as any).headers || null
         }
       } catch (err) {
         console.error('[Webhook: Resend] Failed to fetch full email payload:', err)
       }
+    }
+
+    // 1b. CRM replies (acquisition emails) — stored in turboCleanCrmEmails and the dealership history.
+    try {
+      const crm = await ingestInboundEmail(db, payload, { html: fetchedHtml, text: fetchedText, headers: fetchedHeaders })
+      if (crm) {
+        console.log(`[Webhook: Resend] CRM reply stored (${crm.matchedBy || 'unmatched'})`)
+        return { success: true, message: 'CRM reply recorded' }
+      }
+    } catch (err) {
+      console.error('[Webhook: Resend] CRM reply handling failed:', err)
     }
 
     // 2. Parse sender / recipient

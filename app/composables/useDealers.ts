@@ -42,6 +42,17 @@ export interface Dealer {
   services?: DealerService[]
   createdAt: string
   updatedAt: string
+  notes?: string
+  /** CRM provenance — present when the dealer was won through CRM › Dealership */
+  crmDealershipId?: string
+  crmDealershipCode?: string
+  leadSource?: string
+  dealerGroup?: string
+  brands?: string[]
+  website?: string
+  territory?: string
+  assignedUserName?: string
+  convertedFromCrmAt?: string
 }
 
 const STORAGE_KEY = 'turbo-clean-dealers'
@@ -213,9 +224,20 @@ export function useDealers() {
     }
   }
 
-  function deleteDealer(id: string) {
-    // For now, optimistic delete, should add DELETE
+  /** Counts of records that block deletion (services, work orders, invoices). */
+  async function getDealerUsage(id: string) {
+    return await $fetch<{ services: number, workOrders: number, invoices: number, total: number, deletable: boolean }>(`/api/dealers/${id}/usage`)
+  }
+
+  /**
+   * Permanently deletes a dealer. The server refuses (409, `err.data.data.usage`)
+   * while services, work orders or invoices still reference it. A dealer won
+   * through CRM sends its CRM record back to the pipeline.
+   */
+  async function deleteDealer(id: string) {
+    const res = await $fetch<{ success: boolean, id: string, crm: { dealershipId: string, stage: string } | null }>(`/api/dealers/${id}`, { method: 'DELETE' })
     dealers.value = dealers.value.filter(d => d.id !== id)
+    return res
   }
 
   async function importDealers(newDealers: Omit<Dealer, 'id' | 'createdAt' | 'updatedAt'>[]) {
@@ -285,6 +307,7 @@ export function useDealers() {
     updateDealer,
     patchDealer,
     deleteDealer,
+    getDealerUsage,
     importDealers,
     importDealerServices,
     deleteAllDealerServices,

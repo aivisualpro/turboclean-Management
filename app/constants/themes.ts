@@ -39,5 +39,5 @@ export const THEME_COLORS = [
 
 export const THEME_TYPE = ['default', 'scaled', 'mono']
 
-export type ThemeColor = (typeof THEME_COLORS)[number]['value']
+export type ThemeColor = (typeof THEME_COLORS)[number]['name']
 export type ThemeType = (typeof THEME_TYPE)[number]

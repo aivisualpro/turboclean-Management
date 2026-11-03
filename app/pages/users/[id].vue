@@ -195,7 +195,7 @@ async function handleDelete() {
 </script>
 
 <template>
-  <div class="h-[calc(100dvh-54px-3rem)] overflow-auto -m-4 lg:-m-6 p-4 lg:p-6 bg-muted/20">
+  <div class="absolute inset-0 overflow-auto p-2 bg-muted/20">
     <div class="max-w-4xl mx-auto space-y-6">
       
       <!-- Teleport header actions -->
