@@ -61,6 +61,7 @@ export function buildAuditDoc(body: any, dealershipId: string, actor: any) {
         url: str(e?.url, 1000), label: str(e?.label, 200),
         // Optional detail from the Inventory Scanner (used by the email evidence block).
         ...(e?.title ? { title: str(e.title, 160), stock: str(e?.stock, 40), price: str(e?.price, 40), condition: str(e?.condition, 20), verdict: str(e?.verdict, 20) } : {}),
+        ...(e?.listUrl ? { listUrl: str(e.listUrl, 1000) } : {}),
       })).filter((e: any) => e.url).slice(0, 50)
     : []
   // Photo verdict breakdown from the Inventory Scanner (real / placeholder / no image / stock).
@@ -68,6 +69,14 @@ export function buildAuditDoc(body: any, dealershipId: string, actor: any) {
   const photoBreakdown = pb
     ? { real: int(pb.real) ?? 0, placeholder: int(pb.placeholder) ?? 0, missing: int(pb.missing) ?? 0, stock: int(pb.stock) ?? 0, countStockAsMissing: pb.countStockAsMissing !== false }
     : null
+  // Per crawl page (inventory list) — reports and emails group the findings by these.
+  const pages = Array.isArray(body.pages)
+    ? body.pages.map((p: any) => ({
+        url: str(p?.url, 1000), label: str(p?.label, 80), kind: str(p?.kind, 20),
+        total: int(p?.total) ?? 0, withoutReal: int(p?.withoutReal) ?? 0, withoutRealPct: typeof p?.withoutRealPct === 'number' ? p.withoutRealPct : null,
+        real: int(p?.real) ?? 0, placeholder: int(p?.placeholder) ?? 0, missing: int(p?.missing) ?? 0, stock: int(p?.stock) ?? 0,
+      })).filter((p: any) => p.url).slice(0, 30)
+    : []
 
   const source: AuditSource = AUDIT_SOURCES.includes(body.source) ? body.source : 'manual'
   const counts = { newTotal, usedTotal, newMissingPhotos, usedMissingPhotos }
@@ -87,6 +96,7 @@ export function buildAuditDoc(body: any, dealershipId: string, actor: any) {
     notes: str(body.notes, 6000),
     examples,
     photoBreakdown,
+    pages,
     // Evidence screenshot of the dealership's inventory page (turboCleanCrmFiles) — used by email templates as {{auditScreenshot}}.
     screenshotFileId: /^[a-f0-9]{24}$/i.test(String(body.screenshotFileId || '')) ? String(body.screenshotFileId) : null,
     // Provenance — ready for automated collectors to fill in.

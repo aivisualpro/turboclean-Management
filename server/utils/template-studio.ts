@@ -25,6 +25,8 @@ const FIELD_HELP: Record<string, string> = {
   auditBreakdown: 'HTML BLOCK: "What we found" card (placeholder / no image / stock counts)',
   usedPhotoBar: 'HTML BLOCK: green/red bar "with real photos vs without" for used inventory',
   newInventoryNote: 'HTML BLOCK: one sentence about new inventory gaps (renders nothing when none)',
+  inventoryByPage: 'HTML BLOCK: "Page by page" card — one row per inventory page (URL) we crawled with its vehicles, how many lack a real photo and a share bar (renders nothing when only one page was crawled). {{auditEvidence}} is automatically grouped by page too.',
+  inventoryPageCount: 'number of inventory pages crawled, e.g. "3" (empty for single-page reviews)', inventoryPageList: 'plain list "Pre-owned inventory (29 of 139), New inventory (12 of 334)"',
   prevAuditDate: 'date of the earlier review used for "then vs now" (closest to ~3 months before the latest)', prevUsedTotal: 'pre-owned listed back then', prevUsedMissingPhotos: 'pre-owned without real photo back then', prevUsedMissingPhotoPct: 'pre-owned % without real photo back then',
   prevTotalMissingPhotos: 'all listings without real photo back then', usedMissingChange: 'change in pre-owned without real photo, e.g. "+16" or "−5"', usedMissingPctChange: 'change in share, e.g. "+8.5 pts"',
   auditPeriod: 'time between the two reviews, e.g. "3 months"', trendWord: '"more" / "fewer" / "the same number of"',
@@ -62,7 +64,7 @@ NOTES: <one sentence: what you made or changed>
 
 # Data — merge fields (write them exactly; never invent other {{fields}})
 ${MERGE_FIELDS.map(f => `- {{${f}}}: ${FIELD_HELP[f] || f}`).join('\n')}
-Fallback syntax: {{field|fallback text}} (plain text fallback only). HTML BLOCK fields output complete cards — put each alone in its own <tr><td class="px" style="padding:…40px…">…</td></tr> row; they disappear when there is no data, so never write a heading for them yourself.
+Fallback syntax: {{field|fallback text}} (plain text fallback only). HTML BLOCK fields output complete cards — put each alone in its own <tr><td class="px" style="padding:…40px…">…</td></tr> row; they disappear when there is no data, so never write a heading for them yourself. Whenever the email presents inventory results, place {{inventoryByPage}} right after the headline numbers and before {{auditEvidence}} — dealers crawled on several pages (pre-owned, certified, new) then see results grouped by URL; for single-page reviews it simply disappears.
 
 # Writing
 - Honest, specific, calm confidence. No hype, no emojis, no exclamation marks, no fake urgency, no invented statistics, testimonials, prices or guarantees. Only claim numbers that come from merge fields.

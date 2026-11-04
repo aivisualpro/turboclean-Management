@@ -22,7 +22,7 @@
  */
 import { createHash, createHmac as createHmacNode } from 'node:crypto'
 import { ObjectId } from 'mongodb'
-import { auditBreakdown, auditEvidence, newInventoryNote, RAW_HTML_FIELDS, usedPhotoBar } from './crm-email-blocks'
+import { auditBreakdown, auditEvidence, auditPages, inventoryByPage, newInventoryNote, RAW_HTML_FIELDS, usedPhotoBar } from './crm-email-blocks'
 import { reportUrl as auditReportUrl, trendVars } from './crm-reports'
 import type { Db } from 'mongodb'
 import { Resend } from 'resend'
@@ -98,7 +98,7 @@ export const MERGE_FIELDS = [
   'totalVehicles', 'totalMissingPhotos', 'missingPhotoPct', 'inventoryUrl', 'auditScreenshot', 'replyMailto',
   // Inventory Scanner detail + ready-made HTML blocks (see crm-email-blocks.ts)
   'usedWithPhotos', 'placeholderImages', 'noImageCount', 'stockImages',
-  'auditEvidence', 'auditBreakdown', 'usedPhotoBar', 'newInventoryNote',
+  'auditEvidence', 'auditBreakdown', 'usedPhotoBar', 'newInventoryNote', 'inventoryByPage', 'inventoryPageCount', 'inventoryPageList',
   // Then vs now (vs the audit closest to ~3 months earlier) + public report link
   'prevAuditDate', 'prevUsedTotal', 'prevUsedMissingPhotos', 'prevUsedMissingPhotoPct', 'prevTotalMissingPhotos', 'usedMissingChange', 'usedMissingPctChange', 'auditPeriod', 'trendWord', 'auditTrend', 'reportUrl',
 ] as const
@@ -144,6 +144,10 @@ export function mergeVars(dealership: any, contact: any, sender: Partial<SenderP
     auditBreakdown: audit ? auditBreakdown(audit) : '',
     usedPhotoBar: audit ? usedPhotoBar(audit) : '',
     newInventoryNote: audit ? newInventoryNote(audit) : '',
+    // Grouped by crawl page (URL) — empty for single-page audits so templates can fall back.
+    inventoryByPage: audit ? inventoryByPage(audit) : '',
+    inventoryPageCount: audit && auditPages(audit).length ? String(auditPages(audit).length) : '',
+    inventoryPageList: audit ? auditPages(audit).map((pg: any) => `${pg.label || 'Inventory'} (${pg.withoutReal || 0} of ${pg.total})`).join(', ') : '',
     // Then vs now (latest audit vs the one ~3 months earlier) + the dealer's own report link.
     ...trendVars(audit, extra.history || (audit ? [audit] : [])),
     reportUrl: extra.reportUrl || '',

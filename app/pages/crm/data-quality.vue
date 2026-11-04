@@ -2,7 +2,7 @@
 import { RefreshCw, Loader2, Copy, ShieldCheck, ChevronDown, Download, Upload, DatabaseBackup, History, Merge, Check, AlertTriangle, FileSpreadsheet } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { format, formatDistanceToNow } from 'date-fns'
-import { IMPORT_FIELDS, guessMapping, parseCsv } from '~/composables/useCrmCsv'
+import { IMPORT_FIELDS, guessMapping, joinMapped, parseCsv } from '~/composables/useCrmCsv'
 import { US_STATES } from '~/constants/crm'
 
 /** Data quality: duplicates, missing / non-standard data, CSV import & export, backups, who-changed-what. */
@@ -97,7 +97,9 @@ const defaultState = ref('')
 const hasStateColumn = computed(() => mapping.value.includes('state'))
 const mappedRows = computed(() => body.value.map((r) => {
   const o: Record<string, string> = {}
-  mapping.value.forEach((k, i) => { if (k) o[k] = (o[k] ? `${o[k]}, ` : '') + (r[i] || '').trim() })
+  const cells: Record<string, string[]> = {}
+  mapping.value.forEach((k, i) => { if (k) (cells[k] ||= []).push(r[i] || '') })
+  for (const [k, list] of Object.entries(cells)) o[k] = joinMapped(k, list)
   if (!o.state && defaultState.value) o.state = defaultState.value
   return o
 }))

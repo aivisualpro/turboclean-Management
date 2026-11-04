@@ -40,8 +40,12 @@ type Filter = 'all' | 'without' | 'nophoto' | FinalVerdict | 'review'
 const filter = ref<Filter>('without')
 const q = ref('')
 const cond = ref<'all' | 'new' | 'used'>('all')
+/** Crawl page (URL) filter — shown when the crawl covered 2+ pages. */
+const page = ref('')
+const crawlPages = computed<{ url: string, label: string, total: number, withoutReal: number, withoutRealPct: number | null }[]>(() => ((r.value as any).crawlPages || []).filter((p: any) => p.total > 0))
+const shortPath = (u: string) => { try { return new URL(u).pathname.replace(/\/$/, '') || '/' } catch { return u } }
 const shown = ref(120)
-watch([filter, q, cond], () => { shown.value = 120 })
+watch([filter, q, cond, page], () => { shown.value = 120 })
 const tiles = computed(() => [
   { k: 'real' as Filter, label: 'Real photo', n: s.value.by.real, dot: VERDICT_META.real.dot, hex: VERDICT_META.real.hex, sub: '' },
   { k: 'nophoto' as Filter, label: 'No photo', n: noPhotoCount.value, dot: VERDICT_META.missing.dot, hex: VERDICT_META.missing.hex, sub: `${s.value.by.placeholder} placeholder image${s.value.by.placeholder === 1 ? '' : 's'} · ${s.value.by.missing} with no image` },
@@ -55,6 +59,7 @@ const filtered = computed(() => {
     if (filter.value === 'review' && !(v.verdict === 'review' && !v.override)) return false
     if (filter.value === 'nophoto' && !noPhoto(v.final)) return false
     if (FINALS.includes(filter.value as FinalVerdict) && v.final !== filter.value) return false
+    if (page.value && (v as any).listUrl !== page.value) return false
     if (cond.value === 'new' && v.condition !== 'new') return false
     if (cond.value === 'used' && v.condition === 'new') return false
     if (needle && !`${v.title} ${v.vin} ${v.stock} ${v.price}`.toLowerCase().includes(needle)) return false
@@ -188,6 +193,17 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
             <Select v-model="cond"><SelectTrigger class="h-8 w-[110px] text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">New + used</SelectItem><SelectItem value="used">Used</SelectItem><SelectItem value="new">New</SelectItem></SelectContent></Select>
             <div class="relative"><Search class="size-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><Input v-model="q" placeholder="Search title, VIN, stock…" class="h-8 w-56 pl-8 text-xs" /></div>
           </div>
+        </div>
+        <div v-if="crawlPages.length > 1" class="shrink-0 flex gap-2 overflow-x-auto p-2 border-b bg-muted/20">
+          <button type="button" class="shrink-0 rounded-lg border bg-card px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted/50" :class="!page && 'ring-2 ring-primary'" @click="page = ''">
+            <p class="font-semibold">All pages</p><p class="text-[11px] text-muted-foreground tabular-nums">{{ crawlPages.length }} pages · {{ s.total }} vehicles</p>
+          </button>
+          <button v-for="p in crawlPages" :key="p.url" type="button" class="shrink-0 min-w-[170px] rounded-lg border bg-card px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted/50" :class="page === p.url && 'ring-2 ring-primary'" :title="p.url" @click="page = page === p.url ? '' : p.url">
+            <div class="flex items-center justify-between gap-3"><p class="font-semibold truncate">{{ p.label }}</p><span class="tabular-nums font-semibold" :class="(p.withoutRealPct ?? 0) >= 15 ? 'text-rose-600' : (p.withoutRealPct ?? 0) >= 5 ? 'text-amber-600' : 'text-emerald-600'">{{ p.withoutRealPct ?? 0 }}%</span></div>
+            <p class="text-[11px] text-muted-foreground truncate max-w-[220px]">{{ shortPath(p.url) }}</p>
+            <div class="h-1 rounded-full bg-muted mt-1 overflow-hidden"><div class="h-full rounded-full" :class="(p.withoutRealPct ?? 0) >= 15 ? 'bg-rose-500' : (p.withoutRealPct ?? 0) >= 5 ? 'bg-amber-500' : 'bg-emerald-500'" :style="{ width: `${Math.min(100, p.withoutRealPct ?? 0)}%` }" /></div>
+            <p class="text-[11px] text-muted-foreground tabular-nums mt-0.5"><b class="text-foreground">{{ p.withoutReal }}</b> of {{ p.total }} without a real photo</p>
+          </button>
         </div>
         <div class="flex-1 min-h-0 overflow-y-auto p-2">
           <div v-if="!filtered.length" class="py-20 text-center text-sm text-muted-foreground">Nothing in this view.</div>

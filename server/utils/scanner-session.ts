@@ -322,7 +322,9 @@ export function resultsOf(doc: ScanDoc) {
   const cmap = new Map(doc.clusters.map(c => [c.id, c]))
   return {
     scanId: String(doc._id), summary, countStockAsMissing: doc.countStockAsMissing, advertised: doc.progress.advertised, pages: doc.progress.pagesVisited,
-    vehicles: doc.vehicles.map(v => ({ ...v, final: finalVerdict(v, cmap) })), clusters: doc.clusters, images,
+    vehicles: doc.vehicles.map(v => ({ ...v, listUrl: listKey(v, doc), final: finalVerdict(v, cmap) })), clusters: doc.clusters, images,
+    // Results per crawl page (URL) — the review screen can filter by page.
+    crawlPages: pageBreakdown(doc, null, cmap).map(p => ({ url: p.url, label: p.label, total: p.total, withoutReal: p.withoutReal, withoutRealPct: p.withoutRealPct })),
     savedAuditId: doc.auditId, labels: VERDICT_LABEL, finishedAt: doc.progress.finishedAt,
   }
 }
@@ -580,7 +582,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
           const v: ScanVehicle = {
             key, title: c.title || '', year: c.year ?? null, make: c.make || '', model: c.model || '', vin: c.vin || '', stock: c.stock || '', price: c.price || '',
             condition: (['new', 'used', 'certified'].includes(c.condition) ? c.condition : '') as any, url: c.url || '', image: c.image || null, imageId: null,
-            imageCount: c.imageCount || 0, photoCountText: c.photoCountText || '', noPhotoText: c.noPhotoText || '', page, sourceUrl: r.url,
+            imageCount: c.imageCount || 0, photoCountText: c.photoCountText || '', noPhotoText: c.noPhotoText || '', page, sourceUrl: r.url, listUrl: startUrl,
             verdict: 'review', suggested: 'real', confidence: 0, reasons: [], clusterId: null, override: null,
           }
           seen.set(key, v)
@@ -818,6 +820,48 @@ export async function applyReview(db: Db, id: string, body: any) {
 }
 
 /** Save the scan to the CRM as an automated inventory audit (no screenshots or images kept). */
+/** Which crawl page a vehicle belongs to (older scans: matched by address). */
+function listKey(v: ScanVehicle, doc: ScanDoc) {
+  if (v.listUrl) return v.listUrl
+  const urls = doc.urls?.length ? doc.urls : [doc.startUrl]
+  if (urls.length === 1) return urls[0]!
+  const path = (u: string) => { try { const x = new URL(u); return x.hostname + x.pathname.replace(/\/(index\.html?)?$/, '') } catch { return u } }
+  const src = path(v.sourceUrl || '')
+  return urls.find(u => src.startsWith(path(u))) || urls[0]!
+}
+const KIND_LABEL: Record<string, string> = { used: 'Pre-owned inventory', certified: 'Certified pre-owned', new: 'New inventory', all: 'All inventory' }
+/** "/used-inventory/index.htm" → used; else the cars' own condition decides. */
+function pageKind(url: string, vs: ScanVehicle[]) {
+  // Path first ("/used-vehicles/?type=Certified Used" is the pre-owned page), then the query.
+  const parts = (() => { try { const x = new URL(url); return [x.pathname.toLowerCase(), decodeURIComponent(x.search).toLowerCase()] } catch { return [url.toLowerCase()] } })()
+  for (const u of parts) {
+    if (/certified|cpo/.test(u)) return 'certified'
+    if (/used|pre-?owned|preowned|searchused|second/.test(u)) return 'used'
+    if (/\bnew\b|new-|\/new|searchnew|type=new|condition=new/.test(u)) return 'new'
+  }
+  const n: Record<string, number> = {}
+  for (const v of vs) if (v.condition) n[v.condition] = (n[v.condition] || 0) + 1
+  const top = Object.entries(n).sort((a, b) => b[1] - a[1])[0]
+  return top && top[1] / Math.max(1, vs.length) >= 0.8 ? top[0] : 'all'
+}
+/** Per crawl page: how many vehicles and how many without a real photo — the report and emails group by this. */
+export function pageBreakdown(doc: ScanDoc, d: any, cmap: Map<string, any>) {
+  const groups = new Map<string, ScanVehicle[]>()
+  for (const v of doc.vehicles) { const k = listKey(v, doc); groups.set(k, [...(groups.get(k) || []), v]) }
+  const saved = new Map<string, string>((Array.isArray(d?.scanPages) ? d.scanPages : []).map((p: any) => [String(p?.url || '').replace(/\/$/, ''), String(p?.label || '')]))
+  const order = doc.urls?.length ? doc.urls : [doc.startUrl]
+  return [...groups.entries()]
+    .sort((a, b) => (order.indexOf(a[0]) + 1 || 99) - (order.indexOf(b[0]) + 1 || 99))
+    .map(([url, vs]) => {
+      const by = { real: 0, placeholder: 0, stock: 0, missing: 0 }
+      for (const v of vs) by[finalVerdict(v, cmap)]++
+      const withoutReal = by.missing + by.placeholder + (doc.countStockAsMissing ? by.stock : 0)
+      const kind = pageKind(url, vs)
+      const label = saved.get(url.replace(/\/$/, '')) || KIND_LABEL[kind] || 'Inventory'
+      return { url, label, kind, total: vs.length, withoutReal, withoutRealPct: vs.length ? Math.round((withoutReal / vs.length) * 1000) / 10 : null, ...by }
+    })
+}
+
 export async function saveScan(db: Db, id: string, actor: SessionActor) {
   const doc = await getScan(db, id)
   if (!hasResults(doc)) throw createError({ statusCode: 409, statusMessage: 'Wait for the scan to finish' })
@@ -830,16 +874,21 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
     `Inventory Scanner: ${sum.total} vehicles on ${pages.length} page${pages.length === 1 ? '' : 's'}${doc.progress.advertised ? ` (site advertises ${doc.progress.advertised})` : ''}.`,
     `${sum.by.real} real photos · ${sum.by.missing + sum.by.placeholder} no photo (${sum.by.placeholder} showing a placeholder image such as “photos unavailable”, ${sum.by.missing} with no image) · ${sum.by.stock} stock images${doc.countStockAsMissing ? ' (counted as no photo)' : ' (counted as photos)'}.`,
   ]
+  const byPage = pageBreakdown(doc, d, cmap)
+  if (byPage.length > 1) parts.push(`By crawl page: ${byPage.map(p => `${p.label} — ${p.total} vehicles, ${p.withoutReal} without a real photo`).join(' · ')}.`)
+  // Used cars first, then "No photo" before stock images — the strongest evidence leads; spread across the crawl pages.
+  const ranked = without.filter(v => v.url)
+    .sort((a, b) => (Number(a.condition === 'new') - Number(b.condition === 'new')) || (Number(finalVerdict(a, cmap) === 'stock') - Number(finalVerdict(b, cmap) === 'stock')))
+  const perPage = byPage.length > 1 ? Math.max(4, Math.floor(40 / byPage.length)) : 40
+  const taken = new Map<string, number>()
+  const picked = ranked.filter((v) => { const k = listKey(v, doc); const n = taken.get(k) || 0; if (n >= perPage) return false; taken.set(k, n + 1); return true }).slice(0, 40)
   const { recordAudit } = await import('./crm-audit')
   const audit = await recordAudit(db, d, {
     ...sum.counts,
     source: 'automated',
-    inventoryUrl: pages[0] || doc.startUrl,
-    // Used cars first, then "No photo" before stock images — the strongest evidence leads.
-    examples: without.filter(v => v.url)
-      .sort((a, b) => (Number(a.condition === 'new') - Number(b.condition === 'new')) || (Number(finalVerdict(a, cmap) === 'stock') - Number(finalVerdict(b, cmap) === 'stock')))
-      .slice(0, 25)
-      .map((v) => { const f = finalVerdict(v, cmap); return { url: v.url, label: `${v.title}${v.stock ? ` #${v.stock}` : ''} — ${VERDICT_LABEL[f]}`, title: v.title, stock: v.stock, price: v.price, condition: v.condition, verdict: f } }),
+    inventoryUrl: doc.urls?.[0] || pages[0] || doc.startUrl,
+    pages: byPage,
+    examples: picked.map((v) => { const f = finalVerdict(v, cmap); return { url: v.url, label: `${v.title}${v.stock ? ` #${v.stock}` : ''} — ${VERDICT_LABEL[f]}`, title: v.title, stock: v.stock, price: v.price, condition: v.condition, verdict: f, listUrl: listKey(v, doc) } }),
     photoBreakdown: { real: sum.by.real, placeholder: sum.by.placeholder, missing: sum.by.missing, stock: sum.by.stock, countStockAsMissing: doc.countStockAsMissing },
     merchandisingIssues: [
       ...(sum.by.missing + sum.by.placeholder ? ['Vehicles listed with no photos (placeholder / “photos unavailable”)'] : []),

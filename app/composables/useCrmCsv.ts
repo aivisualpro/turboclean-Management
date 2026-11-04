@@ -24,13 +24,15 @@ export function parseCsv(text: string): string[][] {
   return rows
 }
 
-export const IMPORT_FIELDS: { key: string, label: string, required?: boolean, aliases: string[] }[] = [
+/** `multi` fields may be mapped from several columns (e.g. page 1, page 2, page 3 → crawl pages). */
+export const IMPORT_FIELDS: { key: string, label: string, required?: boolean, multi?: boolean, aliases: string[] }[] = [
   { key: 'name', label: 'Dealership name', required: true, aliases: ['name', 'dealership', 'dealershipname', 'dealer', 'dealername', 'company', 'store'] },
   { key: 'state', label: 'State', required: true, aliases: ['state', 'st', 'province'] },
   { key: 'city', label: 'City', aliases: ['city', 'town'] },
   { key: 'address', label: 'Address', aliases: ['address', 'street', 'address1', 'streetaddress'] },
   { key: 'zip', label: 'ZIP', aliases: ['zip', 'zipcode', 'postal', 'postalcode'] },
-  { key: 'website', label: 'Website', aliases: ['website', 'url', 'site', 'web', 'domain'] },
+  { key: 'website', label: 'Website', aliases: ['website', 'websites', 'url', 'site', 'web', 'domain', 'homepage', 'websiteurl'] },
+  { key: 'scanPages', label: 'Crawl page (inventory URL)', multi: true, aliases: ['page', 'pages', 'page1', 'page2', 'page3', 'page4', 'page5', 'page6', 'crawlpage', 'crawlpages', 'scanpage', 'scanpages', 'inventoryurl', 'inventorypage', 'usedinventory', 'newinventory', 'usedurl', 'newurl', 'srp'] },
   { key: 'phone', label: 'Main phone', aliases: ['phone', 'mainphone', 'telephone', 'tel', 'dealershipphone'] },
   { key: 'brands', label: 'Brands', aliases: ['brand', 'brands', 'make', 'makes', 'franchise', 'franchises'] },
   { key: 'dealerGroup', label: 'Dealer group', aliases: ['group', 'dealergroup', 'parentgroup'] },
@@ -64,8 +66,16 @@ export function guessMapping(headers: string[], rows: string[][] = []) {
     if (out[i]) return
     if (rows.length && !values(i).length) return // empty column → ignore
     const n = norm(h)
-    const f = IMPORT_FIELDS.find(x => !used.has(x.key) && x.aliases.includes(n))
-    if (f) { out[i] = f.key; used.add(f.key) }
+    const f = IMPORT_FIELDS.find(x => (x.multi || !used.has(x.key)) && x.aliases.includes(n))
+    if (f) { out[i] = f.key; used.add(f.key); return }
+    // Columns full of inventory links (…/used-inventory, /inventory/new, searchused.aspx) → crawl pages.
+    const v = values(i)
+    if (rows.length && v.length && v.filter(x => /^https?:\/\/\S+\/(?:\S*(?:inventory|used|new|pre-?owned|certified|vehicles|search)\S*)/i.test(x)).length / v.length >= 0.6) out[i] = 'scanPages'
   })
   return out
+}
+/** Join one mapped field's cells: crawl pages one per line, everything else comma-separated; empty cells skipped. */
+export function joinMapped(key: string, cells: string[]) {
+  const vals = cells.map(c => (c || '').trim()).filter(Boolean)
+  return key === 'scanPages' ? vals.join('\n') : vals.join(', ')
 }

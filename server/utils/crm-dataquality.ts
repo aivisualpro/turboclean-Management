@@ -111,6 +111,50 @@ export const IMPORT_FIELDS = ['name', 'dealerGroup', 'brands', 'website', 'addre
  * `cleanNames` tidies SHOUTED names ("DBA GATES NISSAN INC" → "Gates Nissan").
  * A name-only match in a different city is a different store (e.g. two "Vachon Chevrolet").
  */
+// ───────────────────────── Import: websites + crawl pages ─────────────────────────
+const TRACKING = /^(?:_gl|gclid|gbraid|wbraid|dclid|fbclid|msclkid|mc_[a-z]+|utm_[a-z_]+|_ga|_gac|yclid|srsltid|ref|referrer)$/i
+/** URL without ad/analytics tracking (_gl, gclid, utm_*, …); real filters such as ?paymenttype=cash stay. '' when not a URL. */
+export function cleanImportUrl(v: unknown) {
+  let s = String(v ?? '').trim().replace(/^[<"']+|[>"',;]+$/g, '')
+  if (!s || /\s/.test(s)) return ''
+  if (!/^https?:\/\//i.test(s)) { if (!/^(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[/?#]|$)/i.test(s)) return ''; s = `https://${s}` }
+  try {
+    const u = new URL(s)
+    if (!/\./.test(u.hostname)) return ''
+    for (const k of [...u.searchParams.keys()]) if (TRACKING.test(k)) u.searchParams.delete(k)
+    u.hash = ''
+    return u.toString().replace(/\?$/, '')
+  } catch { return '' }
+}
+const pageKey = (u: string) => u.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/(?=\?|$)/, '')
+/** "used-inventory/index.htm" → "Pre-owned", "/inventory/new" → "New", certified → "Certified pre-owned". */
+export function crawlPageLabel(url: string) {
+  const parts = (() => { try { const u = new URL(url); return [u.pathname.toLowerCase(), decodeURIComponent(u.search).toLowerCase()] } catch { return [url.toLowerCase()] } })()
+  // The path decides first ("/used-vehicles/?type=Certified Used" is the pre-owned page); the query only when the path says nothing.
+  for (const p of parts) {
+    if (/certified|\bcpo\b|-cpo|cpo-/.test(p)) return 'Certified pre-owned'
+    if (/pre-?owned|used/.test(p)) return 'Pre-owned inventory'
+    if (/\bnew\b|new-|-new|searchnew|\/new/.test(p)) return 'New inventory'
+  }
+  return ''
+}
+/** Crawl-page cells (one per line / comma) → `{ url, label }[]` plus the cells that were not links. */
+export function parseCrawlPages(v: unknown) {
+  const cells = String(v ?? '').split(/\n|\s*,\s*(?=https?:\/\/)|\s+(?=https?:\/\/)/).map(x => x.trim()).filter(Boolean)
+  const pages: { url: string, label: string }[] = []
+  const notes: string[] = []
+  const seen = new Set<string>()
+  for (const c of cells) {
+    const url = cleanImportUrl(c)
+    if (!url) { notes.push(c); continue }
+    const k = pageKey(url)
+    if (seen.has(k)) continue
+    seen.add(k)
+    pages.push({ url, label: crawlPageLabel(url) })
+  }
+  return { pages: pages.slice(0, 40), notes }
+}
+
 export async function importDealerships(db: Db, rows: any[], opts: { dryRun?: boolean, ownerId?: string, ownerName?: string, update?: boolean, cleanNames?: boolean }, actor: SessionActor | null) {
   if (!Array.isArray(rows) || !rows.length) throw createError({ statusCode: 400, statusMessage: 'No rows to import' })
   if (rows.length > 2000) throw createError({ statusCode: 400, statusMessage: 'Import at most 2,000 rows at a time' })
@@ -128,7 +172,12 @@ export async function importDealerships(db: Db, rows: any[], opts: { dryRun?: bo
     if (!state) { results.push({ row: i + 1, status: 'invalid', message: 'State is missing' }); continue }
     // Route values in the "group" column ("DAY 5") belong in Route.
     if (!str(r.route, 80) && looksLikeRouteDay(r.dealerGroup)) { r.route = r.dealerGroup; r.dealerGroup = '' }
-    const candidate = { name, website: normalizeUrl(r.website), phone: normalizePhone(r.phone), state, city: normalizeCity(r.city) }
+    const crawl = parseCrawlPages(r.scanPages)
+    // Website: tracking stripped; when the column is empty, the crawl pages' site is the website.
+    const site = cleanImportUrl(r.website) || normalizeUrl(str(r.website, 300)) || (crawl.pages[0] ? `${new URL(crawl.pages[0].url).origin}/` : '')
+    const website = (() => { try { const u = new URL(site); return u.pathname === '/' && !u.search ? u.origin : site } catch { return site } })()
+    const candidate = { name, website, phone: normalizePhone(r.phone), state, city: normalizeCity(r.city) }
+    const skipped = crawl.notes.length ? ` (${crawl.notes.length} page cell${crawl.notes.length === 1 ? '' : 's'} weren't links — ignored)` : ''
     // A name-only match in another city is another store.
     const dups = (await findDealershipDuplicates(db, candidate)).filter(d => !(d.reasons.length === 1 && d.reasons[0] === 'Same name' && candidate.city && d.city && normalizeCity(d.city).toLowerCase() !== candidate.city.toLowerCase()))
     const inFile = seen.find(s => findSame(s, candidate) && (!s.city || !candidate.city || s.city.toLowerCase() === candidate.city.toLowerCase()))
@@ -146,7 +195,14 @@ export async function importDealerships(db: Db, rows: any[], opts: { dryRun?: bo
         const put = (k: string, v: any) => { const same = JSON.stringify(before[k] ?? '') === JSON.stringify(v ?? ''); if (!same) $set[k] = v }
         if (str(r.dealerGroup, 200)) put('dealerGroup', str(r.dealerGroup, 200))
         if (r.brands && normalizeBrands(r.brands).length) put('brands', normalizeBrands(r.brands))
-        if (candidate.website) put('website', candidate.website)
+        if (candidate.website && websiteKey(candidate.website) !== websiteKey(before.website)) put('website', candidate.website)
+        // Crawl pages from the file replace the saved list (labels already given in the CRM are kept).
+        if (crawl.pages.length) {
+          const old = new Map((Array.isArray(before.scanPages) ? before.scanPages : []).map((p: any) => [pageKey(String(p?.url || p || '')), String(p?.label || '')]))
+          const next = crawl.pages.map(p => ({ url: p.url, label: old.get(pageKey(p.url)) || p.label }))
+          const same = JSON.stringify((before.scanPages || []).map((p: any) => pageKey(String(p?.url || p || '')))) === JSON.stringify(next.map(p => pageKey(p.url)))
+          if (!same) $set.scanPages = next
+        }
         if (str(r.address, 300)) put('address', str(r.address, 300))
         if (candidate.city) put('city', candidate.city)
         if (state) put('state', state)
@@ -174,11 +230,12 @@ export async function importDealerships(db: Db, rows: any[], opts: { dryRun?: bo
       }
       const fields = Object.keys(changesAll)
       if (!fields.length) { results.push({ row: i + 1, status: 'unchanged', message: `Already up to date: ${dups.map(d => d.name).join(', ')}` }); continue }
-      results.push({ row: i + 1, status: opts.dryRun ? 'will-update' : 'updated', message: `${dups.length > 1 ? `${dups.length} records (${dups.map(d => d.name).join(' · ')})` : dups[0]!.name}: ${fields.map(f => `${f} → ${JSON.stringify(changesAll[f]!.to)}`).join(', ')}`, changes: changesAll, id: dups[0]!.id })
+      const show = (f: string) => f === 'scanPages' ? `crawl pages → ${(changesAll[f]!.to as any[]).map(p => p.label || p.url).join(' + ')}` : `${f} → ${JSON.stringify(changesAll[f]!.to)}`
+      results.push({ row: i + 1, status: opts.dryRun ? 'will-update' : 'updated', message: `${dups.length > 1 ? `${dups.length} records (${dups.map(d => d.name).join(' · ')})` : dups[0]!.name}: ${fields.map(show).join(', ')}${skipped}`, changes: changesAll, id: dups[0]!.id })
       continue
     }
 
-    if (opts.dryRun) { results.push({ row: i + 1, status: 'ready', message: 'Will be created' }); continue }
+    if (opts.dryRun) { results.push({ row: i + 1, status: 'ready', message: `Will be created${crawl.pages.length ? ` with ${crawl.pages.length} crawl page${crawl.pages.length === 1 ? '' : 's'}` : ''}${skipped}` }); continue }
     const now = new Date().toISOString()
     const leadSource = (LEAD_SOURCES as readonly string[]).find(s => s.toLowerCase() === String(r.leadSource || '').trim().toLowerCase()) || 'Manual research'
     const doc = {
@@ -186,6 +243,7 @@ export async function importDealerships(db: Db, rows: any[], opts: { dryRun?: bo
       address: str(r.address, 300), city: candidate.city, state, zip: str(r.zip, 20), phone: candidate.phone, territory: str(r.territory, 120), route: normalizeRoute(r.route),
       assignedUserId: str(opts.ownerId, 64), assignedUserName: str(opts.ownerName, 120), leadSource, leadSourceDetail: 'CSV import',
       stage: DEFAULT_STAGE, stageChangedAt: now, stageChangedBy: actor, notes: str(r.notes, 5000), tags: [], estMonthlyValue: null,
+      ...(crawl.pages.length ? { scanPages: crawl.pages } : {}),
       createdAt: now, createdBy: actor, updatedAt: now, archivedAt: null as string | null,
     }
     const res = await col.insertOne(doc)
@@ -202,7 +260,7 @@ export async function importDealerships(db: Db, rows: any[], opts: { dryRun?: bo
         isPrimary: true, isActive: true, inactiveAt: null, inactiveReason: '', succeededById: null, precededById: null, addedAt: now, lastVerifiedAt: null, notes: '', createdBy: actor, updatedAt: now,
       })
     }
-    results.push({ row: i + 1, status: 'created', message: `Created ${doc.dealershipId} · ${name}`, id })
+    results.push({ row: i + 1, status: 'created', message: `Created ${doc.dealershipId} · ${name}${crawl.pages.length ? ` · ${crawl.pages.length} crawl page${crawl.pages.length === 1 ? '' : 's'}` : ''}`, id })
   }
   const tally = (s: Status) => results.filter(r => r.status === s).length
   return { results, created: tally('created'), ready: tally('ready'), updated: tally('updated'), willUpdate: tally('will-update'), unchanged: tally('unchanged'), duplicates: tally('duplicate'), invalid: tally('invalid') }

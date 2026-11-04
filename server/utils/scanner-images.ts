@@ -46,6 +46,8 @@ export interface ImageInfo {
 }
 export interface ScanVehicle {
   key: string
+  /** The crawl page (inventory list URL) this vehicle was found on — results and reports are grouped by it. */
+  listUrl?: string
   title: string
   year: number | null
   make: string

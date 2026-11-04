@@ -14,11 +14,12 @@ import process from 'node:process'
 import { Binary, ObjectId } from 'mongodb'
 import type { Db } from 'mongodb'
 import { CRM_COLLECTIONS } from './crm'
+import { auditPages, shortPath } from './crm-email-blocks'
 
 export const REPORTS_COLLECTION = 'turboCleanCrmAuditReports'
 export const PDF_COLLECTION = 'turboCleanCrmPdfs'
 const AUDITS = 'turboCleanCrmAudits'
-export const REPORT_VERSION = 1
+export const REPORT_VERSION = 2
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -157,8 +158,16 @@ export function buildReportHtml(o: { dealership: any, audit: any, history: any[]
   const kpi = (label: string, value: string, sub: string, tone = '#101828') => `<div class="kpi"><div class="kpi-l">${label}</div><div class="kpi-v" style="color:${tone}">${value}</div><div class="kpi-s">${sub}</div></div>`
   const cmpRow = (label: string, x: any, highlight = false) => x ? `<tr${highlight ? ' class="hl"' : ''}><td>${label}</td><td>${dayLabel(x.auditedAt)}</td><td class="r">${fmt(num(x.usedTotal))}</td><td class="r">${fmt(num(x.usedMissingPhotos))}</td><td class="r">${x.usedMissingPhotoPct ?? pct1(num(x.usedMissingPhotos), num(x.usedTotal)) ?? '—'}%</td><td class="r">${fmt(num(x.totalVehicles))}</td><td class="r">${fmt(num(x.totalMissingPhotos))}</td></tr>` : ''
   const points = history.filter(x => num(x.usedTotal) > 0).slice(-10).map(x => ({ label: dayLabel(x.auditedAt).replace(/, (\d{4})$/, " '$1").replace(/'(\d\d)(\d\d)$/, "'$2"), p: x.usedMissingPhotoPct ?? pct1(num(x.usedMissingPhotos), num(x.usedTotal)) ?? 0 }))
-  const examples = (Array.isArray(a.examples) ? a.examples : []).filter((e: any) => e?.url).slice(0, 25)
+  const examples = (Array.isArray(a.examples) ? a.examples : []).filter((e: any) => e?.url).slice(0, 40)
+  const pages = auditPages(a)
+  const byPage = pages.length >= 2
+  const norm = (u: string) => String(u || '').replace(/[?#].*$/, '').replace(/\/$/, '').toLowerCase()
+  const toneOf = (p: number) => p >= 15 ? '#c62a2f' : p >= 5 ? '#b54708' : '#15803d'
+  const pagePct = (pg: any) => pg.withoutRealPct ?? pct1(num(pg.withoutReal), num(pg.total)) ?? 0
   const verdict = (e: any) => e.verdict === 'stock' ? ['Stock image', 'b-stock'] : e.verdict === 'placeholder' ? ['Placeholder', 'b-red'] : /stock/i.test(e.label || '') ? ['Stock image', 'b-stock'] : ['No photo', 'b-red']
+  const exampleTable = (list: any[]) => `<table class="t"><thead><tr><th>Vehicle</th><th>Stock #</th><th class="r">Price</th><th>Issue</th><th></th></tr></thead><tbody>
+      ${list.map((e: any) => { const [label, cls] = verdict(e); const title = e.title || String(e.label || '').split(' — ')[0]!.replace(/\s+#\S+$/, ''); const stock = e.stock || (String(e.label || '').match(/#(\S+)/)?.[1] || ''); return `<tr><td>${esc(title) || 'Vehicle'}</td><td>${esc(stock)}</td><td class="r">${esc(e.price || '')}</td><td><span class="badge ${cls}">${label}</span></td><td class="r"><a href="${esc(e.url)}" target="_blank" rel="noopener">View &rarr;</a></td></tr>` }).join('')}
+    </tbody></table>`
   const issues = [...(a.merchandisingIssues || []), ...(a.websiteIssues || [])]
   const period = base ? periodLabel(base.auditedAt, a.auditedAt) : ''
   return `<!doctype html>
@@ -187,6 +196,9 @@ export function buildReportHtml(o: { dealership: any, audit: any, history: any[]
   table.t th { text-align: left; font-size: 10px; letter-spacing: .8px; text-transform: uppercase; color: #667085; font-weight: 700; padding: 8px 10px; background: #f6f8f7; border-bottom: 1px solid #eaecf0; }
   table.t td { padding: 8px 10px; border-bottom: 1px solid #f0f2f4; } table.t .r { text-align: right; font-variant-numeric: tabular-nums; }
   table.t tr.hl td { background: #effaf3; font-weight: 700; }
+  .bar { height: 6px; border-radius: 3px; background: #eaecf0; overflow: hidden; margin: 2px 0 3px; } .bar i { display: block; height: 100%; border-radius: 3px; }
+  .grp { border: 1px solid #eaecf0; border-radius: 12px; overflow: hidden; margin-top: 12px; break-inside: avoid; } .grp .t td:first-child, .grp .t th:first-child { padding-left: 14px; }
+  .grp-h { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 14px; background: #f6f8f7; border-bottom: 1px solid #eaecf0; font-size: 13px; } .grp-h a { color: #667085; font-size: 11px; margin-left: 6px; }
   .chart { border: 1px solid #eaecf0; border-radius: 12px; padding: 12px 12px 4px; }
   .chips { display: flex; gap: 8px; flex-wrap: wrap; } .chip { border: 1px solid #eaecf0; border-radius: 999px; padding: 6px 12px; font-size: 12px; background: #f9fafb; } .chip b { font-size: 14px; }
   .badge { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 10px; font-weight: 700; letter-spacing: .4px; }
@@ -204,7 +216,7 @@ export function buildReportHtml(o: { dealership: any, audit: any, history: any[]
     <div class="brand">ZRZ<span>&nbsp;OPS</span></div>
     <div class="eyebrow">Inventory photo report &middot; ${dayUpper(a.auditedAt)}</div>
     <h1>${esc(d.name)}</h1>
-    <p>${[d.city, d.state].filter(Boolean).map(esc).join(', ')}${a.inventoryUrl ? ` &middot; reviewed <a href="${esc(a.inventoryUrl)}" style="color:#86efac">${esc(String(a.inventoryUrl).replace(/^https?:\/\/(www\.)?/, '').slice(0, 70))}</a>` : ''}</p>
+    <p>${[d.city, d.state].filter(Boolean).map(esc).join(', ')}${byPage ? ` &middot; reviewed ${pages.length} inventory pages` : ''}${!byPage && a.inventoryUrl ? ` &middot; reviewed <a href="${esc(a.inventoryUrl)}" style="color:#86efac">${esc(String(a.inventoryUrl).replace(/^https?:\/\/(www\.)?/, '').slice(0, 70))}</a>` : ''}</p>
   </div>
   <div class="body">
     <h2>At a glance</h2>
@@ -231,13 +243,20 @@ export function buildReportHtml(o: { dealership: any, audit: any, history: any[]
 
     ${issues.length ? `<h2>Merchandising &amp; website issues</h2><div class="chips">${issues.map((i: string) => `<span class="chip">${esc(i)}</span>`).join('')}</div>` : ''}
 
-    ${examples.length ? `<h2>Listings without a real photo${num(a.totalMissingPhotos) > examples.length ? ` <span style="font-weight:400;color:#667085;font-size:13px">(${examples.length} of ${fmt(num(a.totalMissingPhotos))})</span>` : ''}</h2>
-    <table class="t"><thead><tr><th>Vehicle</th><th>Stock #</th><th class="r">Price</th><th>Issue</th><th></th></tr></thead><tbody>
-      ${examples.map((e: any) => { const [label, cls] = verdict(e); const title = e.title || String(e.label || '').split(' — ')[0]!.replace(/\s+#\S+$/, ''); const stock = e.stock || (String(e.label || '').match(/#(\S+)/)?.[1] || ''); return `<tr><td>${esc(title) || 'Vehicle'}</td><td>${esc(stock)}</td><td class="r">${esc(e.price || '')}</td><td><span class="badge ${cls}">${label}</span></td><td class="r"><a href="${esc(e.url)}" target="_blank" rel="noopener">View &rarr;</a></td></tr>` }).join('')}
+    ${byPage ? `<h2>By inventory page</h2>
+    <table class="t pages"><thead><tr><th>Page</th><th class="r">Vehicles</th><th class="r">No real photo</th><th style="width:34%">Share</th></tr></thead><tbody>
+      ${pages.map((pg: any) => { const p = pagePct(pg); return `<tr><td><div style="font-weight:700;color:#101828">${esc(pg.label || 'Inventory')}</div><a href="${esc(pg.url)}" target="_blank" rel="noopener" style="color:#667085;font-size:11px">${esc(shortPath(pg.url))}</a></td><td class="r">${fmt(num(pg.total))}</td><td class="r" style="color:${toneOf(p)};font-weight:700">${fmt(num(pg.withoutReal))}</td><td><div class="bar"><i style="width:${Math.max(p > 0 ? 2 : 0, Math.min(100, p))}%;background:${toneOf(p)}"></i></div><span style="font-size:11px;color:${toneOf(p)};font-weight:700">${p}%</span>${num(pg.placeholder) || num(pg.missing) || num(pg.stock) ? `<span style="font-size:11px;color:#667085"> &middot; ${[num(pg.placeholder) ? `${fmt(num(pg.placeholder))} placeholder` : '', num(pg.missing) ? `${fmt(num(pg.missing))} no image` : '', num(pg.stock) ? `${fmt(num(pg.stock))} stock` : ''].filter(Boolean).join(', ')}</span>` : ''}</td></tr>` }).join('')}
     </tbody></table>` : ''}
 
+    ${examples.length ? `<h2>Listings without a real photo${num(a.totalMissingPhotos) > examples.length ? ` <span style="font-weight:400;color:#667085;font-size:13px">(${examples.length} of ${fmt(num(a.totalMissingPhotos))})</span>` : ''}</h2>
+    ${byPage && examples.some((e: any) => e.listUrl)
+      ? [...pages.map((pg: any) => ({ pg, list: examples.filter((e: any) => norm(e.listUrl) === norm(pg.url)) })), { pg: null as any, list: examples.filter((e: any) => !pages.some((pg: any) => norm(pg.url) === norm(e.listUrl))) }]
+          .filter(g => g.list.length)
+          .map(g => `<div class="grp"><div class="grp-h"><div><b>${esc(g.pg ? g.pg.label || 'Inventory' : 'Other pages')}</b>${g.pg ? ` <a href="${esc(g.pg.url)}" target="_blank" rel="noopener">${esc(shortPath(g.pg.url))}</a>` : ''}</div>${g.pg ? `<span style="color:${toneOf(pagePct(g.pg))}"><b>${fmt(num(g.pg.withoutReal))}</b> of ${fmt(num(g.pg.total))} &middot; ${pagePct(g.pg)}%</span>` : ''}</div>${exampleTable(g.list)}</div>`).join('')
+      : exampleTable(examples)}` : ''}
+
     <div class="foot">
-      <div style="max-width:520px"><strong style="color:#344054">How we measured.</strong> We reviewed every publicly listed vehicle on the dealership&rsquo;s website on ${dayLabel(a.auditedAt)} and checked the main photo of each one. A listing counts as &ldquo;without a real photo&rdquo; when the image is missing, a &ldquo;photos coming soon&rdquo; placeholder${b?.countStockAsMissing === false ? '' : ', or a stock / catalog image instead of the actual car'}. Counts change as inventory is updated.</div>
+      <div style="max-width:520px"><strong style="color:#344054">How we measured.</strong> We reviewed every publicly listed vehicle on ${byPage ? `the ${pages.length} inventory pages above` : 'the dealership&rsquo;s website'} on ${dayLabel(a.auditedAt)} and checked the main photo of each one. A listing counts as &ldquo;without a real photo&rdquo; when the image is missing, a &ldquo;photos coming soon&rdquo; placeholder${b?.countStockAsMissing === false ? '' : ', or a stock / catalog image instead of the actual car'}. Counts change as inventory is updated.</div>
       <div><strong style="color:#344054">${esc(sender.name || sender.company)}</strong><br>${esc(sender.company)}${sender.phone ? `<br>${esc(sender.phone)}` : ''}${sender.email ? `<br><a href="mailto:${esc(sender.email)}">${esc(sender.email)}</a>` : ''}<br><span style="color:#98a2b3">Report ${esc(String(a._id ?? a.id).slice(-8).toUpperCase())} &middot; v${REPORT_VERSION}</span></div>
     </div>
   </div>
