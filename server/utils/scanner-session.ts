@@ -43,7 +43,7 @@ function budgetMs() {
 export type ScanPhase = 'collecting' | 'analyzing' | 'done' | 'stopped' | 'error'
 export interface ScanProgress { phase: ScanPhase, page: number, vehicles: number, advertised: number | null, analyzed: number, toAnalyze: number, message: string, startedAt: string, finishedAt: string | null, pagesVisited: string[]
   /** Checkpoints — a resumed scan skips finished inventory pages and re-opens the exact result page it was on. */
-  doneUrls?: string[], resumeAt?: { url: string, href: string, page: number } | null }
+  doneUrls?: string[], resumeAt?: { url: string, href: string, page: number, clicks?: number } | null, memMb?: number, restarts?: number }
 export type ScanStatus = 'running' | 'done' | 'stopped' | 'failed' | 'saved' | 'interrupted'
 
 const g = globalThis as any
@@ -111,6 +111,15 @@ function scheduleIdleClose() {
   }, WARM_IDLE_MS)
 }
 
+const BLOCKED_URLS = [
+  '*.mp4*', '*.webm*', '*.m3u8*', '*.mov*', '*.woff*', '*.ttf*', '*.otf*', '*.eot*',
+  '*googletagmanager.com*', '*google-analytics.com*', '*doubleclick.net*', '*googleadservices.com*', '*googlesyndication.com*',
+  '*facebook.net*', '*connect.facebook*', '*hotjar.com*', '*clarity.ms*', '*bing.com/bat*', '*tiktok*', '*snapchat*', '*pinterest*', '*linkedin*', '*twitter*',
+  '*youtube.com*', '*vimeo.com*', '*fullstory*', '*segment.io*', '*segment.com*', '*newrelic*', '*nr-data*', '*quantserve*', '*adroll*', '*criteo*', '*taboola*', '*outbrain*',
+  '*carnow.com*', '*gubagoo*', '*contactatonce*', '*activengage*', '*podium.com*', '*livechat*', '*drift.com*', '*intercom*', '*zopim*', '*tawk.to*', '*olark*',
+  '*trueCar*', '*cdk-ga*', '*dealerfire*/tracking*', '*cdn.cookielaw*', '*onetrust*', '*recaptcha*', '*gstatic.com/recaptcha*', '*maps.googleapis.com*', '*maps.gstatic.com*',
+]
+
 export async function openTab(): Promise<Tab> {
   if (pool.tabs >= MAX_TABS) throw createError({ statusCode: 429, statusMessage: 'The scanner is busy', message: 'The scanner is busy with other pages — wait a moment and try again' })
   const browser = await warmBrowser()
@@ -132,6 +141,10 @@ export async function openTab(): Promise<Tab> {
       conn.send('Network.setUserAgentOverride', { userAgent: ua.replace(/\(X11; Linux x86_64\)/, '(Windows NT 10.0; Win64; x64)'), acceptLanguage: 'en-US,en;q=0.9', platform: 'Windows' }, sid),
       conn.send('Emulation.setDeviceMetricsOverride', { width: SCANNER_VIEWPORT.width, height: SCANNER_VIEWPORT.height, deviceScaleFactor: 1, mobile: false }, sid),
       conn.send('Page.addScriptToEvaluateOnNewDocument', { source: SCANNER_BOOTSTRAP_JS }, sid),
+      // Skip what a crawler never needs (videos, fonts, chat widgets, trackers, ads): dealer sites load
+      // 5–15 MB of it per page, and it is what runs a cloud browser out of memory mid-crawl.
+      conn.send('Network.setBlockedURLs', { urls: BLOCKED_URLS }, sid).catch(() => {}),
+      conn.send('Network.setCacheDisabled', { cacheDisabled: false }, sid).catch(() => {}),
     ])
     const tree = await conn.send('Page.getFrameTree', {}, sid).catch(() => null)
     t.mainFrameId = tree?.frameTree?.frame?.id || ''
@@ -451,6 +464,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     lastPersist = Date.now()
     try {
       // Vehicles go with every heartbeat, so a scan cut off by the server keeps what it found.
+      doc.progress.memMb = Math.round(process.memoryUsage().rss / 1e6)
       const r = await col.findOneAndUpdate({ _id: doc._id }, { $set: { progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, ...(doc.progress.phase === 'analyzing' ? { images: doc.images.map(stripImage) } : {}), heartbeatAt: new Date().toISOString() } }, { projection: { stopRequested: 1, stopReason: 1 }, returnDocument: 'after' })
       if ((r as any)?.stopRequested && !stop) {
         stop = true
@@ -474,10 +488,19 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     t = await openTab()
     let tab = t
     let restarts = 0
+    let lastRestartAt = ''
+    let stalledRestarts = 0
     /** Chromium can die mid-scan (memory, host teardown); start a fresh one and carry on — the vehicles found so far stay. */
     const restartBrowser = async (e: any) => {
-      if (!isBrowserGone(e) || restarts >= 2) return false
+      if (!isBrowserGone(e)) return false
+      // Keep restarting as long as each run gets further than the last (checkpoints make every restart cheaper).
+      const at = `${doc.progress.doneUrls?.length || 0}:${doc.progress.resumeAt?.page || 0}:${doc.vehicles.length}`
+      if (at === lastRestartAt) stalledRestarts++
+      else stalledRestarts = 0
+      lastRestartAt = at
+      if (restarts >= 12 || stalledRestarts >= 2) return false
       restarts++
+      doc.progress.restarts = restarts
       log(`The browser crashed (${String(e?.message || e).slice(0, 60)}) — starting a fresh one and continuing`)
       try { await closeTab(tab) } catch {}
       await sleep(1500)
@@ -521,9 +544,23 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     const resumeAt = doc.progress.resumeAt?.url === startUrl ? doc.progress.resumeAt : null
     log(urls.length > 1 ? `Inventory page ${u + 1} of ${urls.length}: ${startUrl.replace(/^https?:\/\/[^/]+/, '') || '/'}` : `Opening ${startUrl.replace(/^https?:\/\//, '')}`)
     setProgress({ message: 'Loading the inventory page…' })
-    if (resumeAt) { log(`Continuing from result page ${resumeAt.page} where the last run stopped`); pageNo = Math.max(pageNo, resumeAt.page - 1) }
-    try { await goto(tab, resumeAt?.href || startUrl, 25_000, log) }
+    if (resumeAt) { log(`Continuing from result page ${resumeAt.page} where the last run stopped`); pageNo = resumeAt.page - 1 }
+    try {
+      await goto(tab, resumeAt?.href || startUrl, 25_000, log)
+      // Click-paginated lists (no page address): fast-forward to the saved result page without re-reading the ones before it.
+      if (resumeAt?.clicks) {
+        log(`Fast-forwarding ${resumeAt.clicks} result page${resumeAt.clicks === 1 ? '' : 's'} to the checkpoint`)
+        for (let k = 0; k < resumeAt.clicks; k++) {
+          const ok = await evaluate<boolean>(tab, `(() => { const n = ${FIND_NEXT_JS}; if (!n) return false; if (n.kind === 'href') { location.href = n.href; return true } const el = document.querySelector('[data-zrz-next]'); if (el) { el.click(); return true } return false })()`).catch(() => false)
+          if (!ok) { log('Could not fast-forward any further — collecting from here'); break }
+          await sleep(1200)
+          await waitForSettle(tab, 15_000)
+        }
+      }
+    }
     catch (e: any) { if (isBrowserGone(e)) throw e; if (urls.length > 1) { log(`Skipped: ${e?.message || e}`); continue } throw e }
+    let ckBase = resumeAt?.href || startUrl
+    let ckClicks = resumeAt?.clicks || 0
     for (let p = 1; p <= MAX_PAGES && !stop; p++) {
       const page = ++pageNo
       setProgress({ page, message: page === 1 ? 'Loading every vehicle on this page…' : `Page ${page}: loading vehicles…` })
@@ -589,16 +626,24 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       if (next.kind === 'href') {
         log(`${next.label} → ${String(next.href).replace(/^https?:\/\/[^/]+/, '')}`)
         // Checkpoint: a restart re-opens this exact result page instead of page 1.
-        doc.progress.resumeAt = { url: startUrl, href: String(next.href), page: p + 1 }
+        ckBase = String(next.href); ckClicks = 0
+        doc.progress.resumeAt = { url: startUrl, href: ckBase, page: page + 1, clicks: 0 }
         await persist(true)
         await goto(tab, next.href, 25_000, log).catch((e: any) => log(`Could not open the next page (${e?.message})`))
       }
       else {
         log(`Clicking “${next.label}”`)
         await sleep(400)
+        const urlBefore = tab.url
         await evaluate(tab, `(() => { const el = document.querySelector('[data-zrz-next]'); if (el) el.click(); return !!el })()`)
         await sleep(1500)
         await waitForSettle(tab, 15_000)
+        // Checkpoint: if the click changed the address use it; otherwise remember how many clicks from the last address.
+        const urlAfter = tab.url
+        if (urlAfter && urlAfter !== urlBefore && /^https?:/.test(urlAfter)) { ckBase = urlAfter; ckClicks = 0 }
+        else ckClicks++
+        doc.progress.resumeAt = { url: startUrl, href: ckBase, page: page + 1, clicks: ckClicks }
+        await persist(true)
       }
     }
     // Each inventory page advertises its own total; the next one starts fresh.

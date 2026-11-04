@@ -109,11 +109,11 @@ async function cont(opts: { allPages?: boolean, append?: boolean } = {}) {
     if (results.value) {
       tab.value = 'results'
       const cut = scan.value?.status === 'stopped' && /cut off/i.test(progress.value?.message || '')
-      toast[cut ? 'warning' : 'success'](cut ? 'Scan was cut off — showing what it found' : 'Scan complete', { description: `${results.value.summary.total} vehicles · ${results.value.summary.withoutReal} without a real photo (${results.value.summary.withoutRealPct ?? 0}%)` })
+      toast[cut ? 'warning' : 'success'](cut ? 'Crawl was cut off — showing what it found' : 'Crawl complete', { description: `${results.value.summary.total} vehicles · ${results.value.summary.withoutReal} without a real photo (${results.value.summary.withoutRealPct ?? 0}%)` })
     }
     else if (error.value) toast.error(error.value)
     else toast.error(progress.value?.message || 'The scan ended without results')
-  } catch (e: any) { toast.error(e?.message || 'Could not start the scan') }
+  } catch (e: any) { toast.error(e?.message || 'Could not start the crawl') }
 }
 async function stop() { await sc.stop(); toast('Stopping…', { description: 'The photos found so far are still checked and kept.' }) }
 
@@ -193,7 +193,7 @@ const engineLabel = computed(() => engine.value === 'serverless' ? 'Cloud Chrome
           <div class="flex items-center gap-2.5 min-w-0">
             <span class="size-8 rounded-lg bg-red-600 text-white flex items-center justify-center shadow-sm shadow-red-600/30"><ScanSearch class="size-4.5" /></span>
             <div class="min-w-0 leading-tight">
-              <DialogTitle class="text-sm font-semibold truncate">Inventory Scanner</DialogTitle>
+              <DialogTitle class="text-sm font-semibold truncate">Inventory Crawler</DialogTitle>
               <DialogDescription class="text-[11px] text-muted-foreground truncate">{{ dealership.name }}</DialogDescription>
             </div>
           </div>

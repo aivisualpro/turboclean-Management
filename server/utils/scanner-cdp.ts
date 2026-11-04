@@ -145,6 +145,9 @@ export async function openBrowser(): Promise<BrowserHandle> {
       // Serverless functions (Vercel / Lambda) have no /dev/shm — Chromium must use /tmp for shared memory.
       '--disable-dev-shm-usage',
       '--disable-gpu',
+      // Memory diet — a serverless instance has a few GB shared by every tab; dealer sites are heavy.
+      '--disable-site-isolation-trials', '--renderer-process-limit=2', '--disk-cache-size=1', '--media-cache-size=1',
+      '--js-flags=--max-old-space-size=512', '--disable-features=Translate,MediaRouter,OptimizationHints,BackForwardCache,IsolateOrigins,site-per-process',
       '--remote-debugging-pipe',
       `--user-data-dir=${profile}`,
       '--no-first-run', '--disable-background-networking', '--disable-sync', '--disable-extensions', '--disable-component-update',

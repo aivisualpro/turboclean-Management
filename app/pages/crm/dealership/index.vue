@@ -591,7 +591,7 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
           <DropdownMenuContent align="end" class="w-80">
             <DropdownMenuLabel class="text-xs text-muted-foreground">Scan batches · Mission Control</DropdownMenuLabel>
             <DropdownMenuItem v-if="batchesLoading && !batches.length" disabled><Loader2 class="size-4 animate-spin" /> Loading…</DropdownMenuItem>
-            <DropdownMenuItem v-else-if="!batches.length" disabled class="text-xs">No batches yet — select dealerships below and click <b class="mx-1">Scrape &amp; email</b>.</DropdownMenuItem>
+            <DropdownMenuItem v-else-if="!batches.length" disabled class="text-xs">No batches yet — select dealerships below and click <b class="mx-1">Crawl &amp; email</b>.</DropdownMenuItem>
             <DropdownMenuItem v-for="b in batches" :key="b.id" class="flex items-start gap-2.5 py-2" @click="resumeBatch(b.id)">
               <component :is="b.finished ? CheckCircle2 : CircleDashed" class="mt-0.5 size-4 shrink-0" :class="b.finished ? 'text-emerald-500' : 'text-rose-500 animate-spin [animation-duration:3s]'" />
               <span class="min-w-0 flex-1">
@@ -637,7 +637,7 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
             @click="quick = quick === qv.key ? 'all' : qv.key"
           >
             {{ qv.label }}
-            <span class="rounded-full px-1.5 py-px text-[10px] tabular-nums leading-none" :class="[quick === qv.key ? 'bg-muted' : 'bg-transparent', qv.tone && quickCounts[qv.key] ? qv.tone : '']">{{ quickCounts[qv.key] }}</span>
+            <span class="rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums leading-none" :class="quick !== qv.key && qv.tone && quickCounts[qv.key] ? qv.tone : ''" :style="quick === qv.key ? { color: 'inherit', background: 'color-mix(in srgb, currentColor 20%, transparent)' } : undefined">{{ quickCounts[qv.key] }}</span>
           </button>
         </div>
       </div>
@@ -676,10 +676,10 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
           <Button v-if="canDelete" variant="outline" size="sm" class="h-7 gap-1.5 text-xs bg-background border-rose-500/40 text-rose-600 hover:bg-rose-500/10 hover:text-rose-700 dark:text-rose-400" :disabled="bulkBusy" @click="askDelete"><Trash2 class="size-3.5" /> Delete {{ selected.size }}</Button>
           <Button
             v-if="canEdit" size="sm" class="h-7 gap-1.5 text-xs bg-rose-600 text-white shadow-sm hover:bg-rose-700 dark:bg-rose-600 dark:hover:bg-rose-500"
-            :disabled="bulkBusy" :title="selectedScannable < selected.size ? `${selected.size - selectedScannable} of the selected have no scan pages yet — Mission Control can detect them before starting` : 'Scrape the selected dealerships in one go, then email them — Mission Control'"
+            :disabled="bulkBusy" :title="selectedScannable < selected.size ? `${selected.size - selectedScannable} of the selected have no scan pages yet — Mission Control can detect them before starting` : 'Crawl the selected dealerships in one go, then email them — Mission Control'"
             @click="startBatch"
           >
-            <ScanSearch class="size-3.5" /> Scrape &amp; email
+            <ScanSearch class="size-3.5" /> Crawl &amp; email
             <span v-if="selectedScannable < selected.size" class="rounded bg-white/20 px-1 text-[10px] tabular-nums">{{ selectedScannable }}/{{ selected.size }}</span>
           </Button>
           <Loader2 v-if="bulkBusy" class="size-4 animate-spin text-primary" />

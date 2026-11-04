@@ -48,7 +48,7 @@ export interface AutomationDef {
 /** The 15 automations, in the brief's order. Mirrored client-side in app/constants/automations.ts. */
 export const AUTOMATIONS: AutomationDef[] = [
   { key: 'find_dealerships', n: 1, title: 'Find dealerships', group: 'find', kind: 'planned', does: 'Searches an area for car dealerships and adds new ones to the CRM (skipping duplicates).' },
-  { key: 'scrape_inventory', n: 2, title: 'Scrape websites & inventory', group: 'find', kind: 'planned', does: 'Reads each dealership website’s inventory pages and sends the vehicle list to the CRM.' },
+  { key: 'scrape_inventory', n: 2, title: 'Crawl websites & inventory', group: 'find', kind: 'planned', does: 'Reads each dealership website’s inventory pages and sends the vehicle list to the CRM.' },
   { key: 'count_inventory', n: 3, title: 'Count inventory', group: 'find', kind: 'event', does: 'Counts new and used vehicles from every incoming inventory snapshot and saves it as an audit.' },
   { key: 'missing_photos', n: 4, title: 'Missing-photo %', group: 'find', kind: 'scheduled', everyMinutes: 24 * 60, does: 'Calculates missing-photo % on every audit and flags dealerships whose audit is missing or older than 45 days.' },
   { key: 'find_contacts', n: 5, title: 'Find managers & contacts', group: 'find', kind: 'planned', does: 'Finds the GM / used-car manager on the dealership’s staff page and adds them as contacts.' },

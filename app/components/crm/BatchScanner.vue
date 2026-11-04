@@ -31,7 +31,7 @@ const { batch, live, driving, concurrency, feed, emailDealers, error: linkError,
 
 type Step = 'setup' | 'scan' | 'email' | 'sent'
 const step = ref<Step>('setup')
-const STEPS: { key: Step, n: number, label: string }[] = [{ key: 'setup', n: 1, label: 'Pages' }, { key: 'scan', n: 2, label: 'Scan' }, { key: 'email', n: 3, label: 'Emails' }, { key: 'sent', n: 4, label: 'Sent' }]
+const STEPS: { key: Step, n: number, label: string }[] = [{ key: 'setup', n: 1, label: 'Pages' }, { key: 'scan', n: 2, label: 'Crawl' }, { key: 'email', n: 3, label: 'Emails' }, { key: 'sent', n: 4, label: 'Sent' }]
 const stepIndex = computed(() => STEPS.findIndex(s => s.key === step.value))
 
 // ─── Setup ───
@@ -85,7 +85,7 @@ async function detectAll() {
 const ready = computed(() => setupRows.value.filter(r => r.pages.length))
 const starting = ref(false)
 async function start() {
-  if (!ready.value.length) return toast.error('No pages to scan yet', { description: 'Detect or pick the inventory pages first — the scanner never starts from a bare home page.' })
+  if (!ready.value.length) return toast.error('No pages to crawl yet', { description: 'Detect or pick the inventory pages first — the scanner never starts from a bare home page.' })
   starting.value = true
   try {
     await bs.create(setupRows.value.map(r => r.id), { pages: Object.fromEntries(setupRows.value.map(r => [r.id, r.pages])), concurrency: concurrency.value })
@@ -111,7 +111,7 @@ const focus = ref<string | null>(null)
 const focused = computed(() => items.value.find(i => i.dealershipId === focus.value) || null)
 const STATUS: Record<string, { icon: any, cls: string, label: string }> = {
   queued: { icon: CircleDashed, cls: 'text-zinc-500', label: 'Queued' },
-  running: { icon: Loader2, cls: 'text-emerald-400', label: 'Scanning' },
+  running: { icon: Loader2, cls: 'text-emerald-400', label: 'Crawling' },
   done: { icon: CheckCircle2, cls: 'text-emerald-400', label: 'Done' },
   stopped: { icon: AlertTriangle, cls: 'text-amber-400', label: 'Partial' },
   failed: { icon: X, cls: 'text-rose-400', label: 'Failed' },
@@ -239,7 +239,7 @@ function closeDialog() {
   if (driving.value) { closeAsk.value = true; return }
   open.value = false
 }
-function closeKeepRunning() { closeAsk.value = false; open.value = false; toast('Autopilot is on — scanning continues on our servers', { description: 'You can close this tab, shut the laptop or go offline. Open Batches any time to see where it is.', duration: 8000 }) }
+function closeKeepRunning() { closeAsk.value = false; open.value = false; toast('Autopilot is on — crawling continues on our servers', { description: 'You can close this tab, shut the laptop or go offline. Open Batches any time to see where it is.', duration: 8000 }) }
 async function closePause() { closeAsk.value = false; await bs.pause(); open.value = false; toast('Paused', { description: 'Each dealership saved the exact page it was on. Resume from Batches whenever you like — it continues from there.' }) }
 async function closeCancel() { closeAsk.value = false; await bs.cancel(); open.value = false; toast('Batch cancelled', { description: 'Scanned dealerships keep their audits. Waiting ones were dropped.' }) }
 const short = (u: string) => u.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')
@@ -256,7 +256,7 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
           <div class="flex items-center gap-3 min-w-0">
             <span class="relative size-9 rounded-xl bg-emerald-500/15 ring-1 ring-emerald-400/30 flex items-center justify-center"><Radar class="size-5 text-emerald-300" :class="driving && 'animate-pulse'" /><span v-if="driving" class="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-emerald-400 animate-ping" /></span>
             <div class="min-w-0 leading-tight">
-              <DialogTitle class="text-sm font-semibold tracking-wide">Mission Control <span class="text-emerald-400/80 font-normal">· batch scan &amp; outreach</span></DialogTitle>
+              <DialogTitle class="text-sm font-semibold tracking-wide">Mission Control <span class="text-emerald-400/80 font-normal">· batch crawl &amp; outreach</span></DialogTitle>
               <DialogDescription class="text-[11px] text-zinc-400 truncate">{{ batch?.name || `${setupRows.length} dealership${setupRows.length === 1 ? '' : 's'} selected` }}</DialogDescription>
             </div>
           </div>
@@ -284,12 +284,12 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
               <div class="ml-auto flex items-center gap-3">
                 <div class="text-xs text-zinc-400">Scan <Select v-model="concurrency"><SelectTrigger class="inline-flex h-8 w-16 ml-1 mr-1 bg-white/5 border-white/10 text-zinc-100"><SelectValue /></SelectTrigger><SelectContent><SelectItem :value="1">1</SelectItem><SelectItem :value="2">2</SelectItem><SelectItem :value="3">3</SelectItem></SelectContent></Select> at a time</div>
                 <Button v-if="missingPages.length" variant="outline" class="h-10 gap-2 bg-transparent border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-200" :disabled="detectingAll" @click="detectAll"><Loader2 v-if="detectingAll" class="size-4 animate-spin" /><Wand2 v-else class="size-4" /> Detect pages for {{ missingPages.length }}</Button>
-                <Button class="h-10 gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold px-5" :disabled="starting || detectingAll || !ready.length" @click="start"><Loader2 v-if="starting" class="size-4 animate-spin" /><Play v-else class="size-4" /> Start scanning {{ ready.length }} dealership{{ ready.length === 1 ? '' : 's' }}<span v-if="setupRows.length - ready.length" class="ml-1 rounded bg-black/20 px-1.5 text-[11px] font-medium">{{ setupRows.length - ready.length }} skipped</span></Button>
+                <Button class="h-10 gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold px-5" :disabled="starting || detectingAll || !ready.length" @click="start"><Loader2 v-if="starting" class="size-4 animate-spin" /><Play v-else class="size-4" /> Start crawling {{ ready.length }} dealership{{ ready.length === 1 ? '' : 's' }}<span v-if="setupRows.length - ready.length" class="ml-1 rounded bg-black/20 px-1.5 text-[11px] font-medium">{{ setupRows.length - ready.length }} skipped</span></Button>
               </div>
             </div>
             <div class="rounded-2xl border border-white/10 bg-white/[0.03] overflow-hidden">
               <table class="w-full text-sm">
-                <thead class="text-[10px] uppercase tracking-wider text-zinc-500 bg-white/[0.03]"><tr><th class="text-left font-medium px-4 py-2.5 w-10">#</th><th class="text-left font-medium px-3 py-2.5">Dealership</th><th class="text-left font-medium px-3 py-2.5">Pages to scan</th><th class="px-3 py-2.5" /></tr></thead>
+                <thead class="text-[10px] uppercase tracking-wider text-zinc-500 bg-white/[0.03]"><tr><th class="text-left font-medium px-4 py-2.5 w-10">#</th><th class="text-left font-medium px-3 py-2.5">Dealership</th><th class="text-left font-medium px-3 py-2.5">Pages to crawl</th><th class="px-3 py-2.5" /></tr></thead>
                 <tbody class="divide-y divide-white/5">
                   <tr v-for="(r, i) in setupRows" :key="r.id" :class="!r.pages.length && !r.detecting && 'bg-amber-500/[0.04]'">
                     <td class="px-4 py-3 font-mono text-xs text-zinc-500">{{ String(i + 1).padStart(2, '0') }}</td>
@@ -327,7 +327,7 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
             </div>
             <div class="bg-[#070b09] px-4 py-3"><p class="text-[10px] uppercase tracking-wider text-zinc-500">Vehicles found</p><p class="mt-1 text-2xl font-bold tabular-nums leading-none">{{ batch.totals.vehicles.toLocaleString() }}</p><p class="mt-1.5 text-[11px] text-zinc-500 flex items-center gap-1"><Car class="size-3" /> across {{ batch.counts.done + batch.counts.stopped }} site{{ batch.counts.done + batch.counts.stopped === 1 ? '' : 's' }}</p></div>
             <div class="bg-[#070b09] px-4 py-3"><p class="text-[10px] uppercase tracking-wider text-zinc-500">Without a real photo</p><p class="mt-1 text-2xl font-bold tabular-nums leading-none text-rose-400">{{ batch.totals.withoutReal.toLocaleString() }}<span v-if="withoutPct !== null" class="text-sm font-semibold text-rose-400/70 ml-1.5">{{ withoutPct }}%</span></p><p class="mt-1.5 text-[11px] text-zinc-500 flex items-center gap-1"><ImageOff class="size-3" /> placeholders, no image, stock</p></div>
-            <div class="bg-[#070b09] px-4 py-3"><p class="text-[10px] uppercase tracking-wider text-zinc-500">Right now</p><p class="mt-1 text-2xl font-bold tabular-nums leading-none text-emerald-300">{{ batch.counts.running }}<span class="text-sm text-zinc-500 font-normal"> scanning</span></p><p class="mt-1.5 text-[11px] text-zinc-500">{{ batch.counts.queued }} waiting · {{ concurrency }} at a time</p></div>
+            <div class="bg-[#070b09] px-4 py-3"><p class="text-[10px] uppercase tracking-wider text-zinc-500">Right now</p><p class="mt-1 text-2xl font-bold tabular-nums leading-none text-emerald-300">{{ batch.counts.running }}<span class="text-sm text-zinc-500 font-normal"> crawling</span></p><p class="mt-1.5 text-[11px] text-zinc-500">{{ batch.counts.queued }} waiting · {{ concurrency }} at a time</p></div>
             <div class="bg-[#070b09] px-4 py-3 flex flex-col justify-between">
               <p class="text-[10px] uppercase tracking-wider text-zinc-500">{{ batch.finished ? 'Finished' : driving ? 'Running' : 'Paused' }}</p>
               <div class="flex flex-wrap gap-1.5 mt-1">
@@ -531,8 +531,8 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
         <Dialog v-model:open="closeAsk">
           <DialogContent class="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle class="flex items-center gap-2"><DoorOpen class="size-4 text-emerald-600" /> Scans are still running</DialogTitle>
-              <DialogDescription>{{ batch?.counts.running || 0 }} scanning now, {{ batch?.counts.queued || 0 }} waiting. Everything found so far is already saved — choose what happens next.</DialogDescription>
+              <DialogTitle class="flex items-center gap-2"><DoorOpen class="size-4 text-emerald-600" /> Crawls are still running</DialogTitle>
+              <DialogDescription>{{ batch?.counts.running || 0 }} crawling now, {{ batch?.counts.queued || 0 }} waiting. Everything found so far is already saved — choose what happens next.</DialogDescription>
             </DialogHeader>
             <div class="grid gap-2">
               <button type="button" class="rounded-xl border p-3 text-left hover:bg-accent/60 transition-colors" @click="closeKeepRunning">
