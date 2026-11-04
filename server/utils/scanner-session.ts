@@ -291,6 +291,8 @@ export interface ScanDoc {
   clusters: ImageCluster[]
   countStockAsMissing: boolean
   auditId: string | null
+  /** The audit a reviewed (re-labelled) result will correct when saved again. */
+  revisesAuditId?: string | null
   error: string | null
   heartbeatAt: string
   /** Latest live-view frame (server-run batches; overwritten every few seconds). */
@@ -325,7 +327,7 @@ export function resultsOf(doc: ScanDoc) {
     vehicles: doc.vehicles.map(v => ({ ...v, listUrl: listKey(v, doc), final: finalVerdict(v, cmap) })), clusters: doc.clusters, images,
     // Results per crawl page (URL) — the review screen can filter by page.
     crawlPages: pageBreakdown(doc, null, cmap).map(p => ({ url: p.url, label: p.label, total: p.total, withoutReal: p.withoutReal, withoutRealPct: p.withoutRealPct })),
-    savedAuditId: doc.auditId, labels: VERDICT_LABEL, finishedAt: doc.progress.finishedAt,
+    savedAuditId: doc.auditId, revisesAuditId: doc.revisesAuditId || null, labels: VERDICT_LABEL, finishedAt: doc.progress.finishedAt,
   }
 }
 
@@ -432,7 +434,7 @@ export async function createScan(db: Db, body: any, actor: SessionActor) {
   }
   if (base) {
     // Continue the same scan record so one audit covers both lists.
-    await col.updateOne({ _id: base._id }, { $set: { status: 'running', stopRequested: false, startUrl: url, urls, progress, heartbeatAt: now, auditId: null, error: null, batchId: doc.batchId, autoSave: doc.autoSave } })
+    await col.updateOne({ _id: base._id }, { $set: { status: 'running', stopRequested: false, startUrl: url, urls, progress, heartbeatAt: now, auditId: null, revisesAuditId: null, error: null, batchId: doc.batchId, autoSave: doc.autoSave } })
     doc._id = base._id
     doc.log = base.log || []
   }
@@ -814,8 +816,10 @@ export async function applyReview(db: Db, id: string, body: any) {
   if (body?.reapplyRules) await reclassify(db, doc)
   // Any change after saving makes it a draft again until saved once more.
   if (doc.status === 'saved') doc.status = 'done'
+  // Remember which audit these results came from: saving again corrects that audit (no duplicate).
+  if (doc.auditId) doc.revisesAuditId = doc.auditId
   doc.auditId = null
-  await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { vehicles: doc.vehicles, clusters: doc.clusters, countStockAsMissing: doc.countStockAsMissing, status: doc.status, auditId: null } })
+  await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { vehicles: doc.vehicles, clusters: doc.clusters, countStockAsMissing: doc.countStockAsMissing, status: doc.status, auditId: null, revisesAuditId: doc.revisesAuditId || null } })
   return resultsOf(doc)
 }
 
@@ -882,8 +886,10 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
   const perPage = byPage.length > 1 ? Math.max(4, Math.floor(40 / byPage.length)) : 40
   const taken = new Map<string, number>()
   const picked = ranked.filter((v) => { const k = listKey(v, doc); const n = taken.get(k) || 0; if (n >= perPage) return false; taken.set(k, n + 1); return true }).slice(0, 40)
-  const { recordAudit } = await import('./crm-audit')
-  const audit = await recordAudit(db, d, {
+  const { recordAudit, reviseAudit } = await import('./crm-audit')
+  // Already saved (e.g. a batch crawl) → the review corrects that audit instead of adding a second one.
+  const prevAudit = doc.auditId || doc.revisesAuditId || null
+  const audit = await (prevAudit ? (body: any, a: any) => reviseAudit(db, d, String(prevAudit), body, a) : (body: any, a: any) => recordAudit(db, d, body, a))({
     ...sum.counts,
     source: 'automated',
     inventoryUrl: doc.urls?.[0] || pages[0] || doc.startUrl,
@@ -898,6 +904,11 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
     screenshotFileId: null,
     collector: { name: 'ZRZ Inventory Scanner', version: ENGINE_VERSION, runId: String(doc._id) },
   }, actor)
+  // A batch crawl corrected after review: the batch (and its email step) shows the corrected numbers.
+  if (doc.batchId && prevAudit) {
+    const { updateBatchItem } = await import('./scanner-batch')
+    await updateBatchItem(db, doc.batchId, doc.dealershipId, { summary: { total: sum.total, withoutReal: sum.withoutReal, withoutRealPct: sum.withoutRealPct, by: sum.by }, auditId: audit?.id || null }).catch(() => {})
+  }
   await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { status: 'saved', auditId: audit?.id || null, summary: sum, savedAt: new Date().toISOString(), savedBy: { id: actor.id, name: actor.name } } })
   try {
     const { logEventRun } = await import('./automation')

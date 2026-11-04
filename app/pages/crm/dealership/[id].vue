@@ -5,7 +5,7 @@ import type { CrmEmail } from '~/composables/useCrmEmail'
 import { NURTURE_STAGE, OPEN_STAGES, QUEUE_STAGES } from '~/constants/crm'
 import {
   ArrowLeft, Pencil, MoreHorizontal, Archive, ArchiveRestore, Users, UserPlus, History,
-  Building2, ShieldAlert, Trash2, ShieldCheck, ChevronDown, ExternalLink, Copy, Tag, Store, Trophy, Briefcase, ClipboardCheck, ImageOff, GitBranch, MessageSquarePlus, Target, Mail as MailIcon, ScanSearch,
+  Building2, ShieldAlert, Trash2, ShieldCheck, ChevronDown, ExternalLink, Copy, Tag, Store, Trophy, Briefcase, ClipboardCheck, ImageOff, GitBranch, MessageSquarePlus, Target, Mail as MailIcon, ScanSearch, ChevronRight,
 } from 'lucide-vue-next'
 // Separate binding for the header (inside <ClientOnly>): Nuxt drops imports used only there from the SSR build,
 // which would also remove the one the tabs computed needs.
@@ -44,6 +44,10 @@ const inStageMs = computed(() => { const at = dealership.value?.stageChangedAt |
 const latestAudit = computed(() => [...audits.value].sort((a, b) => b.auditedAt.localeCompare(a.auditedAt))[0] || null)
 const showAudit = ref(false)
 const showScanner = ref(false)
+// Re-open the crawl behind the latest automated audit to review / train it.
+const showReview = ref(false)
+const latestScanId = computed(() => { const a: any = latestAudit.value; return a?.source === 'automated' && a?.collector?.runId ? String(a.collector.runId) : null })
+function openLatestAudit() { if (latestScanId.value) showReview.value = true; else tab.value = 'audits' }
 
 const TABS = ['overview', 'history', 'emails', 'pipeline', 'contacts', 'audits']
 // `?tab=activity` was the old name of the History tab.
@@ -378,7 +382,7 @@ const tabs = computed(() => [
             </section>
             <section class="shrink-0 rounded-xl border bg-card">
               <header class="px-5 py-3.5 border-b flex items-center justify-between"><h3 class="font-semibold text-sm flex items-center gap-2"><ClipboardCheck class="size-4 text-muted-foreground" /> Inventory audit</h3><Button variant="ghost" size="sm" class="h-7 text-xs" @click="tab = 'audits'">{{ audits.length ? 'History' : 'Open' }}</Button></header>
-              <div v-if="latestAudit" class="px-5 py-4 flex items-center gap-2">
+              <button v-if="latestAudit" type="button" class="group w-full text-left px-5 py-4 flex items-center gap-2 rounded-b-xl hover:bg-muted/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" :title="latestScanId ? 'Open the crawl results — review and correct the photos' : 'Open the audit history'" @click="openLatestAudit">
                 <div>
                   <p class="text-2xl font-bold tabular-nums leading-none" :class="latestAudit.missingPhotoPct === null ? 'text-muted-foreground' : latestAudit.missingPhotoPct >= 25 ? 'text-rose-600 dark:text-rose-400' : latestAudit.missingPhotoPct >= 10 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'">{{ latestAudit.missingPhotoPct === null ? '—' : `${latestAudit.missingPhotoPct}%` }}</p>
                   <p class="text-[10px] uppercase tracking-wider text-muted-foreground mt-1">missing photos</p>
@@ -389,7 +393,8 @@ const tabs = computed(() => [
                   <p class="text-muted-foreground">Audited {{ formatDistanceToNow(new Date(latestAudit.auditedAt), { addSuffix: true }) }} · {{ audits.length }} on record</p>
                   <p v-if="latestAudit.merchandisingIssues.length + latestAudit.websiteIssues.length" class="text-amber-700 dark:text-amber-300 flex items-center gap-1"><ImageOff class="size-3" /> {{ latestAudit.merchandisingIssues.length + latestAudit.websiteIssues.length }} issues flagged</p>
                 </div>
-              </div>
+                <span class="ml-auto shrink-0 text-xs font-medium text-muted-foreground group-hover:text-foreground inline-flex items-center gap-1">{{ latestScanId ? 'Review & train' : 'Details' }} <ChevronRight class="size-3.5 transition-transform group-hover:translate-x-0.5" /></span>
+              </button>
               <div v-else class="px-5 py-6 text-center">
                 <p class="text-sm text-muted-foreground">Not audited yet.</p>
                 <Button v-if="canEdit" size="sm" variant="outline" class="mt-2 gap-1.5" @click="showAudit = true"><ClipboardCheck class="size-3.5" /> Record first audit</Button>
@@ -483,6 +488,7 @@ const tabs = computed(() => [
     <CrmConvertDialog v-model:open="showConvert" :dealership="dealership" :contacts="contacts" @converted="refresh()" />
     <CrmAuditForm v-model:open="showAudit" :dealership="dealership" :previous="latestAudit" @saved="refresh()" />
     <ClientOnly><CrmInventoryScanner v-if="dealership" v-model:open="showScanner" :dealership="{ id, name: dealership.name, website: dealership.website }" @saved="refresh()" /></ClientOnly>
+    <ClientOnly><CrmScannerReviewDialog v-if="dealership" v-model:open="showReview" :scan-id="latestScanId" :dealership-name="dealership.name" :audit-id="latestAudit ? String((latestAudit as any).id) : null" :audited-at="latestAudit?.auditedAt" @saved="refresh()" /></ClientOnly>
     <Dialog v-model:open="showPark">
       <DialogContent class="sm:max-w-md">
         <DialogHeader>

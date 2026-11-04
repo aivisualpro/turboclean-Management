@@ -4,10 +4,12 @@ import type { CrmDealership } from '~/composables/useCrmDealerships'
 import type { Batch, BatchItem } from '~/composables/useBatchScan'
 import type { EmailTemplate } from '~/composables/useCrmEmail'
 import { loadPreviewContext, renderEmail } from '~/composables/useTemplatePreview'
+import { useInventoryScanner } from '~/composables/useInventoryScanner'
 import type { PreviewContext } from '~/composables/useTemplatePreview'
 import {
   X, Radar, Play, Pause, Square, Loader2, CheckCircle2, AlertTriangle, CircleDashed, Car, ImageOff, Clock, Mail, Send, Eye, ChevronRight, ListChecks,
   RotateCcw, Globe, Sparkles, Inbox, ExternalLink, Users, Check, Ban, Zap, Archive, Pencil, Wand2, DoorOpen, Cloud, WifiOff, ShieldCheck,
+  FileDown, FileText, FileBarChart, ChevronDown,
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { formatDistanceToNow } from 'date-fns'
@@ -109,6 +111,29 @@ const pct = computed(() => batch.value ? Math.round(((batch.value.counts.total -
 const withoutPct = computed(() => { const t = batch.value?.totals; return t && t.vehicles ? Math.round((t.withoutReal / t.vehicles) * 1000) / 10 : null })
 const focus = ref<string | null>(null)
 const focused = computed(() => items.value.find(i => i.dealershipId === focus.value) || null)
+// Full results for the picked dealership — same review screen as a single crawl (re-label photos,
+// image groups, rules). Saving corrects that dealership's audit, so emails use the corrected numbers.
+const rv = useInventoryScanner()
+const rvLoading = ref(false)
+const rvSaving = ref(false)
+const showResults = ref(true)
+const focusedScanId = computed(() => focused.value && (focused.value.status === 'done' || focused.value.status === 'stopped') ? focused.value.scanId : null)
+watch(focusedScanId, async (id) => {
+  rv.results.value = null
+  if (!id) return
+  rvLoading.value = true
+  try { await rv.refresh(id) } catch { toast.error('Could not load the crawl results') } finally { rvLoading.value = false }
+}, { immediate: true })
+const rvDirty = computed(() => !!rv.results.value && !rv.results.value.savedAuditId)
+async function saveCorrections() {
+  if (!rv.results.value || !focused.value) return
+  rvSaving.value = true
+  try {
+    const r = await rv.save()
+    toast.success('Corrections saved', { description: `${focused.value.name}: ${r.summary.withoutReal} of ${r.summary.total} without a real photo (${r.summary.withoutRealPct ?? 0}%). The report and emails use these numbers.` })
+    if (batch.value?.id) await bs.load(batch.value.id).catch(() => {})
+  } catch (e: any) { toast.error(e?.data?.statusMessage || 'Could not save the corrections') } finally { rvSaving.value = false }
+}
 const STATUS: Record<string, { icon: any, cls: string, label: string }> = {
   queued: { icon: CircleDashed, cls: 'text-zinc-500', label: 'Queued' },
   running: { icon: Loader2, cls: 'text-emerald-400', label: 'Crawling' },
@@ -182,6 +207,26 @@ async function previewFor(r: Row) {
   previewLoading.value = true
   previewCtx.value = null
   try { previewCtx.value = await loadPreviewContext(r.dealershipId) } catch { toast.error('Could not load preview data') } finally { previewLoading.value = false }
+}
+// Downloads: the email as a PDF (nothing is sent) and the dealer's inventory report PDF.
+const emailPdfUrl = (r: Row, download = true) => `/api/crm/dealerships/${r.dealershipId}/emails/pdf?templateId=${encodeURIComponent(r.templateId)}${r.contactId ? `&contactId=${encodeURIComponent(r.contactId)}` : ''}${download ? '&download=1' : ''}`
+const reportPdfUrl = (r: Row) => { const a = items.value.find(i => i.dealershipId === r.dealershipId)?.auditId; return a ? `/api/crm/audits/${a}/report?format=pdf&download=1` : '' }
+const pdfBusy = ref<string | null>(null)
+async function downloadPdf(url: string, key: string) {
+  if (!url || pdfBusy.value) return
+  pdfBusy.value = key
+  const t = toast.loading('Preparing the PDF…', { description: 'The first one can take ~10 seconds.' })
+  try {
+    const res = await fetch(url, { credentials: 'include' })
+    if (!res.ok) { let msg = `PDF failed (${res.status})`; try { msg = (await res.json())?.statusMessage || msg } catch {} ; throw new Error(msg) }
+    const name = decodeURIComponent((res.headers.get('content-disposition') || '').match(/filename="?([^";]+)"?/)?.[1] || 'document.pdf')
+    const blob = await res.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob); a.download = name
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(a.href), 10_000)
+    toast.success('PDF downloaded', { id: t, description: name })
+  } catch (e: any) { toast.error(e?.message || 'Could not make the PDF', { id: t }) } finally { pdfBusy.value = null }
 }
 const previewRendered = computed(() => {
   const r = previewRow.value
@@ -386,7 +431,20 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
                       <Button as="a" :href="`/crm/dealership/${focused.dealershipId}?tab=audits`" target="_blank" size="sm" variant="outline" class="h-7 gap-1.5 text-xs bg-transparent border-white/15 text-zinc-100 hover:bg-white/10"><ExternalLink class="size-3.5" /> Open in CRM</Button>
                     </div>
                   </div>
-                  <p v-if="focused.auditId" class="mt-2 text-[11px] text-emerald-400/90 flex items-center gap-1.5"><CheckCircle2 class="size-3.5" /> Inventory audit saved — the email step uses these numbers.</p>
+                  <p v-if="focused.auditId && !rvDirty" class="mt-2 text-[11px] text-emerald-400/90 flex items-center gap-1.5"><CheckCircle2 class="size-3.5" /> Inventory audit saved — the email step uses these numbers.<button v-if="focusedScanId" type="button" class="ml-auto text-zinc-400 hover:text-white underline underline-offset-2" @click="showResults = !showResults">{{ showResults ? 'Hide results' : 'Review results' }}</button></p>
+                </div>
+
+                <!-- Full results: review + train, exactly like a single crawl -->
+                <div v-if="focusedScanId && showResults" class="mb-3 rounded-2xl border border-white/10 overflow-hidden flex flex-col">
+                  <div v-if="rvDirty" class="shrink-0 flex flex-wrap items-center gap-3 px-4 py-2.5 bg-amber-500/10 border-b border-amber-500/20 text-sm text-amber-100">
+                    <Pencil class="size-4 text-amber-300" />
+                    <span>You changed some verdicts — now <b class="tabular-nums">{{ rv.results.value!.summary.withoutReal }}</b> of {{ rv.results.value!.summary.total }} without a real photo ({{ rv.results.value!.summary.withoutRealPct ?? 0 }}%). Save to update the audit, report and emails.</span>
+                    <Button size="sm" class="ml-auto h-8 gap-1.5 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold" :disabled="rvSaving" @click="saveCorrections"><Loader2 v-if="rvSaving" class="size-3.5 animate-spin" /><Check v-else class="size-3.5" /> Save corrections</Button>
+                  </div>
+                  <div class="dark h-[72vh] min-h-[520px] bg-background text-foreground">
+                    <div v-if="rvLoading || !rv.results.value" class="h-full flex items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 class="size-4 animate-spin" /> Loading {{ focused?.name }}'s results…</div>
+                    <CrmScannerResults v-else :results="rv.results.value" :review="rv.review" :list-rules="rv.listRules" :add-rule="rv.addRule" :remove-rule="rv.removeRule" />
+                  </div>
                 </div>
 
                 <!-- Live consoles -->
@@ -483,6 +541,15 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
                       </td>
                       <td class="px-3 py-3 text-right whitespace-nowrap">
                         <Button variant="ghost" size="sm" class="h-7 gap-1.5 text-xs text-zinc-300 hover:text-white hover:bg-white/10" :disabled="!r.templateId" @click="previewFor(r)"><Eye class="size-3.5" /> Preview</Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger as-child>
+                            <Button variant="ghost" size="sm" class="h-7 gap-1 text-xs text-zinc-300 hover:text-white hover:bg-white/10" :disabled="!!pdfBusy" title="Download as PDF"><Loader2 v-if="pdfBusy?.endsWith(r.dealershipId)" class="size-3.5 animate-spin" /><FileDown v-else class="size-3.5" /> PDF <ChevronDown class="size-3 opacity-60" /></Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" class="w-64">
+                            <DropdownMenuItem :disabled="!r.templateId" @select="downloadPdf(emailPdfUrl(r), `email:${r.dealershipId}`)"><FileText class="size-4" /><div><p class="text-sm">This email</p><p class="text-[11px] text-muted-foreground">Filled for {{ r.name }} — not sent</p></div></DropdownMenuItem>
+                            <DropdownMenuItem :disabled="!reportPdfUrl(r)" @select="downloadPdf(reportPdfUrl(r), `report:${r.dealershipId}`)"><FileBarChart class="size-4" /><div><p class="text-sm">Inventory report</p><p class="text-[11px] text-muted-foreground">{{ reportPdfUrl(r) ? 'Full findings, grouped by page' : 'No saved audit yet' }}</p></div></DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                         <label v-if="dealerCtx(r.dealershipId)?.lastEmail && !dealerCtx(r.dealershipId)!.lastEmail!.replied" class="ml-1 inline-flex items-center gap-1 text-[10px] text-zinc-500 cursor-pointer" title="Send even though this dealership was emailed recently"><Checkbox :model-value="r.allowDuplicate" class="size-3 border-white/30" @update:model-value="(v: any) => { r.allowDuplicate = !!v }" /> again</label>
                       </td>
                     </tr>
@@ -523,7 +590,7 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
         <!-- Email preview dialog -->
         <Dialog :open="!!previewRow" @update:open="(o: boolean) => { if (!o) previewRow = null }">
           <DialogContent class="sm:max-w-4xl max-h-[92vh] p-0 gap-0 overflow-hidden flex flex-col">
-            <DialogHeader class="px-5 pt-5 pb-3 border-b"><DialogTitle class="text-base">{{ previewRow?.name }} — {{ tplList.find(t => t.id === previewRow?.templateId)?.name }}</DialogTitle><DialogDescription class="text-xs">Filled with this dealership's latest audit and contact — exactly what will be sent.</DialogDescription></DialogHeader>
+            <DialogHeader class="px-5 pt-5 pb-3 border-b"><DialogTitle class="text-base">{{ previewRow?.name }} — {{ tplList.find(t => t.id === previewRow?.templateId)?.name }}</DialogTitle><DialogDescription class="text-xs flex flex-wrap items-center gap-2"><span>Filled with this dealership's latest audit and contact — exactly what will be sent.</span><span v-if="previewRow" class="ml-auto flex gap-2"><Button v-if="reportPdfUrl(previewRow)" size="sm" variant="outline" class="h-7 gap-1.5 text-xs" :disabled="!!pdfBusy" @click="downloadPdf(reportPdfUrl(previewRow!), `report:${previewRow!.dealershipId}`)"><FileBarChart class="size-3.5" /> Report PDF</Button><Button size="sm" class="h-7 gap-1.5 text-xs" :disabled="!!pdfBusy || !previewRow.templateId" @click="downloadPdf(emailPdfUrl(previewRow!), `email:${previewRow!.dealershipId}`)"><Loader2 v-if="pdfBusy" class="size-3.5 animate-spin" /><FileDown v-else class="size-3.5" /> Download PDF</Button></span></DialogDescription></DialogHeader>
             <CrmEmailPreview v-model:device="previewDevice" class="flex-1 min-h-0 rounded-none border-0" :html="previewRendered?.html || ''" :subject="previewRendered?.subject" :preheader="previewRendered?.preheader" :from="previewCtx?.from" :to="previewCtx?.to" :loading="previewLoading" max-height="calc(92vh - 110px)" />
           </DialogContent>
         </Dialog>

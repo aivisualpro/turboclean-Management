@@ -163,3 +163,31 @@ export async function recordAudit(db: Db, dealership: any, body: any, session: a
   } catch (e) { console.error('[CRM] audit report snapshot failed:', (e as Error).message) }
   return serializeAudit({ _id: res.insertedId, ...doc })
 }
+
+/**
+ * Re-save an automated audit after its crawl results were reviewed (photos re-labelled, rules
+ * applied): same audit, same date, corrected numbers. The stored report is rebuilt so emails,
+ * {{reportUrl}} and PDFs show the corrected findings. The original numbers stay in the activity log.
+ */
+export async function reviseAudit(db: Db, dealership: any, auditId: string, body: any, session: any) {
+  const actor = actorFromSession(session)
+  const before = ObjectId.isValid(auditId) ? await db.collection(AUDIT_COLLECTION).findOne({ _id: new ObjectId(auditId) }) : null
+  if (!before) return recordAudit(db, dealership, body, session)
+  const next = buildAuditDoc({ ...body, auditedAt: before.auditedAt }, dealership._id.toString(), before.auditedBy || actor)
+  const { createdAt: _c, auditedBy: _b, ...fields } = next
+  const revision = { at: new Date().toISOString(), by: actor, from: { totalVehicles: before.totalVehicles, totalMissingPhotos: before.totalMissingPhotos, usedMissingPhotos: before.usedMissingPhotos } }
+  await db.collection(AUDIT_COLLECTION).updateOne({ _id: before._id }, { $set: { ...fields, revisedAt: revision.at, revisedBy: actor }, $push: { revisions: revision } as any })
+  if (before.totalMissingPhotos !== next.totalMissingPhotos || before.totalVehicles !== next.totalVehicles) {
+    await logActivity(db, {
+      dealershipId: dealership._id.toString(), type: 'audit.recorded', actor,
+      message: `Inventory audit corrected after review — ${next.totalVehicles} vehicles, ${next.totalMissingPhotos} without a real photo (was ${before.totalMissingPhotos})`,
+      changes: { 'Missing photos': { from: before.totalMissingPhotos, to: next.totalMissingPhotos } },
+    })
+  }
+  try {
+    const { REPORTS_COLLECTION, snapshotAuditReport } = await import('./crm-reports')
+    await db.collection(REPORTS_COLLECTION).deleteOne({ auditId })
+    await snapshotAuditReport(db, dealership, { ...before, ...fields })
+  } catch (e) { console.error('[CRM] audit report rebuild failed:', (e as Error).message) }
+  return serializeAudit({ ...before, ...fields, revisedAt: revision.at })
+}

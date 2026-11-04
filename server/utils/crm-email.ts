@@ -651,6 +651,57 @@ export async function previewCrmEmail(db: Db, dealership: any, input: SendInput,
 }
 
 /**
+ * The email a dealership WOULD get (template + its latest audit + contact), as one printable
+ * document: a "preview — not sent" envelope above the email. The audit screenshot is embedded, so
+ * the PDF needs no sign-in to render. Used for "Download PDF" next to Preview (e.g. to hand over
+ * on a visit when there is no contact email yet).
+ */
+export async function emailPreviewDocument(db: Db, dealership: any, input: { templateId: string, contactId?: string | null }, actor: SessionActor | null) {
+  const dealershipId = dealership._id.toString()
+  let contactId = input.contactId && ObjectId.isValid(input.contactId) ? input.contactId : null
+  if (!contactId) {
+    const contacts = await db.collection(CRM_COLLECTIONS.contacts).find({ dealershipId }).toArray()
+    const { pickEmailContact } = await import('./automation-research')
+    const c = pickEmailContact(contacts) || contacts.find((x: any) => x.isPrimary) || null
+    contactId = c?._id?.toString() || null
+  }
+  const contact = contactId ? await db.collection(CRM_COLLECTIONS.contacts).findOne({ _id: new ObjectId(contactId), dealershipId }) : null
+  const picked = await pickVariants(db, input.templateId)
+  const version = picked.version
+  const subject = String(picked.subject?.text || version?.subject || '')
+  const p = await previewCrmEmail(db, dealership, { templateId: input.templateId, templateVersion: version?.version, contactId, subject, body: '' } as any, actor)
+  let body = p.html
+  // Screenshot: same-origin URL → embedded image (the PDF printer is not signed in).
+  const m = body.match(/\/api\/crm\/files\/([a-f0-9]{24})/i)
+  if (m) {
+    const file = await getFile(db, m[1]!).catch(() => null)
+    body = body.split(`/api/crm/files/${m[1]}`).join(file ? `data:${file.contentType};base64,${file.data.toString('base64')}` : '')
+  }
+  const sender = await getSenderProfile(db, actor)
+  const head = body.match(/<head[^>]*>([\s\S]*?)<\/head>/i)?.[1] || ''
+  const styles = (head.match(/<style[\s\S]*?<\/style>/gi) || []).join('\n')
+  const inner = body.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1] ?? body
+  const bg = (body.match(/<body([^>]*)>/i)?.[1] || '').match(/background(?:-color)?:\s*([^;"]+)/i)?.[1] || '#ffffff'
+  const to = contact ? `${`${contact.firstName || ''} ${contact.lastName || ''}`.trim()}${contact.email ? ` <${contact.email}>` : ''}` : 'No contact yet'
+  const row = (k: string, v: string) => v ? `<tr><td style="padding:3px 14px 3px 0;color:#667085;white-space:nowrap;vertical-align:top">${k}</td><td style="padding:3px 0;color:#101828">${v}</td></tr>` : ''
+  const envelope = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;line-height:17px;background:#ffffff;border-bottom:1px solid #eaecf0;padding:18px 24px">
+  <div style="font-size:10px;font-weight:700;letter-spacing:1.6px;color:#b54708;margin-bottom:8px">EMAIL PREVIEW &middot; NOT SENT</div>
+  <div style="font-size:17px;font-weight:700;color:#101828;margin-bottom:10px">${esc(p.subject || '')}</div>
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+    ${row('From', esc(sender.displayName ? `${sender.displayName} · ${sender.company || FROM_BRAND()}` : FROM_BRAND()))}
+    ${row('To', esc(to))}
+    ${row('Dealership', esc(dealership.name || ''))}
+    ${row('Template', esc(`${picked.template?.name || ''}${version?.version ? ` v${version.version}` : ''}`))}
+  </table>
+</div>`
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(p.subject || 'Email')} — ${esc(dealership.name || '')}</title>
+<style>@page{size:Letter;margin:0.3in}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{margin:0;background:${esc(bg)}}</style>${styles}</head>
+<body>${envelope}<div>${inner}</div></body></html>`
+  const fileName = `${String(dealership.name || 'dealer').replace(/[^\w]+/g, '-')}_${String(picked.template?.name || 'email').replace(/[^\w]+/g, '-')}_${new Date().toISOString().slice(0, 10)}`.replace(/-+/g, '-')
+  return { html, fileName, subject: p.subject }
+}
+
+/**
  * Everything a template preview needs to render exactly like a real send, in the browser:
  * the merge values (incl. the ready-made HTML blocks) for a real dealership — its latest audit and
  * best contact — or for a realistic sample dealership. The sender is always the signed-in user's
