@@ -1,10 +1,12 @@
 import { actorFromSession, getCrmDb } from '../../../../utils/crm'
-import { deleteDealership } from '../../../../utils/crm-duplicates'
+import { bulkDeleteDealerships } from '../../../../utils/crm-trash'
 import { getUserSession } from '../../../../utils/auth'
 
-/** DELETE /api/crm/dealerships/:id — permanently delete a dealership and its linked records (not won accounts). */
+/** DELETE /api/crm/dealerships/:id — move a dealership and everything linked to it to Trash (restorable for 30 days; not won accounts). */
 export default defineEventHandler(async (event) => {
   const session = await getUserSession(event)
   if (!session) throw createError({ statusCode: 401, statusMessage: 'Sign in first' })
-  return deleteDealership(await getCrmDb(), getRouterParam(event, 'id')!, actorFromSession(session))
+  const r = await bulkDeleteDealerships(await getCrmDb(), [getRouterParam(event, 'id')!], actorFromSession(session))
+  if (!r.deleted.length) throw createError({ statusCode: r.skipped[0]?.reason.startsWith('Won') ? 409 : 404, statusMessage: r.skipped[0]?.reason || 'Dealership not found' })
+  return { ok: true, undoToken: r.undoToken }
 })

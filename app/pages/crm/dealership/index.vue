@@ -9,7 +9,7 @@ import {
   Plus, Search, Store, ShieldAlert, Download, RefreshCw, ChevronUp, ChevronDown,
   ChevronsUpDown, X, Filter, UserCircle2,
   CheckSquare, Tag, UserCheck, Loader2, ExternalLink, Briefcase, Trophy, SlidersHorizontal, Upload, Binoculars,
-  ScanSearch, Radar, Layers, Mail, CheckCircle2, CircleDashed, Route, Grid3x3,
+  ScanSearch, Radar, Layers, Mail, CheckCircle2, CircleDashed, Route, Grid3x3, Trash2, ArchiveRestore, ShieldCheck, AlertTriangle,
 } from 'lucide-vue-next'
 import type { Batch as ScanBatch } from '~/composables/useBatchScan'
 import { toast } from 'vue-sonner'
@@ -23,6 +23,7 @@ const { dealerships, isLoading, lastFetchedAt, fetchDealerships, updateDealershi
 const { isActionAllowed } = usePermissions()
 const canAdd = computed(() => isActionAllowed('crm_dealership', 'Add'))
 const canEdit = computed(() => isActionAllowed('crm_dealership', 'Edit'))
+const canDelete = computed(() => isActionAllowed('crm_dealership', 'Delete'))
 
 const { pending } = await useAsyncData('crm-dealerships-bootstrap', async () => {
   if (dealerships.value.length === 0) await fetchDealerships()
@@ -380,6 +381,75 @@ function startBatch() {
   showBatch.value = true
 }
 function resumeBatch(id: string) { batchIds.value = []; batchResumeId.value = id; showBatch.value = true }
+// ─── Delete selected (moves to Trash — restorable with every linked record) ───
+const showDelete = ref(false)
+const deleteConfirm = ref('')
+const deleting = ref(false)
+const toDelete = computed(() => dealerships.value.filter(d => selected.value.has(d.id)))
+const toDeleteWon = computed(() => toDelete.value.filter(d => d.dealerId))
+const deletableCount = computed(() => toDelete.value.length - toDeleteWon.value.length)
+/** Big deletes ask for the word DELETE, small ones a single click. */
+const needsTyping = computed(() => deletableCount.value >= 10)
+function askDelete() { deleteConfirm.value = ''; showDelete.value = true }
+async function confirmDelete() {
+  if (needsTyping.value && deleteConfirm.value.trim().toUpperCase() !== 'DELETE') return
+  deleting.value = true
+  try {
+    const r = await $fetch<{ deleted: { id: string, name: string }[], skipped: { name: string, reason: string }[], undoToken: string | null, backupId: string | null }>('/api/crm/dealerships/bulk-delete', { method: 'POST', body: { ids: toDelete.value.map(d => d.id) } })
+    const gone = new Set(r.deleted.map(x => x.id))
+    dealerships.value = dealerships.value.filter(d => !gone.has(d.id))
+    clearSelection()
+    showDelete.value = false
+    const token = r.undoToken
+    toast.success(`${r.deleted.length} dealership${r.deleted.length === 1 ? '' : 's'} moved to Trash`, {
+      description: `${r.skipped.length ? `${r.skipped.length} skipped (won accounts). ` : ''}Contacts, activity, emails and audits went with them — restore any time for 30 days.${r.backupId ? ' A full backup was saved first.' : ''}`,
+      duration: 20_000,
+      action: token ? { label: 'Undo', onClick: () => restoreToken(token) } : undefined,
+    })
+    loadFacts().catch(() => {})
+  }
+  catch (e: any) { toast.error(e?.data?.statusMessage || 'Could not delete') }
+  finally { deleting.value = false }
+}
+async function restoreToken(undoToken: string) {
+  try {
+    const r = await $fetch<{ restored: any[], failed: any[] }>('/api/crm/dealerships/trash/restore', { method: 'POST', body: { undoToken } })
+    toast.success(`Restored ${r.restored.length} dealership${r.restored.length === 1 ? '' : 's'}`, { description: r.failed.length ? `${r.failed.length} could not be restored` : 'Everything is back, history included.' })
+    await Promise.all([fetchDealerships(), loadFacts()])
+    if (showTrash.value) loadTrash()
+  }
+  catch (e: any) { toast.error(e?.data?.statusMessage || 'Could not restore') }
+}
+
+// ─── Trash ───
+interface TrashRow { id: string, undoToken: string | null, code: string, name: string, city: string, state: string, counts: Record<string, number>, deletedAt: string, deletedBy: { name: string } | null, restorable: boolean }
+const showTrash = ref(false)
+const trash = ref<TrashRow[]>([])
+const trashLoading = ref(false)
+const trashPick = ref<Set<string>>(new Set())
+const trashQ = ref('')
+const trashShown = computed(() => { const n = trashQ.value.trim().toLowerCase(); return n ? trash.value.filter(t => `${t.name} ${t.city} ${t.code}`.toLowerCase().includes(n)) : trash.value })
+async function loadTrash() {
+  trashLoading.value = true
+  try { trash.value = (await $fetch<{ items: TrashRow[] }>('/api/crm/dealerships/trash')).items; trashPick.value = new Set() } catch {} finally { trashLoading.value = false }
+}
+function openTrash() { showTrash.value = true; loadTrash() }
+function toggleTrash(id: string) { const s = new Set(trashPick.value); s.has(id) ? s.delete(id) : s.add(id); trashPick.value = s }
+const restoring = ref(false)
+async function restorePicked(ids?: string[]) {
+  const list = ids || [...trashPick.value]
+  if (!list.length) return
+  restoring.value = true
+  try {
+    const r = await $fetch<{ restored: any[], failed: { name: string, reason: string }[] }>('/api/crm/dealerships/trash/restore', { method: 'POST', body: { ids: list } })
+    toast.success(`Restored ${r.restored.length} dealership${r.restored.length === 1 ? '' : 's'}`, { description: r.failed.length ? r.failed.map(f => `${f.name}: ${f.reason}`).slice(0, 3).join(' · ') : 'Contacts, activity, emails and audits are back too.' })
+    await Promise.all([fetchDealerships(), loadFacts(), loadTrash()])
+  }
+  catch (e: any) { toast.error(e?.data?.statusMessage || 'Could not restore') }
+  finally { restoring.value = false }
+}
+const linkedCount = (c: Record<string, number>) => Object.values(c || {}).reduce((a, b) => a + b, 0)
+
 async function onBatchDone() { try { await Promise.all([fetchDealerships(), loadFacts(), loadBatches()]) } catch {} }
 
 // Recent batches (resume the unfinished ones from here — a closed Mission Control only pauses them).
@@ -536,6 +606,7 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <Button v-if="canDelete" variant="outline" size="icon" class="size-8" title="Trash — restore deleted dealerships (30 days)" @click="openTrash"><Trash2 class="size-4" /></Button>
         <Button variant="outline" size="icon" class="size-8" title="Refresh" :disabled="refreshing" @click="refresh">
           <RefreshCw class="size-4" :class="refreshing && 'animate-spin'" />
         </Button>
@@ -602,6 +673,7 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
             </DropdownMenuContent>
           </DropdownMenu>
           <Button variant="outline" size="sm" class="h-7 gap-1.5 text-xs bg-background" @click="exportCsv(true)"><Download class="size-3.5" /> Export selected</Button>
+          <Button v-if="canDelete" variant="outline" size="sm" class="h-7 gap-1.5 text-xs bg-background border-rose-500/40 text-rose-600 hover:bg-rose-500/10 hover:text-rose-700 dark:text-rose-400" :disabled="bulkBusy" @click="askDelete"><Trash2 class="size-3.5" /> Delete {{ selected.size }}</Button>
           <Button
             v-if="canEdit" size="sm" class="h-7 gap-1.5 text-xs bg-rose-600 text-white shadow-sm hover:bg-rose-700 dark:bg-rose-600 dark:hover:bg-rose-500"
             :disabled="bulkBusy" :title="selectedScannable < selected.size ? `${selected.size - selectedScannable} of the selected have no scan pages yet — Mission Control can detect them before starting` : 'Scrape the selected dealerships in one go, then email them — Mission Control'"
@@ -809,6 +881,67 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
       <CrmScanPagesEditor v-model:open="showPages" :dealership="pagesFor" />
       <CrmBatchScanner v-model:open="showBatch" :dealership-ids="batchIds" :batch-id="batchResumeId" @done="onBatchDone" />
     </ClientOnly>
+
+    <!-- Delete selected -->
+    <Dialog v-model:open="showDelete">
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <div class="flex items-start gap-3">
+            <div class="size-10 shrink-0 rounded-xl bg-rose-500/10 flex items-center justify-center"><Trash2 class="size-5 text-rose-600" /></div>
+            <div class="min-w-0">
+              <DialogTitle>Delete {{ deletableCount }} dealership{{ deletableCount === 1 ? '' : 's' }}?</DialogTitle>
+              <DialogDescription class="text-xs mt-1">They move to <b class="text-foreground">Trash</b> with everything linked to them — contacts, activity, emails, audits, stage history. Restore any time in the next 30 days; after that they are gone.</DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+        <ul class="max-h-48 overflow-y-auto rounded-lg border divide-y text-sm">
+          <li v-for="d in toDelete.slice(0, 50)" :key="d.id" class="flex items-center gap-2 px-3 py-1.5" :class="d.dealerId && 'opacity-60'">
+            <span class="font-mono text-[10px] text-muted-foreground w-16 shrink-0">{{ d.dealershipId }}</span>
+            <span class="truncate flex-1">{{ d.name }}</span>
+            <span class="text-[11px] text-muted-foreground shrink-0">{{ d.city }}</span>
+            <span v-if="d.dealerId" class="shrink-0 rounded bg-emerald-500/10 px-1.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">Won — kept</span>
+          </li>
+          <li v-if="toDelete.length > 50" class="px-3 py-1.5 text-xs text-muted-foreground">…and {{ toDelete.length - 50 }} more</li>
+        </ul>
+        <p v-if="toDeleteWon.length" class="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200"><AlertTriangle class="size-4 shrink-0 mt-px" /> {{ toDeleteWon.length }} won account{{ toDeleteWon.length === 1 ? ' lives' : 's live' }} in Dealers and will be skipped.</p>
+        <p v-if="deletableCount >= 10" class="flex items-center gap-2 text-xs text-muted-foreground"><ShieldCheck class="size-4 text-emerald-600" /> A full CRM backup is saved automatically before a delete this size.</p>
+        <label v-if="needsTyping" class="block space-y-1">
+          <span class="text-xs">Type <b class="font-mono">DELETE</b> to confirm</span>
+          <Input v-model="deleteConfirm" class="h-9 font-mono" placeholder="DELETE" autocomplete="off" @keydown.enter="confirmDelete" />
+        </label>
+        <DialogFooter class="gap-2">
+          <Button variant="ghost" :disabled="deleting" @click="showDelete = false">Cancel</Button>
+          <Button variant="destructive" class="gap-1.5 min-w-32" :disabled="deleting || !deletableCount || (needsTyping && deleteConfirm.trim().toUpperCase() !== 'DELETE')" @click="confirmDelete"><Loader2 v-if="deleting" class="size-4 animate-spin" /><Trash2 v-else class="size-4" /> Move {{ deletableCount }} to Trash</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Trash -->
+    <Dialog v-model:open="showTrash">
+      <DialogContent class="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle class="flex items-center gap-2"><Trash2 class="size-4 text-muted-foreground" /> Trash</DialogTitle>
+          <DialogDescription class="text-xs">Dealerships deleted in the last 30 days. Restoring brings back the dealership with its contacts, activity, emails and audits — exactly as they were.</DialogDescription>
+        </DialogHeader>
+        <div class="flex items-center gap-2">
+          <div class="relative flex-1"><Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" /><Input v-model="trashQ" class="h-8 pl-8 text-sm" placeholder="Search deleted dealerships…" /></div>
+          <Button size="sm" class="h-8 gap-1.5" :disabled="restoring || !trashPick.size" @click="restorePicked()"><Loader2 v-if="restoring" class="size-4 animate-spin" /><ArchiveRestore v-else class="size-4" /> Restore {{ trashPick.size || '' }}</Button>
+        </div>
+        <div class="max-h-[55vh] overflow-y-auto rounded-lg border divide-y">
+          <div v-if="trashLoading && !trash.length" class="p-6 text-center text-sm text-muted-foreground"><Loader2 class="size-4 animate-spin inline" /> Loading…</div>
+          <div v-else-if="!trashShown.length" class="p-8 text-center text-sm text-muted-foreground">Trash is empty.</div>
+          <label v-for="t in trashShown" :key="t.id" class="flex items-center gap-3 px-3 py-2 text-sm hover:bg-accent/40 cursor-pointer">
+            <Checkbox :model-value="trashPick.has(t.id)" :disabled="!t.restorable" @update:model-value="toggleTrash(t.id)" />
+            <div class="min-w-0 flex-1">
+              <p class="truncate font-medium">{{ t.name }} <span class="font-mono text-[10px] text-muted-foreground">{{ t.code }}</span></p>
+              <p class="text-[11px] text-muted-foreground">{{ [t.city, t.state].filter(Boolean).join(', ') }} · deleted {{ formatDistanceToNow(new Date(t.deletedAt), { addSuffix: true }) }}{{ t.deletedBy?.name ? ` by ${t.deletedBy.name}` : '' }}{{ linkedCount(t.counts) ? ` · ${linkedCount(t.counts)} linked records` : '' }}</p>
+            </div>
+            <Button v-if="t.restorable" variant="ghost" size="sm" class="h-7 text-xs gap-1" :disabled="restoring" @click.prevent="restorePicked([t.id])"><ArchiveRestore class="size-3.5" /> Restore</Button>
+            <span v-else class="text-[10px] text-muted-foreground" title="Deleted one at a time before Trash existed — only the dealership and contacts were kept">Partial</span>
+          </label>
+        </div>
+      </DialogContent>
+    </Dialog>
 
     <Dialog v-model:open="showBulkLost">
       <DialogContent class="sm:max-w-lg">

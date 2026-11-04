@@ -85,8 +85,35 @@ export function websiteKey(v: unknown) {
 const NAME_NOISE = /\b(the|of|inc|llc|co|corp|dealership|auto|automotive|motors?|cars?|group|sales)\b/g
 /** "The Smith Toyota of Hartford, LLC" → "smith toyota hartford" — for fuzzy duplicate matching. */
 export function nameKey(v: unknown) {
-  return String(v ?? '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9 ]+/g, ' ').replace(NAME_NOISE, ' ').replace(/\s+/g, ' ').trim()
+  // "DBA Gates Nissan" (registered as "doing business as") is the same store as "Gates Nissan".
+  return String(v ?? '').toLowerCase().replace(/^\s*d\.?b\.?a\.?\s*:?\s*/, '').replace(/&/g, ' and ').replace(/[^a-z0-9 ]+/g, ' ').replace(NAME_NOISE, ' ').replace(/\s+/g, ' ').trim()
 }
 
 export const emailKey = (v: unknown) => String(v ?? '').trim().toLowerCase()
 export const personKey = (first: unknown, last: unknown) => `${String(first ?? '').trim().toLowerCase()} ${String(last ?? '').trim().toLowerCase()}`.trim()
+
+
+// Words that stay upper-case when a SHOUTED name is tidied.
+const KEEP_UPPER = new Set(['GMC', 'VW', 'BMW', 'KIA', 'CT', 'US', 'USA', 'CDJR', 'RAM', 'SUV', 'LR1', 'PAG', 'SST', 'JB', 'DNBRY', 'MJ', 'A-1', 'II', 'III', 'IV', 'NY', 'NJ', 'MA', 'RI'])
+const KEEP_LOWER = new Set(['of', 'and', 'the', 'by', 'at', 'on', 'in'])
+/** "DBA GATES GMC BUICK INC" → "Gates GMC Buick"; names typed normally are left alone (only DBA / suffix removed). */
+export function cleanDealerName(v: unknown) {
+  let s = String(v ?? '').trim().replace(/\s+/g, ' ')
+  s = s.replace(/^d\.?b\.?a\.?\s*:?\s*/i, '')
+  const letters = s.replace(/\([^)]*\)/g, '').replace(/[^A-Za-z]/g, '')
+  const shouted = letters.length >= 4 && letters.replace(/[^A-Z]/g, '').length / letters.length >= 0.8
+  if (shouted) {
+    s = s.replace(/\s*,\s*/g, ', ').replace(/\s*&\s*/g, ' & ')
+    s = s.split(' ').map((w, i) => {
+      const core = w.toUpperCase().split(/['’]/)[0]!.replace(/[^A-Z0-9-]/g, '')
+      if (KEEP_UPPER.has(core)) return w.toUpperCase().replace(/['’]S\b/, "'s")
+      if (i > 0 && KEEP_LOWER.has(w.toLowerCase())) return w.toLowerCase()
+      return w.toLowerCase().replace(/(^|[-('/.])([a-z])/g, (_m, p, c) => p + c.toUpperCase()).replace(/^Mc([a-z])/, (_m, c) => `Mc${c.toUpperCase()}`).replace(/'S\b/g, "'s")
+    }).join(' ')
+  }
+  let prev = ''
+  while (prev !== s) { prev = s; s = s.replace(/[\s,]+(inc\.?|llc\.?|l\.l\.c\.|corp\.?|ltd\.?|co\.?|the)$/i, '').trim() }
+  return s.slice(0, 200)
+}
+/** A dealer group that is really a visit day ("DAY 5") — older imports put routes there. */
+export const looksLikeRouteDay = (v: unknown) => /^\s*day\s*-?\s*\d{1,3}\s*$/i.test(String(v ?? ''))

@@ -67,6 +67,19 @@ const users = ref<{ id: string, name: string }[]>([])
 onMounted(async () => { try { const res = await $fetch<any[]>('/api/users'); users.value = (res || []).filter(u => u.status !== 'Inactive').map(u => ({ id: u.id, name: u.name || u.email })).sort((a, b) => a.name.localeCompare(b.name)); ownerId.value = (me.value as any)?.id || '' } catch {} })
 const check = ref<any>(null)
 const importing = ref(false)
+/** Rows that match an existing dealership update it (fills / fixes fields) instead of being skipped. */
+const updateExisting = ref(true)
+/** "DBA GATES NISSAN INC" → "Gates Nissan" on import (and on updated records). */
+const cleanNames = ref(true)
+const resultFilter = ref<'changes' | 'all'>('changes')
+const STATUS_META: Record<string, { label: string, cls: string }> = {
+  'created': { label: 'Created', cls: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' }, 'ready': { label: 'New', cls: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' },
+  'updated': { label: 'Updated', cls: 'bg-sky-500/10 text-sky-700 dark:text-sky-300' }, 'will-update': { label: 'Will update', cls: 'bg-sky-500/10 text-sky-700 dark:text-sky-300' },
+  'unchanged': { label: 'Up to date', cls: 'bg-muted text-muted-foreground' }, 'duplicate': { label: 'Skipped', cls: 'bg-amber-500/10 text-amber-700 dark:text-amber-300' }, 'invalid': { label: 'Invalid', cls: 'bg-rose-500/10 text-rose-700 dark:text-rose-300' },
+}
+const shownResults = computed(() => (check.value?.results || []).filter((x: any) => resultFilter.value === 'all' || !['ready', 'created', 'unchanged'].includes(x.status)))
+const multiMatches = computed(() => (check.value?.results || []).filter((x: any) => /^\d+ records \(/.test(x.message || '')).length)
+const actionCount = computed(() => (check.value?.ready || 0) + (check.value?.willUpdate || 0))
 async function onFile(e: Event) {
   const f = (e.target as HTMLInputElement).files?.[0]
   if (!f) return
@@ -75,7 +88,7 @@ async function onFile(e: Event) {
   fileName.value = f.name
   headers.value = rows[0]!.map(h => h.trim())
   body.value = rows.slice(1)
-  mapping.value = guessMapping(headers.value)
+  mapping.value = guessMapping(headers.value, body.value)
   defaultState.value = ''
   check.value = null
 }
@@ -89,14 +102,18 @@ const mappedRows = computed(() => body.value.map((r) => {
   return o
 }))
 const missingRequired = computed(() => IMPORT_FIELDS.filter(f => f.required && !mapping.value.includes(f.key) && !(f.key === 'state' && defaultState.value)).map(f => f.label))
-watch([mapping, defaultState], () => { check.value = null }, { deep: true })
+watch([mapping, defaultState, updateExisting, cleanNames], () => { check.value = null }, { deep: true })
 async function runImport(dryRun: boolean) {
   importing.value = true
   try {
     const owner = users.value.find(u => u.id === ownerId.value)
-    const res: any = await $fetch('/api/crm/import/dealerships', { method: 'POST', body: { rows: mappedRows.value, dryRun, ownerId: owner?.id || '', ownerName: owner?.name || '' } })
+    const res: any = await $fetch('/api/crm/import/dealerships', { method: 'POST', body: { rows: mappedRows.value, dryRun, update: updateExisting.value, cleanNames: cleanNames.value, ownerId: owner?.id || '', ownerName: owner?.name || '' } })
     check.value = res
-    if (!dryRun) { toast.success(`Imported ${res.created} dealership${res.created === 1 ? '' : 's'}`, { description: `${res.duplicates} duplicates skipped · ${res.invalid} invalid` }); load() }
+    if (!dryRun) {
+      toast.success(`${res.created} created · ${res.updated} updated`, { description: `${res.unchanged} already up to date · ${res.duplicates} skipped · ${res.invalid} invalid` })
+      load()
+      try { await useCrmDealerships().fetchDealerships() } catch {}
+    }
   } catch (e: any) { toast.error(e?.data?.statusMessage || 'Import failed') } finally { importing.value = false }
 }
 
@@ -228,7 +245,7 @@ const changeText = (c: any) => c ? Object.entries(c).map(([k, v]: any) => `${k}:
       <section v-if="canEdit" class="rounded-xl border bg-card p-4 space-y-4">
         <div>
           <h3 class="text-sm font-semibold flex items-center gap-2"><Upload class="size-4 text-muted-foreground" /> Import dealerships from CSV</h3>
-          <p class="text-[11px] text-muted-foreground mt-0.5">One row per dealership; optional contact columns create a primary contact. Columns are matched automatically — check them below. Duplicates (already in the CRM or repeated in the file) are skipped.</p>
+          <p class="text-[11px] text-muted-foreground mt-0.5">One row per dealership; optional contact columns create a primary contact. Columns are matched by header <b>and by their values</b> (a column of "DAY 1, DAY 2…" goes to Route, empty columns are ignored) — check them below. Re-import a corrected file with <b>Update existing</b> on to fix records in place.</p>
         </div>
         <label class="inline-flex items-center gap-2 rounded-md border border-dashed px-4 py-3 text-sm cursor-pointer hover:bg-muted/40">
           <Upload class="size-4" /> {{ fileName || 'Choose a .csv file' }}
@@ -267,14 +284,33 @@ const changeText = (c: any) => c ? Object.entries(c).map(([k, v]: any) => `${k}:
               <SelectTrigger class="h-8 w-[110px] text-xs" :class="!hasStateColumn && !defaultState && 'border-destructive'"><SelectValue placeholder="Pick state" /></SelectTrigger>
               <SelectContent class="max-h-72"><SelectItem v-for="st in US_STATES" :key="st" :value="st">{{ st }}</SelectItem></SelectContent>
             </Select>
+            <label class="inline-flex items-center gap-1.5 text-xs cursor-pointer" title="Rows that match a dealership already in the CRM update it (every filled column wins; a 'DAY n' dealer group moves to Route) instead of being skipped"><Switch v-model="updateExisting" /> Update existing</label>
+            <label class="inline-flex items-center gap-1.5 text-xs cursor-pointer" title="DBA GATES NISSAN INC → Gates Nissan (also tidies matching records)"><Switch v-model="cleanNames" /> Tidy names</label>
             <Button size="sm" variant="outline" :disabled="importing || !!missingRequired.length" @click="runImport(true)"><Loader2 v-if="importing" class="size-4 animate-spin" /> Check file</Button>
-            <Button size="sm" :disabled="importing || !!missingRequired.length || !check || !check.ready" @click="runImport(false)">Import {{ check?.ready ? `${check.ready} new` : '' }}</Button>
+            <Button size="sm" :disabled="importing || !!missingRequired.length || !check || !actionCount" @click="runImport(false)">{{ check ? [check.ready ? `Create ${check.ready}` : '', check.willUpdate ? `Update ${check.willUpdate}` : ''].filter(Boolean).join(' · ') || 'Nothing to do' : 'Import' }}</Button>
             <span v-if="missingRequired.length" class="text-xs text-destructive">{{ missingRequired.length === 1 && missingRequired[0] === 'State' ? 'No State column — pick the state for these rows' : `Map: ${missingRequired.join(', ')}` }}</span>
           </div>
-          <div v-if="check" class="rounded-lg border">
-            <p class="px-3 py-2 text-xs border-b bg-muted/30"><b>{{ check.created || check.ready }}</b> {{ check.created ? 'created' : 'ready' }} · <b>{{ check.duplicates }}</b> duplicates · <b>{{ check.invalid }}</b> invalid</p>
-            <ul class="max-h-64 overflow-y-auto divide-y text-xs">
-              <li v-for="r in check.results.filter((x: any) => x.status !== 'ready' && x.status !== 'created')" :key="r.row" class="px-3 py-1.5 flex gap-2"><span class="text-muted-foreground w-14">Row {{ r.row }}</span><span :class="r.status === 'invalid' ? 'text-destructive' : 'text-amber-700 dark:text-amber-300'">{{ r.message }}</span></li>
+          <div v-if="check" class="rounded-lg border overflow-hidden">
+            <div class="grid grid-cols-2 sm:grid-cols-5 gap-px bg-border text-center">
+              <div class="bg-card px-3 py-2"><p class="text-lg font-bold tabular-nums text-emerald-600">{{ check.created || check.ready }}</p><p class="text-[10px] uppercase tracking-wider text-muted-foreground">{{ check.created ? 'Created' : 'New' }}</p></div>
+              <div class="bg-card px-3 py-2"><p class="text-lg font-bold tabular-nums text-sky-600">{{ check.updated || check.willUpdate || 0 }}</p><p class="text-[10px] uppercase tracking-wider text-muted-foreground">{{ check.updated ? 'Updated' : 'Will update' }}</p></div>
+              <div class="bg-card px-3 py-2"><p class="text-lg font-bold tabular-nums">{{ check.unchanged || 0 }}</p><p class="text-[10px] uppercase tracking-wider text-muted-foreground">Up to date</p></div>
+              <div class="bg-card px-3 py-2"><p class="text-lg font-bold tabular-nums text-amber-600">{{ check.duplicates }}</p><p class="text-[10px] uppercase tracking-wider text-muted-foreground">Skipped</p></div>
+              <div class="bg-card px-3 py-2"><p class="text-lg font-bold tabular-nums text-rose-600">{{ check.invalid }}</p><p class="text-[10px] uppercase tracking-wider text-muted-foreground">Invalid</p></div>
+            </div>
+            <div class="flex items-center gap-2 px-3 py-1.5 border-y bg-muted/30 text-[11px]">
+              <button type="button" :class="resultFilter === 'changes' ? 'font-semibold text-foreground' : 'text-muted-foreground'" @click="resultFilter = 'changes'">Changes & problems</button>
+              <span class="text-muted-foreground">·</span>
+              <button type="button" :class="resultFilter === 'all' ? 'font-semibold text-foreground' : 'text-muted-foreground'" @click="resultFilter = 'all'">All rows</button>
+              <button v-if="multiMatches" type="button" class="ml-auto text-amber-700 dark:text-amber-300 hover:underline" @click="tab = 'health'">{{ multiMatches }} row{{ multiMatches === 1 ? '' : 's' }} matched more than one record — merge the duplicates →</button>
+            </div>
+            <ul class="max-h-80 overflow-y-auto divide-y text-xs">
+              <li v-for="r in shownResults" :key="r.row" class="px-3 py-1.5 flex items-start gap-2">
+                <span class="text-muted-foreground w-14 shrink-0 tabular-nums">Row {{ r.row }}</span>
+                <span class="shrink-0 rounded px-1.5 py-px text-[10px] font-semibold" :class="STATUS_META[r.status]?.cls">{{ STATUS_META[r.status]?.label || r.status }}</span>
+                <span class="min-w-0 break-words" :class="r.status === 'invalid' && 'text-destructive'">{{ r.message }}</span>
+              </li>
+              <li v-if="!shownResults.length" class="px-3 py-4 text-center text-muted-foreground">Nothing to review — every row is new or already up to date.</li>
             </ul>
           </div>
         </template>

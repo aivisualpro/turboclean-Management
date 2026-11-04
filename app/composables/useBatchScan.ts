@@ -1,11 +1,11 @@
-import { streamScanRun } from '~/composables/useInventoryScanner'
 import type { ScannerProgress } from '~/composables/useInventoryScanner'
 
 /**
- * Batch scanning ("Mission Control"): this browser drives a stored batch — it claims the next queued
- * dealership, streams its scan, and moves on, with `concurrency` scans at once. Everything is kept
- * on the server as it happens (claims are atomic, scans auto-save their audits), so closing the
- * console pauses the batch and Resume picks it up — from any browser.
+ * Batch scanning ("Mission Control") — AUTOPILOT. The batch runs on the server: each dealership is
+ * scanned in its own server invocation and the next one starts by itself; a cron restarts anything
+ * that stalls from its last checkpoint. This composable only WATCHES (polls `/live` every ~2.5 s):
+ * closing the window, losing the internet or a flat battery does not stop or lose anything —
+ * reopen and it shows exactly where the batch is.
  */
 export type ItemStatus = 'queued' | 'running' | 'done' | 'stopped' | 'failed' | 'skipped' | 'cancelled'
 export interface BatchItem {
@@ -21,179 +21,143 @@ export interface BatchItem {
 export interface Batch {
   id: string, name: string, status: 'running' | 'done', items: BatchItem[], concurrency: number, autoSave: boolean, createdAt: string, createdBy: { id: string, name: string } | null, finishedAt?: string
   counts: Record<'total' | ItemStatus, number>, totals: { vehicles: number, withoutReal: number, emailed: number }, finished: boolean
+  mode?: 'server' | 'browser', paused?: boolean
 }
-/** Live state of one dealership while this browser scans it. */
-export interface LiveRun { dealershipId: string, progress: ScannerProgress | null, log: { at: string, text: string }[], frame: string | null, startedAt: number, lastEvent: number, scanId: string | null }
+/** Live state of one running dealership (mirrored from the server every poll). */
+export interface LiveRun { dealershipId: string, progress: (ScannerProgress & { doneUrls?: string[], resumeAt?: { url: string, href: string, page: number } | null }) | null, log: { at: string, text: string }[], frame: string | null, startedAt: number, lastEvent: number, scanId: string | null }
 export interface EmailDealer { dealershipId: string, stage: string, city: string, state: string, contacts: { id: string, name: string, email: string, title: string, doNotEmail: boolean, bounced: boolean, isPrimary: boolean }[], bestContactId: string | null, lastEmail: { subject: string, sentAt: string, to: string, templateName: string, replied: boolean } | null }
 
 export function useBatchScan() {
   const batch = ref<Batch | null>(null)
   const live = ref<Record<string, LiveRun>>({})
+  /** True while the server is working on the batch (not paused, not finished). */
   const driving = ref(false)
   const concurrency = ref(2)
   const error = ref<string | null>(null)
+  /** Seconds since the last successful poll — the UI shows "reconnecting…" when it grows. */
+  const offlineFor = ref(0)
   const feed = ref<{ at: number, dealershipId: string, name: string, text: string, kind: 'info' | 'ok' | 'warn' | 'err' }[]>([])
-  let stopRequested = false
-  let aborts: AbortController[] = []
-  let refreshTimer: ReturnType<typeof setInterval> | null = null
-  /** Called when every worker has stopped (batch finished, paused or cancelled). */
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let watching = false
+  let lastOk = Date.now()
+  let pollMs = 2500
+  /** Called when the batch stops moving (finished or paused). */
   let onFinished: ((b: Batch | null, reason: 'finished' | 'paused') => void) | null = null
   const whenFinished = (fn: typeof onFinished) => { onFinished = fn }
+  const say = (dealershipId: string, name: string, text: string, kind: 'info' | 'ok' | 'warn' | 'err' = 'info', at = Date.now()) => { feed.value = [...feed.value.slice(-399), { at, dealershipId, name, text, kind }] }
+  const kindOf = (t: string): 'info' | 'ok' | 'warn' | 'err' => /failed|could not|blocked|error|gave up/i.test(t) ? 'err' : /crash|restart|waiting|paus|slow|rate-limit|skipped/i.test(t) ? 'warn' : /saved|done in|vehicles · |verified/i.test(t) ? 'ok' : 'info'
 
-  const say = (dealershipId: string, name: string, text: string, kind: 'info' | 'ok' | 'warn' | 'err' = 'info') => { feed.value = [...feed.value.slice(-299), { at: Date.now(), dealershipId, name, text, kind }] }
+  // What has already been shown in the feed (so a poll only adds new lines / status changes).
+  const seenLog = new Map<string, string>()
+  const lastStatus = new Map<string, string>()
+  function absorb(b: Batch, liveRows: Record<string, any>) {
+    const prevDriving = driving.value
+    batch.value = b
+    concurrency.value = b.concurrency || concurrency.value
+    const next: Record<string, LiveRun> = {}
+    for (const [dealershipId, l] of Object.entries(liveRows || {})) {
+      const name = b.items.find(i => i.dealershipId === dealershipId)?.name || ''
+      const logs: { at: string, text: string }[] = l.log || []
+      const lastSeen = seenLog.get(dealershipId)
+      const from = lastSeen ? logs.findIndex(x => `${x.at}|${x.text}` === lastSeen) + 1 : Math.max(0, logs.length - 4)
+      for (const x of logs.slice(from)) say(dealershipId, name, x.text, kindOf(x.text), new Date(x.at).getTime())
+      if (logs.length) seenLog.set(dealershipId, `${logs[logs.length - 1]!.at}|${logs[logs.length - 1]!.text}`)
+      const prev = live.value[dealershipId]
+      next[dealershipId] = { dealershipId, scanId: l.scanId, progress: l.progress, log: logs, frame: l.frame || prev?.frame || null, startedAt: new Date(l.startedAt || Date.now()).getTime(), lastEvent: new Date(l.heartbeatAt || Date.now()).getTime() }
+    }
+    live.value = next
+    for (const i of b.items) {
+      const before = lastStatus.get(i.dealershipId)
+      if (before && before !== i.status) {
+        if (i.status === 'done') say(i.dealershipId, i.name, `${i.summary?.total ?? 0} vehicles · ${i.summary?.withoutReal ?? 0} without a real photo (${i.summary?.withoutRealPct ?? 0}%) — audit saved`, 'ok')
+        else if (i.status === 'failed') say(i.dealershipId, i.name, i.error || 'Failed', 'err')
+        else if (i.status === 'queued' && (before === 'stopped' || before === 'failed' || before === 'running')) say(i.dealershipId, i.name, i.resumeFrom ? 'Back in the queue — will continue from its checkpoint' : 'Back in the queue', 'warn')
+        else if (i.status === 'stopped') say(i.dealershipId, i.name, i.auditId ? 'Stopped — what it found is saved' : 'Paused — progress saved', 'warn')
+      }
+      lastStatus.set(i.dealershipId, i.status)
+    }
+    driving.value = !b.finished && !b.paused
+    if (prevDriving && !driving.value) onFinished?.(b, b.finished ? 'finished' : 'paused')
+  }
+
+  async function poll() {
+    if (!batch.value) return
+    try {
+      const r = await $fetch<{ batch: Batch, live: Record<string, any> }>(`/api/scanner/batches/${batch.value.id}/live`, { query: { frames: document.hidden ? '0' : '1' }, timeout: 20_000 })
+      absorb(r.batch, r.live)
+      error.value = null
+      lastOk = Date.now()
+      offlineFor.value = 0
+      pollMs = driving.value ? 2500 : 10_000
+    }
+    catch (e: any) {
+      offlineFor.value = Math.round((Date.now() - lastOk) / 1000)
+      error.value = navigator.onLine === false ? 'You are offline — the batch keeps running on the server' : 'Reconnecting… the batch keeps running on the server'
+      pollMs = Math.min(15_000, pollMs * 1.5)
+    }
+  }
+  function schedule() {
+    if (!watching) return
+    timer = setTimeout(async () => { await poll(); schedule() }, pollMs)
+  }
+  /** Start watching the batch (safe to call repeatedly). */
+  function watchBatch() {
+    if (watching) return
+    watching = true
+    poll().then(schedule)
+  }
+  function unwatch() { watching = false; if (timer) clearTimeout(timer); timer = null }
+  const onOnline = () => { if (watching) { pollMs = 500; if (timer) clearTimeout(timer); schedule() } }
+  const onVisible = () => { if (!document.hidden) onOnline() }
+  if (import.meta.client) { window.addEventListener('online', onOnline); document.addEventListener('visibilitychange', onVisible) }
 
   async function create(dealershipIds: string[], opts: { pages?: Record<string, string[]>, concurrency?: number, name?: string } = {}) {
     error.value = null
     const r = await $fetch<{ batch: Batch }>('/api/scanner/batches', { method: 'POST', body: { dealershipIds, pages: opts.pages, concurrency: opts.concurrency ?? concurrency.value, name: opts.name } })
     batch.value = r.batch
     concurrency.value = r.batch.concurrency
+    seenLog.clear(); lastStatus.clear(); feed.value = []
     return r.batch
   }
   async function load(id: string) {
-    const r = await $fetch<{ batch: Batch }>(`/api/scanner/batches/${id}`)
-    batch.value = r.batch
+    const r = await $fetch<{ batch: Batch, live: Record<string, any> }>(`/api/scanner/batches/${id}/live`)
+    if (batch.value?.id !== id) { seenLog.clear(); lastStatus.clear(); feed.value = [] }
+    absorb(r.batch, r.live)
     return r.batch
   }
   const list = () => $fetch<{ batches: Batch[] }>('/api/scanner/batches')
 
-  /** Scan one claimed dealership and stream it into `live`. */
-  async function runItem(item: BatchItem) {
-    const b = batch.value!
-    const ctrl = new AbortController()
-    aborts.push(ctrl)
-    const run: LiveRun = { dealershipId: item.dealershipId, progress: null, log: [], frame: null, startedAt: Date.now(), lastEvent: Date.now(), scanId: null }
-    live.value = { ...live.value, [item.dealershipId]: run }
-    say(item.dealershipId, item.name, `Starting — ${item.urls.length} page${item.urls.length === 1 ? '' : 's'}`)
-    const touch = () => { run.lastEvent = Date.now(); live.value = { ...live.value } }
-    let failure: string | null = null
-    try {
-      if (item.resumeFrom) say(item.dealershipId, item.name, 'Continuing the paused scan — keeping what it found', 'info')
-      const r = await streamScanRun({ dealershipId: item.dealershipId, urls: item.urls, allPages: true, batchId: b.id, autoSave: b.autoSave !== false, appendTo: item.resumeFrom || undefined }, (name, data) => {
-        if (name === 'scan') run.scanId = data.id
-        else if (name === 'progress') run.progress = data
-        else if (name === 'log') { run.log = [...run.log.slice(-60), data]; say(item.dealershipId, item.name, data.text) }
-        else if (name === 'frame') run.frame = `data:image/jpeg;base64,${data.data}`
-        else if (name === 'done') say(item.dealershipId, item.name, `${data.summary.total} vehicles · ${data.summary.withoutReal} without a real photo (${data.summary.withoutRealPct ?? 0}%)`, 'ok')
-        else if (name === 'failure') { failure = data.message; say(item.dealershipId, item.name, data.message, 'err') }
-        else if (name === 'saved') say(item.dealershipId, item.name, 'Audit saved to the CRM', 'ok')
-        touch()
-      }, ctrl.signal)
-      if (!r.finished && r.scanId) {
-        // The stream broke (network blip, proxy timeout) but the server keeps scanning — follow it by polling.
-        say(item.dealershipId, item.name, 'Connection dropped — following the scan on the server', 'warn')
-        failure = await followStored(r.scanId, run, item, ctrl.signal)
-      }
-    }
-    catch (e: any) {
-      if (ctrl.signal.aborted) say(item.dealershipId, item.name, 'Paused — will resume with the batch', 'warn')
-      else say(item.dealershipId, item.name, e?.message || 'Could not start', 'err')
-    }
-    finally {
-      aborts = aborts.filter(a => a !== ctrl)
-      const next = { ...live.value }
-      delete next[item.dealershipId]
-      live.value = next
-      await load(b.id).catch(() => {})
-      // The cloud browser died under it (not the dealer's fault) → try again, keeping what it found.
-      if (failure && BROWSER_GONE.test(failure) && (item.attempts || 1) < 3 && !stopRequested && batch.value) {
-        say(item.dealershipId, item.name, `Browser crashed — trying again (attempt ${(item.attempts || 1) + 1} of 3), keeping what it found`, 'warn')
-        await $fetch<{ batch: Batch }>(`/api/scanner/batches/${batch.value.id}/requeue`, { method: 'POST', body: { dealershipId: item.dealershipId, resume: true } }).then(r => { batch.value = r.batch }).catch(() => {})
-      }
-    }
-  }
-  const BROWSER_GONE = /connection is closed|Target closed|Session closed|target crashed|browser (has )?disconnected|No target with given id|Cut off by the server/i
-  /** Poll a scan the server is still running until it ends; mirrors progress/log into the live card. Returns the failure message, if any. */
-  async function followStored(scanId: string, run: LiveRun, item: BatchItem, signal: AbortSignal): Promise<string | null> {
-    const until = Date.now() + 20 * 60_000
-    let seenLogs = 0
-    while (Date.now() < until && !signal.aborted) {
-      await new Promise(r => setTimeout(r, 4000))
-      let p: any
-      try { p = await $fetch<any>(`/api/scanner/scans/${scanId}`) } catch { continue }
-      const sc = p?.scan
-      if (!sc) continue
-      run.progress = sc.progress
-      const logs: { at: string, text: string }[] = sc.log || []
-      if (logs.length > seenLogs) { for (const l of logs.slice(seenLogs)) say(item.dealershipId, item.name, l.text); run.log = [...run.log.slice(-60), ...logs.slice(seenLogs)]; seenLogs = logs.length }
-      run.lastEvent = Date.now(); live.value = { ...live.value }
-      if (sc.status === 'running' || sc.status === 'interrupted') continue
-      if (sc.status === 'failed') return sc.error || 'Scan failed'
-      // Cut off on the server (host teardown) → counts as a crash so it is picked up again.
-      if (sc.status === 'stopped' && /cut off/i.test(sc.error || '')) return 'Cut off by the server'
-      return null
-    }
-    return null
-  }
-
-  /** Drive the batch: keep `concurrency` scans running until nothing is queued. */
+  /** Start / resume autopilot on the server, then watch it. */
   async function drive() {
-    if (!batch.value || driving.value) return
-    driving.value = true
-    stopRequested = false
-    error.value = null
-    refreshTimer = setInterval(() => { if (batch.value) load(batch.value.id).catch(() => {}) }, 8000)
-    const workers: Promise<void>[] = []
-    const worker = async () => {
-      while (!stopRequested && batch.value) {
-        let claimed: { item: BatchItem | null, batch: Batch }
-        try { claimed = await $fetch(`/api/scanner/batches/${batch.value.id}/claim`, { method: 'POST' }) }
-        catch (e: any) { error.value = e?.data?.statusMessage || 'Lost contact with the server'; await new Promise(r => setTimeout(r, 5000)); continue }
-        batch.value = claimed.batch
-        if (!claimed.item) return
-        await runItem(claimed.item)
-      }
-    }
-    try {
-      for (let i = 0; i < Math.max(1, concurrency.value); i++) { workers.push(worker()); await new Promise(r => setTimeout(r, 1500)) }
-      await Promise.all(workers)
-    }
-    finally {
-      if (refreshTimer) clearInterval(refreshTimer)
-      refreshTimer = null
-      driving.value = false
-      if (batch.value) await load(batch.value.id).catch(() => {})
-      onFinished?.(batch.value, stopRequested ? 'paused' : 'finished')
-    }
+    if (!batch.value) return
+    const r = await $fetch<{ batch: Batch }>(`/api/scanner/batches/${batch.value.id}/start`, { method: 'POST' })
+    absorb(r.batch, {})
+    driving.value = !r.batch.finished
+    watchBatch()
   }
-  /** Queue every paused (stopped) dealership again so Resume continues where it left off. */
-  async function resumeStopped() {
-    if (!batch.value) return 0
-    const id = batch.value.id
-    const stopped = batch.value.items.filter(i => i.status === 'stopped')
-    for (const i of stopped) {
-      const r = await $fetch<{ batch: Batch }>(`/api/scanner/batches/${id}/requeue`, { method: 'POST', body: { dealershipId: i.dealershipId } }).catch(() => null)
-      if (r) batch.value = r.batch
-    }
-    return stopped.length
-  }
-
-  /** Pause: stop claiming; running scans are asked to stop and keep what they found. */
+  /** Paused dealerships are resumed by `drive()` on the server; kept for the component API. */
+  async function resumeStopped() { return 0 }
+  /** Pause: running scans save where they are and stop; Resume continues from that exact page. */
   async function pause() {
-    stopRequested = true
-    const ids = Object.values(live.value).map(r => r.scanId).filter(Boolean) as string[]
-    await Promise.all(ids.map(id => $fetch(`/api/scanner/scans/${id}/stop`, { method: 'POST' }).catch(() => {})))
+    if (!batch.value) return
+    const r = await $fetch<{ batch: Batch }>(`/api/scanner/batches/${batch.value.id}/pause`, { method: 'POST' })
+    absorb(r.batch, live.value)
+    driving.value = false
   }
   /** Cancel everything still queued (running scans stop and keep what they found). */
   async function cancel() {
-    stopRequested = true
     if (!batch.value) return
     const r = await $fetch<{ batch: Batch }>(`/api/scanner/batches/${batch.value.id}/cancel`, { method: 'POST' })
-    batch.value = r.batch
+    absorb(r.batch, live.value)
   }
   async function requeue(dealershipId: string, urls?: string[]) {
     if (!batch.value) return
     const r = await $fetch<{ batch: Batch }>(`/api/scanner/batches/${batch.value.id}/requeue`, { method: 'POST', body: { dealershipId, urls } })
-    batch.value = r.batch
-    if (!driving.value) drive()
+    absorb(r.batch, live.value)
+    watchBatch()
   }
-  function dispose() {
-    stopRequested = true
-    for (const a of aborts) a.abort()
-    aborts = []
-    if (refreshTimer) clearInterval(refreshTimer)
-    refreshTimer = null
-    driving.value = false
-  }
+  /** Stop watching (the batch itself keeps running on the server). */
+  function dispose() { unwatch() }
 
   // ── Email step ──
   const emailDealers = ref<EmailDealer[]>([])
@@ -210,6 +174,6 @@ export function useBatchScan() {
     return r.results
   }
 
-  onBeforeUnmount(dispose)
-  return { batch, live, driving, concurrency, error, feed, create, load, list, drive, pause, cancel, requeue, resumeStopped, whenFinished, dispose, emailDealers, loadEmailContext, send }
+  onBeforeUnmount(() => { unwatch(); if (import.meta.client) { window.removeEventListener('online', onOnline); document.removeEventListener('visibilitychange', onVisible) } })
+  return { batch, live, driving, concurrency, error, offlineFor, feed, watchBatch, unwatch, create, load, list, drive, pause, cancel, requeue, resumeStopped, whenFinished, dispose, emailDealers, loadEmailContext, send }
 }

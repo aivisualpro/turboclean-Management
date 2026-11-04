@@ -7,7 +7,7 @@ import type { Db } from 'mongodb'
 import { CRM_COLLECTIONS, DEFAULT_STAGE, LEAD_SOURCES, logActivity, nextDealershipId, normalizeUrl, str, CONTACT_ROLES } from './crm'
 import type { SessionActor } from './crm'
 import { duplicateScan, findDealershipDuplicates } from './crm-duplicates'
-import { isKnownBrand, isStateCode, nameKey, normalizeBrands, normalizeCity, normalizePhone, normalizeRoute, normalizeState, phoneKey, websiteKey } from './crm-normalize'
+import { isKnownBrand, isStateCode, nameKey, normalizeBrands, normalizeCity, normalizePhone, normalizeRoute, normalizeState, phoneKey, websiteKey, cleanDealerName, looksLikeRouteDay } from './crm-normalize'
 import { buildFacts } from './crm-facts'
 
 // ───────────────────────── Health scan ─────────────────────────
@@ -104,22 +104,80 @@ export async function exportCsv(db: Db, kind: 'dealerships' | 'contacts' | 'acti
 // ───────────────────────── CSV import (dealerships + optional primary contact) ─────────────────────────
 export const IMPORT_FIELDS = ['name', 'dealerGroup', 'brands', 'website', 'address', 'city', 'state', 'zip', 'phone', 'territory', 'route', 'leadSource', 'notes', 'contactFirstName', 'contactLastName', 'contactRole', 'contactJobTitle', 'contactEmail', 'contactPhone'] as const
 
-export async function importDealerships(db: Db, rows: any[], opts: { dryRun?: boolean, ownerId?: string, ownerName?: string }, actor: SessionActor | null) {
+/**
+ * CSV import. New dealerships are created; rows that match an existing one are skipped — or, with
+ * `update: true`, merged into it: every column that has a value overwrites that field, and a dealer
+ * group that is really a visit day ("DAY 5", from an older import) is moved to Route.
+ * `cleanNames` tidies SHOUTED names ("DBA GATES NISSAN INC" → "Gates Nissan").
+ * A name-only match in a different city is a different store (e.g. two "Vachon Chevrolet").
+ */
+export async function importDealerships(db: Db, rows: any[], opts: { dryRun?: boolean, ownerId?: string, ownerName?: string, update?: boolean, cleanNames?: boolean }, actor: SessionActor | null) {
   if (!Array.isArray(rows) || !rows.length) throw createError({ statusCode: 400, statusMessage: 'No rows to import' })
   if (rows.length > 2000) throw createError({ statusCode: 400, statusMessage: 'Import at most 2,000 rows at a time' })
-  const results: { row: number, status: 'created' | 'duplicate' | 'invalid' | 'ready', message: string, id?: string, duplicateOf?: any[] }[] = []
+  type Status = 'created' | 'ready' | 'updated' | 'will-update' | 'unchanged' | 'duplicate' | 'invalid'
+  const results: { row: number, status: Status, message: string, id?: string, duplicateOf?: any[], changes?: Record<string, { from: any, to: any }> }[] = []
   const seen: any[] = []
+  const clean = opts.cleanNames !== false
+  const col = db.collection(CRM_COLLECTIONS.dealerships)
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i] || {}
-    const name = str(r.name, 200)
+    const rawName = str(r.name, 200)
+    const name = clean ? cleanDealerName(rawName) : rawName
     const state = normalizeState(r.state)
     if (!name) { results.push({ row: i + 1, status: 'invalid', message: 'Name is missing' }); continue }
     if (!state) { results.push({ row: i + 1, status: 'invalid', message: 'State is missing' }); continue }
+    // Route values in the "group" column ("DAY 5") belong in Route.
+    if (!str(r.route, 80) && looksLikeRouteDay(r.dealerGroup)) { r.route = r.dealerGroup; r.dealerGroup = '' }
     const candidate = { name, website: normalizeUrl(r.website), phone: normalizePhone(r.phone), state, city: normalizeCity(r.city) }
-    const dups = await findDealershipDuplicates(db, candidate)
-    const inFile = seen.find(s => findSame(s, candidate))
-    if (dups.length || inFile) { results.push({ row: i + 1, status: 'duplicate', message: dups.length ? `Already in CRM: ${dups.map(d => d.name).join(', ')}` : `Same as row ${inFile.row} in this file`, duplicateOf: dups }); continue }
+    // A name-only match in another city is another store.
+    const dups = (await findDealershipDuplicates(db, candidate)).filter(d => !(d.reasons.length === 1 && d.reasons[0] === 'Same name' && candidate.city && d.city && normalizeCity(d.city).toLowerCase() !== candidate.city.toLowerCase()))
+    const inFile = seen.find(s => findSame(s, candidate) && (!s.city || !candidate.city || s.city.toLowerCase() === candidate.city.toLowerCase()))
+    if (inFile) { results.push({ row: i + 1, status: 'duplicate', message: `Same as row ${inFile.row} in this file` }); continue }
     seen.push({ ...candidate, row: i + 1 })
+
+    if (dups.length) {
+      if (!opts.update) { results.push({ row: i + 1, status: 'duplicate', message: `Already in CRM: ${dups.map(d => d.name).join(', ')}`, duplicateOf: dups }); continue }
+      // ── Update existing record(s) ──
+      const changesAll: Record<string, { from: any, to: any }> = {}
+      for (const dup of dups) {
+        const before = await col.findOne({ _id: new ObjectId(dup.id) })
+        if (!before) continue
+        const $set: Record<string, any> = {}
+        const put = (k: string, v: any) => { const same = JSON.stringify(before[k] ?? '') === JSON.stringify(v ?? ''); if (!same) $set[k] = v }
+        if (str(r.dealerGroup, 200)) put('dealerGroup', str(r.dealerGroup, 200))
+        if (r.brands && normalizeBrands(r.brands).length) put('brands', normalizeBrands(r.brands))
+        if (candidate.website) put('website', candidate.website)
+        if (str(r.address, 300)) put('address', str(r.address, 300))
+        if (candidate.city) put('city', candidate.city)
+        if (state) put('state', state)
+        if (str(r.zip, 20)) put('zip', str(r.zip, 20))
+        if (candidate.phone) put('phone', candidate.phone)
+        if (str(r.territory, 120)) put('territory', str(r.territory, 120))
+        if (str(r.route, 80)) put('route', normalizeRoute(r.route))
+        // Repair: an older import stored the visit day as the dealer group.
+        if (looksLikeRouteDay(before.dealerGroup) && !str(r.dealerGroup, 200)) {
+          $set.dealerGroup = ''
+          if (!str(r.route, 80) && !before.route) $set.route = normalizeRoute(before.dealerGroup)
+        }
+        // Tidy a SHOUTED / "DBA …" name that came from a previous import.
+        if (clean && before.name && cleanDealerName(before.name) !== before.name) put('name', cleanDealerName(before.name))
+        const notes = str(r.notes, 5000)
+        if (notes && !String(before.notes || '').includes(notes)) $set.notes = [before.notes, notes].filter(Boolean).join('\n')
+        const changes: Record<string, { from: any, to: any }> = {}
+        for (const k of Object.keys($set)) changes[k] = { from: before[k] ?? '', to: $set[k] }
+        if (!Object.keys(changes).length) continue
+        Object.assign(changesAll, changes)
+        if (!opts.dryRun) {
+          await col.updateOne({ _id: before._id }, { $set: { ...$set, updatedAt: new Date().toISOString() } })
+          await logActivity(db, { dealershipId: dup.id, type: 'dealership.updated', message: `Updated from CSV import: ${Object.keys(changes).join(', ')}`, changes, actor })
+        }
+      }
+      const fields = Object.keys(changesAll)
+      if (!fields.length) { results.push({ row: i + 1, status: 'unchanged', message: `Already up to date: ${dups.map(d => d.name).join(', ')}` }); continue }
+      results.push({ row: i + 1, status: opts.dryRun ? 'will-update' : 'updated', message: `${dups.length > 1 ? `${dups.length} records (${dups.map(d => d.name).join(' · ')})` : dups[0]!.name}: ${fields.map(f => `${f} → ${JSON.stringify(changesAll[f]!.to)}`).join(', ')}`, changes: changesAll, id: dups[0]!.id })
+      continue
+    }
+
     if (opts.dryRun) { results.push({ row: i + 1, status: 'ready', message: 'Will be created' }); continue }
     const now = new Date().toISOString()
     const leadSource = (LEAD_SOURCES as readonly string[]).find(s => s.toLowerCase() === String(r.leadSource || '').trim().toLowerCase()) || 'Manual research'
@@ -130,7 +188,7 @@ export async function importDealerships(db: Db, rows: any[], opts: { dryRun?: bo
       stage: DEFAULT_STAGE, stageChangedAt: now, stageChangedBy: actor, notes: str(r.notes, 5000), tags: [], estMonthlyValue: null,
       createdAt: now, createdBy: actor, updatedAt: now, archivedAt: null as string | null,
     }
-    const res = await db.collection(CRM_COLLECTIONS.dealerships).insertOne(doc)
+    const res = await col.insertOne(doc)
     const id = res.insertedId.toString()
     await logActivity(db, { dealershipId: id, type: 'dealership.created', message: `Dealership record ${doc.dealershipId} created (CSV import)`, actor })
     const { recordStageChange } = await import('./crm-stage')
@@ -144,10 +202,10 @@ export async function importDealerships(db: Db, rows: any[], opts: { dryRun?: bo
         isPrimary: true, isActive: true, inactiveAt: null, inactiveReason: '', succeededById: null, precededById: null, addedAt: now, lastVerifiedAt: null, notes: '', createdBy: actor, updatedAt: now,
       })
     }
-    results.push({ row: i + 1, status: 'created', message: `Created ${doc.dealershipId}`, id })
+    results.push({ row: i + 1, status: 'created', message: `Created ${doc.dealershipId} · ${name}`, id })
   }
-  const tally = (s: string) => results.filter(r => r.status === s).length
-  return { results, created: tally('created'), ready: tally('ready'), duplicates: tally('duplicate'), invalid: tally('invalid') }
+  const tally = (s: Status) => results.filter(r => r.status === s).length
+  return { results, created: tally('created'), ready: tally('ready'), updated: tally('updated'), willUpdate: tally('will-update'), unchanged: tally('unchanged'), duplicates: tally('duplicate'), invalid: tally('invalid') }
 }
 function findSame(a: any, b: any) {
   return (websiteKey(a.website) && websiteKey(a.website) === websiteKey(b.website)) || (phoneKey(a.phone) && phoneKey(a.phone) === phoneKey(b.phone)) || (nameKey(a.name) === nameKey(b.name) && a.state === b.state)

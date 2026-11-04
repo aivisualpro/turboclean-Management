@@ -106,7 +106,12 @@ export default defineNuxtConfig({
     // needs Fluid compute). Normal requests are unaffected — they still finish in milliseconds.
     // memory 3009 MB: the headless Chromium that scans dealer sites (2–3 tabs at once in a batch)
     // dies with "Browser connection is closed" when it runs out of the default 1–2 GB.
-    vercel: { functions: { maxDuration: 800, memory: 3009 } },
+    vercel: {
+      functions: { maxDuration: 800, memory: 3009 },
+      // Batch-scan autopilot safety net: every minute, restart any dealership whose scan stalled
+      // (server cut off, crash) from its last checkpoint. Set CRON_SECRET in Vercel to lock it down.
+      config: { crons: [{ path: '/api/scanner/batches/tick', schedule: '* * * * *' }] } as any,
+    },
   },
 
   compatibilityDate: '2024-12-14',

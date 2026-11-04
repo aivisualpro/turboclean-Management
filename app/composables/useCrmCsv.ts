@@ -46,14 +46,26 @@ export const IMPORT_FIELDS: { key: string, label: string, required?: boolean, al
   { key: 'contactPhone', label: 'Contact phone', aliases: ['contactphone', 'mobile', 'cell', 'directphone', 'cellphone'] },
 ]
 
-/** Header → field key guess (unknown headers → ''). */
-export function guessMapping(headers: string[]) {
+/**
+ * Header → field key guess (unknown headers → ''). With sample rows the VALUES are checked too:
+ * a column full of "DAY 1 / DAY 2" is a route even when its header says "Group", and an empty
+ * column is ignored so it can't overwrite anything.
+ */
+export function guessMapping(headers: string[], rows: string[][] = []) {
   const norm = (h: string) => h.toLowerCase().replace(/[^a-z0-9-]/g, '')
+  const values = (i: number) => rows.slice(0, 200).map(r => (r[i] || '').trim()).filter(Boolean)
+  const isDays = (i: number) => { const v = values(i); return v.length > 0 && v.filter(x => /^day\s*-?\s*\d{1,3}$/i.test(x)).length / v.length >= 0.8 }
   const used = new Set<string>()
-  return headers.map((h) => {
+  const out = headers.map(() => '')
+  // 1. Columns whose values are visit days → Route.
+  if (rows.length) headers.forEach((_h, i) => { if (!used.has('route') && isDays(i)) { out[i] = 'route'; used.add('route') } })
+  // 2. Headers.
+  headers.forEach((h, i) => {
+    if (out[i]) return
+    if (rows.length && !values(i).length) return // empty column → ignore
     const n = norm(h)
     const f = IMPORT_FIELDS.find(x => !used.has(x.key) && x.aliases.includes(n))
-    if (f) used.add(f.key)
-    return f?.key || ''
+    if (f) { out[i] = f.key; used.add(f.key) }
   })
+  return out
 }

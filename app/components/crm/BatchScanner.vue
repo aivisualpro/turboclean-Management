@@ -7,7 +7,7 @@ import { loadPreviewContext, renderEmail } from '~/composables/useTemplatePrevie
 import type { PreviewContext } from '~/composables/useTemplatePreview'
 import {
   X, Radar, Play, Pause, Square, Loader2, CheckCircle2, AlertTriangle, CircleDashed, Car, ImageOff, Clock, Mail, Send, Eye, ChevronRight, ListChecks,
-  RotateCcw, Globe, Sparkles, Inbox, ExternalLink, Users, Check, Ban, Zap, Archive, Pencil, Wand2, DoorOpen,
+  RotateCcw, Globe, Sparkles, Inbox, ExternalLink, Users, Check, Ban, Zap, Archive, Pencil, Wand2, DoorOpen, Cloud, WifiOff, ShieldCheck,
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { formatDistanceToNow } from 'date-fns'
@@ -27,7 +27,7 @@ const emit = defineEmits<{ done: [] }>()
 const { dealerships, fetchDealerships } = useCrmDealerships()
 const { templates, loadLibrary } = useCrmEmail()
 const bs = useBatchScan()
-const { batch, live, driving, concurrency, feed, emailDealers } = bs
+const { batch, live, driving, concurrency, feed, emailDealers, error: linkError, offlineFor } = bs
 
 type Step = 'setup' | 'scan' | 'email' | 'sent'
 const step = ref<Step>('setup')
@@ -124,7 +124,7 @@ watch(() => feed.value.length, () => nextTick(() => { if (feedEl.value) feedEl.v
 const clockText = (at: number) => new Date(at).toLocaleTimeString([], { hour12: false })
 const FEED_CLS: Record<string, string> = { info: 'text-emerald-300/80', ok: 'text-emerald-300 font-semibold', warn: 'text-amber-300', err: 'text-rose-300' }
 
-async function pause() { await bs.pause(); toast('Paused', { description: 'Running scans keep what they found. Press Resume to continue.' }) }
+async function pause() { await bs.pause(); toast('Pausing…', { description: 'Running scans save the page they are on and stop. Resume continues from there.' }) }
 async function resume() { bs.drive() }
 const cancelAsk = ref(false)
 async function cancelAll() { cancelAsk.value = false; await bs.cancel(); toast('Cancelled the rest', { description: 'Running scans stop and keep what they found. Everything scanned so far is saved.' }) }
@@ -194,24 +194,25 @@ const viewId = ref<string | null>(null)
 const viewOpen = ref(false)
 
 // ─── Lifecycle ───
-/** Closing while scans run: keep going in the background (this browser tab stays the engine) or pause. */
+/** Closing while scans run: autopilot keeps going on the server — or pause / cancel. */
 const closeAsk = ref(false)
-const background = ref(false)
 bs.whenFinished((b, reason) => {
   if (open.value || !b) return
   if (reason === 'finished') toast.success(`Batch finished — ${b.counts.done} of ${b.counts.total} dealerships scanned`, { description: `${b.totals.vehicles} vehicles · ${b.totals.withoutReal} without a real photo. Open Mission Control to send the emails.`, duration: 15_000, action: { label: 'Open', onClick: () => { open.value = true } } })
 })
 watch(open, async (v) => {
   if (!v) {
-    if (background.value) { background.value = false; return }
-    bs.dispose(); if (clock) clearInterval(clock); clock = null
+    // The server keeps scanning; keep a light watch so "finished" can be announced.
+    if (!driving.value) bs.unwatch()
+    if (clock) clearInterval(clock); clock = null
     return
   }
-  // Re-opened while a batch still runs in the background → just show it.
-  if (driving.value && batch.value) {
-    if (props.batchId && props.batchId !== batch.value.id) toast('Another batch is still running', { description: 'Finish, pause or cancel it before opening a different one.' })
-    else if (!props.batchId && props.dealershipIds?.length) toast('A batch is still running', { description: 'Finish, pause or cancel it before starting a new one.' })
+  // Re-opened while the watched batch is still running → just show it (unless another batch was picked).
+  if (driving.value && batch.value && (!props.batchId || props.batchId === batch.value.id) && !props.dealershipIds?.length) {
     step.value = 'scan'
+    bs.watchBatch()
+    if (clock) clearInterval(clock)
+    clock = setInterval(() => { elapsed.value = Math.round((Date.now() - t0.value) / 1000) }, 1000)
     return
   }
   step.value = 'setup'
@@ -224,12 +225,8 @@ watch(open, async (v) => {
       step.value = batch.value?.finished ? 'email' : 'scan'
       t0.value = new Date(batch.value?.createdAt || Date.now()).getTime()
       if (step.value === 'email') await goEmail()
-      else {
-        // Paused dealerships continue where they left off; failed ones wait for Retry.
-        const n = await bs.resumeStopped()
-        if (n) toast(`Resuming ${n} paused dealership${n === 1 ? '' : 's'}`, { description: 'They continue from where they stopped.' })
-        bs.drive()
-      }
+      else if (batch.value?.paused) bs.watchBatch()
+      else bs.drive()
     }
     catch { toast.error('Could not load that batch'); open.value = false; return }
   }
@@ -242,8 +239,8 @@ function closeDialog() {
   if (driving.value) { closeAsk.value = true; return }
   open.value = false
 }
-function closeKeepRunning() { closeAsk.value = false; background.value = true; open.value = false; toast('Still scanning in the background', { description: 'Keep this browser tab open. The Batches button on the Dealerships page shows progress; you will be told when it finishes.' }) }
-async function closePause() { closeAsk.value = false; await bs.pause(); open.value = false; toast('Paused', { description: 'Everything found so far is saved. Resume from the Batches menu whenever you like.' }) }
+function closeKeepRunning() { closeAsk.value = false; open.value = false; toast('Autopilot is on — scanning continues on our servers', { description: 'You can close this tab, shut the laptop or go offline. Open Batches any time to see where it is.', duration: 8000 }) }
+async function closePause() { closeAsk.value = false; await bs.pause(); open.value = false; toast('Paused', { description: 'Each dealership saved the exact page it was on. Resume from Batches whenever you like — it continues from there.' }) }
 async function closeCancel() { closeAsk.value = false; await bs.cancel(); open.value = false; toast('Batch cancelled', { description: 'Scanned dealerships keep their audits. Waiting ones were dropped.' }) }
 const short = (u: string) => u.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')
 const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(new Date(iso), { addSuffix: true }) : '' } catch { return '' } }
@@ -342,6 +339,14 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
             </div>
           </div>
 
+          <!-- Autopilot / connection strip -->
+          <div class="relative z-10 shrink-0 flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-1.5 border-b border-white/10 text-[11px]" :class="linkError ? 'bg-amber-500/10 text-amber-200' : 'bg-emerald-500/[0.06] text-emerald-200/80'">
+            <span class="inline-flex items-center gap-1.5 font-semibold tracking-wide"><Cloud class="size-3.5" /> AUTOPILOT</span>
+            <span v-if="linkError" class="inline-flex items-center gap-1.5"><WifiOff class="size-3.5" /> {{ linkError }}<span v-if="offlineFor > 5" class="text-amber-300/70">· {{ offlineFor }}s</span></span>
+            <span v-else class="text-zinc-400">Runs on our servers — closing this window, sleep, a dead battery or no internet won't stop it.</span>
+            <span class="ml-auto inline-flex items-center gap-1.5 text-zinc-400"><ShieldCheck class="size-3.5 text-emerald-400" /> Every result page is checkpointed · auto-retry on crashes</span>
+          </div>
+
           <div class="relative z-10 flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
             <!-- Dealer rail -->
             <aside class="min-h-0 overflow-y-auto border-r border-white/10 bg-[#070b09]/80 backdrop-blur-sm">
@@ -403,6 +408,8 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
                         <div class="flex gap-4 font-mono">
                           <div><p class="text-[9px] uppercase tracking-wider text-zinc-500">Vehicles</p><p class="text-lg font-bold tabular-nums leading-none text-emerald-200">{{ live[i.dealershipId]?.progress?.vehicles || 0 }}<span v-if="live[i.dealershipId]?.progress?.advertised" class="text-xs text-zinc-500">/{{ live[i.dealershipId]!.progress!.advertised }}</span></p></div>
                           <div><p class="text-[9px] uppercase tracking-wider text-zinc-500">Page</p><p class="text-lg font-bold tabular-nums leading-none">{{ live[i.dealershipId]?.progress?.page || 1 }}</p></div>
+                          <div v-if="i.urls.length > 1"><p class="text-[9px] uppercase tracking-wider text-zinc-500">Lists</p><p class="text-lg font-bold tabular-nums leading-none">{{ live[i.dealershipId]?.progress?.doneUrls?.length || 0 }}<span class="text-xs text-zinc-500">/{{ i.urls.length }}</span></p></div>
+                          <div v-if="(i.attempts || 1) > 1"><p class="text-[9px] uppercase tracking-wider text-amber-500/80">Attempt</p><p class="text-lg font-bold tabular-nums leading-none text-amber-300">{{ i.attempts }}</p></div>
                           <div v-if="live[i.dealershipId]?.progress?.toAnalyze"><p class="text-[9px] uppercase tracking-wider text-zinc-500">Photos</p><p class="text-lg font-bold tabular-nums leading-none">{{ live[i.dealershipId]!.progress!.analyzed }}<span class="text-xs text-zinc-500">/{{ live[i.dealershipId]!.progress!.toAnalyze }}</span></p></div>
                         </div>
                         <div class="mt-2 h-1 rounded-full bg-white/10 overflow-hidden"><div class="h-full bg-gradient-to-r from-emerald-500 to-emerald-300 transition-all duration-500" :style="{ width: `${itemPct(i)}%` }" /></div>
@@ -529,8 +536,8 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
             </DialogHeader>
             <div class="grid gap-2">
               <button type="button" class="rounded-xl border p-3 text-left hover:bg-accent/60 transition-colors" @click="closeKeepRunning">
-                <p class="text-sm font-semibold flex items-center gap-2"><Zap class="size-4 text-emerald-600" /> Keep scanning in the background</p>
-                <p class="text-xs text-muted-foreground mt-0.5">Close this window and carry on working. Keep this browser tab open — the Batches button shows progress and you'll get a message when it's done.</p>
+                <p class="text-sm font-semibold flex items-center gap-2"><Zap class="size-4 text-emerald-600" /> Keep running on autopilot <span class="rounded-full bg-emerald-500/15 px-1.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">Recommended</span></p>
+                <p class="text-xs text-muted-foreground mt-0.5">Scanning runs on our servers, not in this browser. Close the tab, shut the laptop or lose Wi-Fi — it carries on, and every page is checkpointed.</p>
               </button>
               <button type="button" class="rounded-xl border p-3 text-left hover:bg-accent/60 transition-colors" @click="closePause">
                 <p class="text-sm font-semibold flex items-center gap-2"><Pause class="size-4 text-amber-600" /> Pause and close</p>

@@ -41,7 +41,9 @@ function budgetMs() {
 }
 
 export type ScanPhase = 'collecting' | 'analyzing' | 'done' | 'stopped' | 'error'
-export interface ScanProgress { phase: ScanPhase, page: number, vehicles: number, advertised: number | null, analyzed: number, toAnalyze: number, message: string, startedAt: string, finishedAt: string | null, pagesVisited: string[] }
+export interface ScanProgress { phase: ScanPhase, page: number, vehicles: number, advertised: number | null, analyzed: number, toAnalyze: number, message: string, startedAt: string, finishedAt: string | null, pagesVisited: string[]
+  /** Checkpoints — a resumed scan skips finished inventory pages and re-opens the exact result page it was on. */
+  doneUrls?: string[], resumeAt?: { url: string, href: string, page: number } | null }
 export type ScanStatus = 'running' | 'done' | 'stopped' | 'failed' | 'saved' | 'interrupted'
 
 const g = globalThis as any
@@ -278,6 +280,8 @@ export interface ScanDoc {
   auditId: string | null
   error: string | null
   heartbeatAt: string
+  /** Latest live-view frame (server-run batches; overwritten every few seconds). */
+  frame?: { data: string, ts: number } | null
   createdAt: string
   createdBy: { id: string, name: string }
   savedAt?: string | null
@@ -368,10 +372,10 @@ export async function latestScan(db: Db, dealershipId: string) {
   return doc ? scanPayload(await finalizeIfInterrupted(db, doc as ScanDoc)) : { scan: null, results: null }
 }
 
-export async function requestStop(db: Db, id: string) {
+export async function requestStop(db: Db, id: string, reason: 'stop' | 'pause' = 'stop') {
   const doc = await getScan(db, id)
   if (doc.status !== 'running') return { stopping: false }
-  await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { stopRequested: true } })
+  await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { stopRequested: true, stopReason: reason } })
   return { stopping: true }
 }
 
@@ -404,7 +408,7 @@ export async function createScan(db: Db, body: any, actor: SessionActor) {
   const base = body?.appendTo ? await getScan(db, str(body.appendTo, 40)) : null
   if (base && base.dealershipId !== dealershipId) throw createError({ statusCode: 400, statusMessage: 'That scan belongs to another dealership' })
   const now = new Date().toISOString()
-  const progress: ScanProgress = { phase: 'collecting', page: 0, vehicles: base?.vehicles.length || 0, advertised: base?.progress.advertised ?? null, analyzed: 0, toAnalyze: 0, message: 'Opening the website…', startedAt: now, finishedAt: null, pagesVisited: base ? [...base.progress.pagesVisited] : [] }
+  const progress: ScanProgress = { phase: 'collecting', page: 0, vehicles: base?.vehicles.length || 0, advertised: base?.progress.advertised ?? null, analyzed: 0, toAnalyze: 0, message: 'Opening the website…', startedAt: now, finishedAt: null, pagesVisited: base ? [...base.progress.pagesVisited] : [], doneUrls: base ? [...(base.progress.doneUrls || [])] : [], resumeAt: base?.progress.resumeAt || null }
   const doc: ScanDoc = {
     scannerVersion: ENGINE_VERSION, dealershipId, dealershipName: d.name || '', status: 'running', stopRequested: false, startUrl: url, urls, allPages: body?.allPages !== false,
     batchId: str(body?.batchId, 40) || null, autoSave: !!body?.autoSave,
@@ -431,6 +435,8 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
   const collectUntil = t0 + budget * 0.55
   const analyzeUntil = t0 + budget * 0.88
   let stop = false
+  /** Paused (not stopped): keep everything for the resume, don't save a half audit. */
+  let pausing = false
   let lastPersist = 0
 
   const log = (text: string) => {
@@ -445,8 +451,12 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     lastPersist = Date.now()
     try {
       // Vehicles go with every heartbeat, so a scan cut off by the server keeps what it found.
-      const r = await col.findOneAndUpdate({ _id: doc._id }, { $set: { progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, heartbeatAt: new Date().toISOString() } }, { projection: { stopRequested: 1 }, returnDocument: 'after' })
-      if ((r as any)?.stopRequested && !stop) { stop = true; log('Stopping — checking the photos found so far…') }
+      const r = await col.findOneAndUpdate({ _id: doc._id }, { $set: { progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, ...(doc.progress.phase === 'analyzing' ? { images: doc.images.map(stripImage) } : {}), heartbeatAt: new Date().toISOString() } }, { projection: { stopRequested: 1, stopReason: 1 }, returnDocument: 'after' })
+      if ((r as any)?.stopRequested && !stop) {
+        stop = true
+        pausing = (r as any)?.stopReason === 'pause'
+        log(pausing ? 'Pausing — everything found so far is saved; it continues from here when resumed' : 'Stopping — checking the photos found so far…')
+      }
     } catch {}
   }
   const setProgress = (patch: Partial<ScanProgress>) => {
@@ -480,13 +490,16 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     let framing = false
     const FRAME_CAP = 4_000_000
     frameTimer = setInterval(async () => {
-      if (framing || frameBytes > FRAME_CAP || doc.progress.phase !== 'collecting' || opts.isClosed()) return
+      if (framing || doc.progress.phase !== 'collecting') return
+      const streaming = !opts.isClosed() && frameBytes <= FRAME_CAP
+      // Server-run batches have no stream: the latest frame is kept on the scan for the live view.
+      if (!streaming && !doc.batchId) return
       framing = true
       try {
         const cur = tab
-        const shot = await cur.conn.send('Page.captureScreenshot', { format: 'jpeg', quality: 40 }, cur.sid, 8000)
-        frameBytes += shot.data.length
-        emit('frame', { data: shot.data, w: SCANNER_VIEWPORT.width, h: SCANNER_VIEWPORT.height, ts: Date.now() })
+        const shot = await cur.conn.send('Page.captureScreenshot', { format: 'jpeg', quality: streaming ? 40 : 30 }, cur.sid, 8000)
+        if (streaming) { frameBytes += shot.data.length; emit('frame', { data: shot.data, w: SCANNER_VIEWPORT.width, h: SCANNER_VIEWPORT.height, ts: Date.now() }) }
+        if (doc.batchId) await col.updateOne({ _id: doc._id }, { $set: { frame: { data: shot.data, ts: Date.now() } } }).catch(() => {})
       } catch {}
       framing = false
     }, 3000)
@@ -503,9 +516,13 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     try {
     const startUrl = urls[u]!
     const countBefore = doc.vehicles.length
+    doc.progress.doneUrls ||= []
+    if (doc.progress.doneUrls.includes(startUrl)) { log(`Already collected: ${startUrl.replace(/^https?:\/\/[^/]+/, '') || '/'} — skipping (saved earlier)`); continue }
+    const resumeAt = doc.progress.resumeAt?.url === startUrl ? doc.progress.resumeAt : null
     log(urls.length > 1 ? `Inventory page ${u + 1} of ${urls.length}: ${startUrl.replace(/^https?:\/\/[^/]+/, '') || '/'}` : `Opening ${startUrl.replace(/^https?:\/\//, '')}`)
     setProgress({ message: 'Loading the inventory page…' })
-    try { await goto(tab, startUrl, 25_000, log) }
+    if (resumeAt) { log(`Continuing from result page ${resumeAt.page} where the last run stopped`); pageNo = Math.max(pageNo, resumeAt.page - 1) }
+    try { await goto(tab, resumeAt?.href || startUrl, 25_000, log) }
     catch (e: any) { if (isBrowserGone(e)) throw e; if (urls.length > 1) { log(`Skipped: ${e?.message || e}`); continue } throw e }
     for (let p = 1; p <= MAX_PAGES && !stop; p++) {
       const page = ++pageNo
@@ -558,6 +575,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       // After a browser restart (or a resumed scan) pages are seen again: nothing "new" is normal then.
       const revisit = doc.progress.pagesVisited.includes(res?.url || tab.url)
       if (!revisit) doc.progress.pagesVisited.push(res?.url || tab.url)
+      await persist(true)
       log(`Page ${page}: ${pageCards} cards on screen, ${added} new — ${res?.strategy === 'known' ? 'recognised layout' : 'detected by structure'}`)
       if (pageCards === 0 && p === 1) { log('No vehicle cards on this page — moving on'); break }
       if (!doc.allPages || doc.vehicles.length >= MAX_VEHICLES) break
@@ -570,6 +588,9 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       if (!next) break
       if (next.kind === 'href') {
         log(`${next.label} → ${String(next.href).replace(/^https?:\/\/[^/]+/, '')}`)
+        // Checkpoint: a restart re-opens this exact result page instead of page 1.
+        doc.progress.resumeAt = { url: startUrl, href: String(next.href), page: p + 1 }
+        await persist(true)
         await goto(tab, next.href, 25_000, log).catch((e: any) => log(`Could not open the next page (${e?.message})`))
       }
       else {
@@ -582,6 +603,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     }
     // Each inventory page advertises its own total; the next one starts fresh.
     advertised = null
+    if (!stop) { doc.progress.doneUrls.push(startUrl); doc.progress.resumeAt = null; await persist(true) }
     }
     catch (e: any) {
       // Same inventory page again on a fresh browser (already-collected vehicles are de-duplicated).
@@ -590,6 +612,15 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     }
     }
     if (doc.vehicles.length === startCount && startCount > 0) log('Nothing new on these pages — keeping the vehicles found earlier')
+    if (pausing) {
+      doc.status = 'stopped'
+      Object.assign(doc.progress, { phase: 'stopped', message: `Paused — ${doc.vehicles.length} vehicles saved, continues from here`, finishedAt: new Date().toISOString() })
+      log(`Paused with ${doc.vehicles.length} vehicles saved`)
+      await col.updateOne({ _id: doc._id }, { $set: { status: 'stopped', progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, images: doc.images.map(stripImage), heartbeatAt: new Date().toISOString() } })
+      emit('progress', doc.progress)
+      if (doc.batchId) await batchNote(db, doc, 'stopped', { error: null }).catch(() => {})
+      return
+    }
     if (doc.vehicles.length === 0) throw createError({ statusCode: 422, statusMessage: 'No vehicle cards found', message: urls.length > 1 ? 'No vehicle cards were found on any of the pages — check the scan pages for this dealership.' : 'No vehicle cards found on this page. Pick the inventory / search results page (e.g. Used Inventory), then press Continue.' })
     // Keep what was collected even if the photo step is cut short.
     await col.updateOne({ _id: doc._id }, { $set: { vehicles: doc.vehicles, progress: doc.progress, heartbeatAt: new Date().toISOString() } }).catch(() => {})
@@ -657,7 +688,9 @@ async function analyzePhotos(t: Tab, doc: ScanDoc, o: { setProgress: (p: Partial
     if (!id) { id = `i${images.size + 1}`; images.set(id, { id, url: u, ok: false }); byUrl.set(u, id) }
     v.imageId = id
   }
-  const todo = [...images.values()].filter(i => !i.hash && !i.error)
+  const todo = [...images.values()].filter(i => !i.hash && (!i.error || /^Not checked/.test(i.error)))
+  for (const i of todo) delete i.error
+  doc.images = [...images.values()]
   o.setProgress({ phase: 'analyzing', analyzed: 0, toAnalyze: todo.length, message: `Checking ${todo.length} photos…` })
   if (todo.length) {
     // A blank tab does the image maths (no page scripts, no cross-origin limits on our own bytes).
@@ -686,6 +719,7 @@ async function analyzePhotos(t: Tab, doc: ScanDoc, o: { setProgress: (p: Partial
             }
           }
           done += batch.length
+          doc.images = [...images.values()]
           o.setProgress({ analyzed: done, message: `Checking photos… ${done} of ${todo.length}` })
         }
       }
