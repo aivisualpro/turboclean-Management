@@ -187,6 +187,11 @@ export async function goto(t: Tab, url: string, timeoutMs = 25_000, log?: (s: st
     }
     if (r?.errorText) throw createError({ statusCode: 502, statusMessage: 'Could not open the site', message: `Could not open ${url.replace(/^https?:\/\//, '')} (${r.errorText})` })
     await waitForSettle(t, timeoutMs)
+    // Akamai / Cloudflare "Access Denied": most US dealer sites refuse visitors from outside the US.
+    if (t.status === 403) {
+      const title = await evaluate<string>(t, 'document.title', 5_000).catch(() => '')
+      throw createError({ statusCode: 403, statusMessage: 'The website blocked this visit', message: `${url.replace(/^https?:\/\//, '')} answered "Access Denied" (HTTP 403${title ? `, "${title}"` : ''}). Dealer websites usually block traffic from outside the US — run this from zrzops.com (US servers) or through a US VPN.` })
+    }
     const limited = t.status === 429 || t.status === 503 || t.status === 509
     if (!limited || attempt >= RATE_LIMIT_WAITS.length) {
       if (limited) throw createError({ statusCode: 503, statusMessage: 'The website is rate-limiting us', message: `The dealer's website answered "too many requests" (HTTP ${t.status}) three times. Wait a minute, then try again.` })
@@ -345,7 +350,7 @@ async function finalizeIfInterrupted(db: Db, doc: ScanDoc) {
   doc.status = 'stopped'
   doc.log = [...(doc.log || []), { at: now, text: 'The server cut this scan off — keeping the vehicles found so far; photos judged by address and text only' }].slice(-60)
   Object.assign(doc.progress, { phase: 'stopped', message: `Cut off early — ${sum.total} vehicles · ${sum.withoutReal} without a real photo (${sum.withoutRealPct ?? 0}%)`, finishedAt: now })
-  await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { status: 'stopped', progress: doc.progress, log: doc.log, vehicles: doc.vehicles, images: doc.images, clusters: doc.clusters, heartbeatAt: now } }).catch(() => {})
+  await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { status: 'stopped', error: 'Cut off by the server', progress: doc.progress, log: doc.log, vehicles: doc.vehicles, images: doc.images, clusters: doc.clusters, heartbeatAt: now } }).catch(() => {})
   if (doc.batchId) batchNote(db, doc, 'stopped', { summary: { total: sum.total, withoutReal: sum.withoutReal, withoutRealPct: sum.withoutRealPct, by: sum.by }, error: 'Cut off by the server' }).catch(() => {})
   return doc
 }
@@ -457,7 +462,18 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     emit('progress', doc.progress)
     log(`Starting a private browser${isServerless() ? ' in the cloud' : ''}…`)
     t = await openTab()
-    const tab = t
+    let tab = t
+    let restarts = 0
+    /** Chromium can die mid-scan (memory, host teardown); start a fresh one and carry on — the vehicles found so far stay. */
+    const restartBrowser = async (e: any) => {
+      if (!isBrowserGone(e) || restarts >= 2) return false
+      restarts++
+      log(`The browser crashed (${String(e?.message || e).slice(0, 60)}) — starting a fresh one and continuing`)
+      try { await closeTab(tab) } catch {}
+      await sleep(1500)
+      t = tab = await openTab()
+      return true
+    }
 
     // Live view: a small frame every ~2.5 s while collecting (non-interactive), capped in total size.
     let frameBytes = 0
@@ -467,7 +483,8 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       if (framing || frameBytes > FRAME_CAP || doc.progress.phase !== 'collecting' || opts.isClosed()) return
       framing = true
       try {
-        const shot = await tab.conn.send('Page.captureScreenshot', { format: 'jpeg', quality: 40 }, tab.sid, 8000)
+        const cur = tab
+        const shot = await cur.conn.send('Page.captureScreenshot', { format: 'jpeg', quality: 40 }, cur.sid, 8000)
         frameBytes += shot.data.length
         emit('frame', { data: shot.data, w: SCANNER_VIEWPORT.width, h: SCANNER_VIEWPORT.height, ts: Date.now() })
       } catch {}
@@ -483,12 +500,13 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     const urls = doc.urls?.length ? doc.urls : [doc.startUrl]
     let pageNo = 0
     for (let u = 0; u < urls.length && !stop; u++) {
+    try {
     const startUrl = urls[u]!
     const countBefore = doc.vehicles.length
     log(urls.length > 1 ? `Inventory page ${u + 1} of ${urls.length}: ${startUrl.replace(/^https?:\/\/[^/]+/, '') || '/'}` : `Opening ${startUrl.replace(/^https?:\/\//, '')}`)
     setProgress({ message: 'Loading the inventory page…' })
     try { await goto(tab, startUrl, 25_000, log) }
-    catch (e: any) { if (urls.length > 1) { log(`Skipped: ${e?.message || e}`); continue } throw e }
+    catch (e: any) { if (isBrowserGone(e)) throw e; if (urls.length > 1) { log(`Skipped: ${e?.message || e}`); continue } throw e }
     for (let p = 1; p <= MAX_PAGES && !stop; p++) {
       const page = ++pageNo
       setProgress({ page, message: page === 1 ? 'Loading every vehicle on this page…' : `Page ${page}: loading vehicles…` })
@@ -536,15 +554,19 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
         lastH = r.h
       }
       await collect()
-      doc.progress.pagesVisited.push(res?.url || tab.url)
+      if (tab.conn.closed) throw new Error('Browser connection is closed')
+      // After a browser restart (or a resumed scan) pages are seen again: nothing "new" is normal then.
+      const revisit = doc.progress.pagesVisited.includes(res?.url || tab.url)
+      if (!revisit) doc.progress.pagesVisited.push(res?.url || tab.url)
       log(`Page ${page}: ${pageCards} cards on screen, ${added} new — ${res?.strategy === 'known' ? 'recognised layout' : 'detected by structure'}`)
-      if (doc.vehicles.length === countBefore && p === 1) { log('No vehicle cards on this page — moving on'); break }
+      if (pageCards === 0 && p === 1) { log('No vehicle cards on this page — moving on'); break }
       if (!doc.allPages || doc.vehicles.length >= MAX_VEHICLES) break
       if (Date.now() >= collectUntil) { log('Time limit for collecting reached — checking the photos found so far'); stop = stop || u < urls.length - 1; break }
-      if (added === 0 && p > 1) break
+      if (added === 0 && p > 1 && !revisit) break
       if (advertised && doc.vehicles.length - countBefore >= advertised) break
 
       const next = await evaluate<any>(tab, FIND_NEXT_JS).catch(() => null)
+      if (tab.conn.closed) throw new Error('Browser connection is closed')
       if (!next) break
       if (next.kind === 'href') {
         log(`${next.label} → ${String(next.href).replace(/^https?:\/\/[^/]+/, '')}`)
@@ -561,13 +583,20 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     // Each inventory page advertises its own total; the next one starts fresh.
     advertised = null
     }
+    catch (e: any) {
+      // Same inventory page again on a fresh browser (already-collected vehicles are de-duplicated).
+      if (await restartBrowser(e)) { u--; continue }
+      throw e
+    }
+    }
     if (doc.vehicles.length === startCount && startCount > 0) log('Nothing new on these pages — keeping the vehicles found earlier')
     if (doc.vehicles.length === 0) throw createError({ statusCode: 422, statusMessage: 'No vehicle cards found', message: urls.length > 1 ? 'No vehicle cards were found on any of the pages — check the scan pages for this dealership.' : 'No vehicle cards found on this page. Pick the inventory / search results page (e.g. Used Inventory), then press Continue.' })
     // Keep what was collected even if the photo step is cut short.
     await col.updateOne({ _id: doc._id }, { $set: { vehicles: doc.vehicles, progress: doc.progress, heartbeatAt: new Date().toISOString() } }).catch(() => {})
 
     // ── Photos ──
-    await analyzePhotos(tab, doc, { setProgress, log, deadline: analyzeUntil })
+    try { await analyzePhotos(tab, doc, { setProgress, log, deadline: analyzeUntil }) }
+    catch (e: any) { if (!(await restartBrowser(e))) throw e; await analyzePhotos(tab, doc, { setProgress, log, deadline: analyzeUntil }) }
     await reclassify(db, doc, log)
 
     const sum = summarize(doc.vehicles, doc.clusters, { countStockAsMissing: doc.countStockAsMissing })
@@ -605,6 +634,9 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     if (t) await closeTab(t)
   }
 }
+
+/** The shared Chromium died (crash, out of memory, host teardown) — not the dealer's fault. */
+const isBrowserGone = (e: any) => /connection is closed|Target closed|Session closed|target crashed|Inspected target navigated or closed|browser (has )?disconnected|No target with given id/i.test(String(e?.message || e || ''))
 
 /** Report a batch item's state back to its batch (see scanner-batch.ts). */
 async function batchNote(db: Db, doc: ScanDoc, status: 'running' | 'done' | 'stopped' | 'failed', extra: Record<string, any> = {}) {

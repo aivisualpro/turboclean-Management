@@ -104,7 +104,9 @@ export default defineNuxtConfig({
   nitro: {
     // Vercel: the Inventory Scanner runs a whole scan inside one request (Pro plan maximum = 800 s,
     // needs Fluid compute). Normal requests are unaffected — they still finish in milliseconds.
-    vercel: { functions: { maxDuration: 800 } },
+    // memory 3009 MB: the headless Chromium that scans dealer sites (2–3 tabs at once in a batch)
+    // dies with "Browser connection is closed" when it runs out of the default 1–2 GB.
+    vercel: { functions: { maxDuration: 800, memory: 3009 } },
   },
 
   compatibilityDate: '2024-12-14',

@@ -9,6 +9,8 @@ import type { ScannerProgress } from '~/composables/useInventoryScanner'
  */
 export type ItemStatus = 'queued' | 'running' | 'done' | 'stopped' | 'failed' | 'skipped' | 'cancelled'
 export interface BatchItem {
+  /** How many times this dealership has been claimed (auto-retries stop at 3). */
+  attempts?: number
   /** Continue a paused scan instead of starting over (set by the server when a stopped item is queued again). */
   resumeFrom?: string | null
   dealershipId: string, name: string, website: string, urls: string[], status: ItemStatus, scanId: string | null, auditId: string | null
@@ -63,6 +65,7 @@ export function useBatchScan() {
     live.value = { ...live.value, [item.dealershipId]: run }
     say(item.dealershipId, item.name, `Starting — ${item.urls.length} page${item.urls.length === 1 ? '' : 's'}`)
     const touch = () => { run.lastEvent = Date.now(); live.value = { ...live.value } }
+    let failure: string | null = null
     try {
       if (item.resumeFrom) say(item.dealershipId, item.name, 'Continuing the paused scan — keeping what it found', 'info')
       const r = await streamScanRun({ dealershipId: item.dealershipId, urls: item.urls, allPages: true, batchId: b.id, autoSave: b.autoSave !== false, appendTo: item.resumeFrom || undefined }, (name, data) => {
@@ -71,11 +74,15 @@ export function useBatchScan() {
         else if (name === 'log') { run.log = [...run.log.slice(-60), data]; say(item.dealershipId, item.name, data.text) }
         else if (name === 'frame') run.frame = `data:image/jpeg;base64,${data.data}`
         else if (name === 'done') say(item.dealershipId, item.name, `${data.summary.total} vehicles · ${data.summary.withoutReal} without a real photo (${data.summary.withoutRealPct ?? 0}%)`, 'ok')
-        else if (name === 'failure') say(item.dealershipId, item.name, data.message, 'err')
+        else if (name === 'failure') { failure = data.message; say(item.dealershipId, item.name, data.message, 'err') }
         else if (name === 'saved') say(item.dealershipId, item.name, 'Audit saved to the CRM', 'ok')
         touch()
       }, ctrl.signal)
-      if (!r.finished && r.scanId) say(item.dealershipId, item.name, 'Connection dropped — the scan continues on the server', 'warn')
+      if (!r.finished && r.scanId) {
+        // The stream broke (network blip, proxy timeout) but the server keeps scanning — follow it by polling.
+        say(item.dealershipId, item.name, 'Connection dropped — following the scan on the server', 'warn')
+        failure = await followStored(r.scanId, run, item, ctrl.signal)
+      }
     }
     catch (e: any) {
       if (ctrl.signal.aborted) say(item.dealershipId, item.name, 'Paused — will resume with the batch', 'warn')
@@ -87,7 +94,35 @@ export function useBatchScan() {
       delete next[item.dealershipId]
       live.value = next
       await load(b.id).catch(() => {})
+      // The cloud browser died under it (not the dealer's fault) → try again, keeping what it found.
+      if (failure && BROWSER_GONE.test(failure) && (item.attempts || 1) < 3 && !stopRequested && batch.value) {
+        say(item.dealershipId, item.name, `Browser crashed — trying again (attempt ${(item.attempts || 1) + 1} of 3), keeping what it found`, 'warn')
+        await $fetch<{ batch: Batch }>(`/api/scanner/batches/${batch.value.id}/requeue`, { method: 'POST', body: { dealershipId: item.dealershipId, resume: true } }).then(r => { batch.value = r.batch }).catch(() => {})
+      }
     }
+  }
+  const BROWSER_GONE = /connection is closed|Target closed|Session closed|target crashed|browser (has )?disconnected|No target with given id|Cut off by the server/i
+  /** Poll a scan the server is still running until it ends; mirrors progress/log into the live card. Returns the failure message, if any. */
+  async function followStored(scanId: string, run: LiveRun, item: BatchItem, signal: AbortSignal): Promise<string | null> {
+    const until = Date.now() + 20 * 60_000
+    let seenLogs = 0
+    while (Date.now() < until && !signal.aborted) {
+      await new Promise(r => setTimeout(r, 4000))
+      let p: any
+      try { p = await $fetch<any>(`/api/scanner/scans/${scanId}`) } catch { continue }
+      const sc = p?.scan
+      if (!sc) continue
+      run.progress = sc.progress
+      const logs: { at: string, text: string }[] = sc.log || []
+      if (logs.length > seenLogs) { for (const l of logs.slice(seenLogs)) say(item.dealershipId, item.name, l.text); run.log = [...run.log.slice(-60), ...logs.slice(seenLogs)]; seenLogs = logs.length }
+      run.lastEvent = Date.now(); live.value = { ...live.value }
+      if (sc.status === 'running' || sc.status === 'interrupted') continue
+      if (sc.status === 'failed') return sc.error || 'Scan failed'
+      // Cut off on the server (host teardown) → counts as a crash so it is picked up again.
+      if (sc.status === 'stopped' && /cut off/i.test(sc.error || '')) return 'Cut off by the server'
+      return null
+    }
+    return null
   }
 
   /** Drive the batch: keep `concurrency` scans running until nothing is queued. */

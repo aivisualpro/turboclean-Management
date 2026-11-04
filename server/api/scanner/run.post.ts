@@ -23,9 +23,13 @@ export default defineEventHandler(async (event) => {
     stream.push({ event: name, data: JSON.stringify(data) }).catch(() => {})
   }
   const ping = setInterval(() => emit('ping', { t: Date.now() }), 15_000)
-  // The scan keeps going (and keeps saving) even if the browser disconnects.
-  run(emit, { isClosed: () => closed })
+  // The scan keeps going (and keeps saving) even if the browser disconnects. On Vercel the
+  // function would otherwise be torn down the moment the client drops — waitUntil keeps it alive
+  // until the scan has finished (the client re-attaches by polling GET /api/scanner/scans/:id).
+  const work = run(emit, { isClosed: () => closed })
     .catch(() => {})
     .finally(async () => { clearInterval(ping); await stream.close().catch(() => {}) })
+  ;(event as any).waitUntil?.(work)
+  ;(event.context as any)?.waitUntil?.(work)
   return stream.send()
 })
