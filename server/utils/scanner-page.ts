@@ -448,9 +448,21 @@ export const ANALYZE_FN_JS = `async (items) => {
       }
       var hash2 = ''
       for (var h2 = 0; h2 < 256; h2 += 4) hash2 += parseInt(bits2.slice(h2, h2 + 4), 2).toString(16)
+      // Small JPEG for the AI photo check (kept in memory only, never stored).
+      var thumb = ''
+      if (it.thumb) {
+        try {
+          var tw = Math.min(384, bmp.width), th = Math.max(1, Math.round(bmp.height * tw / bmp.width))
+          var tc = new OffscreenCanvas(tw, th); tc.getContext('2d').drawImage(bmp, 0, 0, tw, th)
+          var blob = await tc.convertToBlob({ type: 'image/jpeg', quality: 0.72 })
+          var buf = new Uint8Array(await blob.arrayBuffer()), bin = ''
+          for (var z = 0; z < buf.length; z += 8192) bin += String.fromCharCode.apply(null, buf.subarray(z, z + 8192))
+          thumb = btoa(bin)
+        } catch (e) { thumb = '' }
+      }
       var text = ''
       if (detector) { try { var found = await detector.detect(bmp); text = found.map(function (f) { return f.rawValue }).join(' ').slice(0, 300) } catch (e) {} }
-      out.push({ id: it.id, ok: true, w: bmp.width, h: bmp.height, hash: hash, hash2: hash2, whiteRatio: white / (W * H), grayRatio: gray / (W * H), colorfulness: Math.round(colorfulness * 10) / 10, edgeDensity: edges / ((W - 2) * (H - 2)), borderWhite: border ? borderWhite / border : 0, uniqueColors: Object.keys(q).length, text: text, ocr: !!detector })
+      out.push({ id: it.id, ok: true, w: bmp.width, h: bmp.height, hash: hash, hash2: hash2, thumb: thumb || undefined, whiteRatio: white / (W * H), grayRatio: gray / (W * H), colorfulness: Math.round(colorfulness * 10) / 10, edgeDensity: edges / ((W - 2) * (H - 2)), borderWhite: border ? borderWhite / border : 0, uniqueColors: Object.keys(q).length, text: text, ocr: !!detector })
       bmp.close && bmp.close()
     } catch (e) { out.push({ id: it.id, ok: false, error: String(e && e.message || e) }) }
   }

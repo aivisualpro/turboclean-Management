@@ -44,6 +44,8 @@ export interface ImageInfo {
   uniqueColors?: number
   text?: string
   ocr?: boolean
+  /** Gemini's look at the photo (cached by fingerprint). */
+  ai?: { v: 'real' | 'placeholder' | 'stock', c: number, why: string, text: string, model: string, cached?: boolean }
   bytes?: number
 }
 export interface ScanVehicle {
@@ -216,6 +218,17 @@ export function classify(vehicles: ScanVehicle[], images: Map<string, ImageInfo>
     const rule = rules.find(r => (r.hash && info?.hash && samePicture(r, info)) || (r.urlContains && img.url.toLowerCase().includes(r.urlContains.toLowerCase())))
     if (rule) { ruleHits.set(rule.id, (ruleHits.get(rule.id) || 0) + 1); decide(rule.verdict as any, 1, [`Matches your saved rule “${rule.label}”`]); continue }
 
+    // Gemini looked at the picture itself. Confident answers decide — except when the very same picture
+    // sits on 3+ different models (then it is a placeholder / stock image whatever it shows).
+    const ai = info?.ok ? info.ai : undefined
+    // The very same picture on several listings (exact match on both fingerprints) is never "this car's" photo,
+    // whatever it shows — so a "real" from the AI does not override a reliable duplicate.
+    const reliableDup = !!cluster && (!!info?.hash2 || (cluster.vehicles >= 3 && cluster.models >= 2))
+    if (ai && ai.c >= 0.75 && !(ai.v === 'real' && reliableDup)) {
+      const aiWhy = `AI check: ${ai.v === 'real' ? 'a real photo of the car' : ai.v === 'stock' ? 'a stock / studio image' : 'not a photo of the car'}${ai.why ? ` — ${short(ai.why, 60)}` : ''}${ai.text ? ` (reads “${short(ai.text, 40)}”)` : ''}`
+      decide(ai.v, Math.round(Math.max(0.75, ai.c) * 100) / 100, [aiWhy])
+      continue
+    }
     const file = decodeURIComponent(img.url.split('?')[0]!.split('/').slice(-3).join('/'))
     const pm = file.match(PLACEHOLDER_URL)
     if (pm) P.push([0.92, `File name says “${pm[0]}”`])
@@ -227,7 +240,7 @@ export function classify(vehicles: ScanVehicle[], images: Map<string, ImageInfo>
     if (img.alt && STOCK_TEXT.test(img.alt)) S.push([0.8, `Image description says “${short(img.alt)}”`])
     if (v.noPhotoText) P.push([0.85, `The card says “${short(v.noPhotoText)}”`])
     if (info?.ok) {
-      const t = (info.text || '').replace(/\s+/g, ' ').trim()
+      const t = `${info.text || ''} ${info.ai?.text || ''}`.replace(/\s+/g, ' ').trim()
       const pt = t.match(PLACEHOLDER_TEXT)
       if (pt) P.push([0.97, `The picture reads “${short(t, 60)}”`])
       const st = t.match(STOCK_TEXT)
@@ -235,6 +248,8 @@ export function classify(vehicles: ScanVehicle[], images: Map<string, ImageInfo>
       if ((info.w || 0) < 80 || (info.h || 0) < 60) P.push([0.9, `The image is only ${info.w}×${info.h}px (a spacer, not a photo)`])
       if ((info.whiteRatio || 0) >= 0.55 && (info.colorfulness || 0) < 14 && (info.edgeDensity || 0) < 0.1) P.push([0.62, 'Mostly blank, colourless picture — typical of a generic placeholder'])
       else if ((info.grayRatio || 0) > 0.92 && (info.edgeDensity || 0) < 0.06) P.push([0.55, 'Flat grey picture with almost no detail'])
+      // A grey car silhouette from a stock host (EVOX etc. "Photos Coming Soon") is a placeholder, not a stock photo.
+      if (sm && (info.colorfulness || 0) < 10 && (info.grayRatio || 0) > 0.8) P.push([0.9, 'A grey car silhouette — a “photos coming soon” graphic'])
       if ((info.borderWhite || 0) >= 0.9 && (info.whiteRatio || 0) >= 0.35 && (info.colorfulness || 0) >= 14 && !P.length) S.push([0.5, 'Car on a plain white background — looks like a studio / stock render'])
     }
     else if (info && !info.ok) R.push([0.5, `Couldn’t download the photo to check it (${info.error})`])

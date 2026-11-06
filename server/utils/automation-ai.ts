@@ -242,6 +242,53 @@ async function* sseEvents(body: ReadableStream<Uint8Array>) {
 
 const isOverload = (e: any) => /^Gemini is (overloaded|rate limit)/.test(String(e?.message || ''))
 
+// ───────────────────────── Vision (Gemini) ─────────────────────────
+/** Gemini key present → photo checks can use vision. */
+export const visionConfigured = () => !!geminiKey() && String(process.env.SCANNER_AI || '').toLowerCase() !== 'off'
+/** The vision model: SCANNER_VISION_MODEL, else GEMINI_MODEL, else the default flash model. */
+export const visionModel = () => process.env.SCANNER_VISION_MODEL || process.env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL
+let thinkingParam: 'level' | 'none' = 'level'
+/**
+ * One Gemini call with several images (inline JPEGs) → JSON. Fast settings: temperature 0, low
+ * thinking, JSON output. Retries / fallback models like every other Gemini call.
+ */
+export async function askGeminiVision(opts: { system: string, prompt: string, images: { label: string, mime: string, b64: string }[], maxTokens?: number, timeoutMs?: number, purpose?: string }) {
+  if (!geminiKey()) throw new Error('GOOGLE_GEMINI_API_KEY is not set')
+  const model = visionModel()
+  const t = withTimeout(opts.timeoutMs ?? 45_000)
+  const t0 = Date.now()
+  const parts: any[] = [{ text: opts.prompt }]
+  for (const im of opts.images) { parts.push({ text: im.label }); parts.push({ inlineData: { mimeType: im.mime, data: im.b64 } }) }
+  const make = () => JSON.stringify({
+    systemInstruction: { parts: [{ text: opts.system }] },
+    contents: [{ role: 'user', parts }],
+    generationConfig: { maxOutputTokens: opts.maxTokens ?? 4000, temperature: 0, responseMimeType: 'application/json', ...(thinkingParam === 'level' ? { thinkingConfig: { thinkingLevel: 'low' } } : {}) },
+  })
+  try {
+    const r = await geminiWithRetries(model, t.signal, async (m) => {
+      let res = await fetch(geminiUrl(m, 'generateContent'), { method: 'POST', signal: t.signal, headers: geminiHeaders(), body: make() })
+      if (res.status === 400 && thinkingParam === 'level') {
+        const txt = await res.text()
+        if (!/thinking/i.test(txt)) throw new GeminiHttpError(400, txt)
+        thinkingParam = 'none' // this model has no thinking level — ask without it from now on
+        res = await fetch(geminiUrl(m, 'generateContent'), { method: 'POST', signal: t.signal, headers: geminiHeaders(), body: make() })
+      }
+      if (!res.ok) throw new GeminiHttpError(res.status, await res.text())
+      const data: any = await res.json()
+      const blocked = geminiBlocked(data)
+      if (blocked) throw new Error(blocked)
+      return { text: geminiText(data).trim(), model: String(data?.modelVersion || m), usage: geminiUsage(data) }
+    }, () => false)
+    logCall({ provider: 'gemini', purpose: opts.purpose || 'vision', brain: null, model: r.model, ms: Date.now() - t0, ok: true, images: opts.images.length, ...r.usage })
+    return { data: parseJsonBlock(r.text), model: r.model, ms: Date.now() - t0 }
+  }
+  catch (e: any) {
+    logCall({ provider: 'gemini', purpose: opts.purpose || 'vision', brain: null, model, ms: Date.now() - t0, ok: false, images: opts.images.length, error: String(e?.message || e).slice(0, 300) })
+    throw e
+  }
+  finally { t.clear() }
+}
+
 // ───────────────────────── Public API ─────────────────────────
 export async function askClaude(opts: AskOptions) {
   const provider = aiProvider()

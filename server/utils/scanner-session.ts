@@ -47,7 +47,9 @@ export interface ScanProgress { phase: ScanPhase, page: number, vehicles: number
   /** What each inventory list says it has ("42 vehicles") — coverage = collected vs these. */
   advertisedByUrl?: Record<string, number>
   /** Result pages the dealer's site refused (bot protection) — retried later from this exact page. */
-  blocked?: { url: string, href: string, page: number, at: string }[] }
+  blocked?: { url: string, href: string, page: number, at: string }[]
+  /** Lists whose "next page" never moved although the site lists more vehicles. */
+  stuck?: { url: string, page: number }[] }
 export type ScanStatus = 'running' | 'done' | 'stopped' | 'failed' | 'saved' | 'interrupted'
 
 const g = globalThis as any
@@ -161,7 +163,9 @@ export async function openTab(): Promise<Tab> {
     conn.on(`${sid}:Page.frameStartedLoading`, (p: any) => { if (!t.mainFrameId || p.frameId === t.mainFrameId) { t.loading = true; t.status = null } })
     conn.on(`${sid}:Page.loadEventFired`, () => { t.loading = false })
     conn.on(`${sid}:Page.frameNavigated`, (p: any) => { if (!p.frame?.parentId) { t.url = p.frame.url; t.mainFrameId = p.frame.id } })
+    // Same-page navigations (history.pushState) start "loading" but never fire a load event.
     conn.on(`${sid}:Page.navigatedWithinDocument`, (p: any) => { t.url = p.url })
+    conn.on(`${sid}:Page.frameStoppedLoading`, (p: any) => { if (!t.mainFrameId || p.frameId === t.mainFrameId) t.loading = false })
     conn.on(`${sid}:Network.responseReceived`, (p: any) => { if (p.type === 'Document' && (!p.frameId || p.frameId === t.mainFrameId)) t.status = Number(p.response?.status) || null })
     conn.on(`${sid}:Page.javascriptDialogOpening`, () => { conn.send('Page.handleJavaScriptDialog', { accept: true }, sid).catch(() => {}) })
     return t
@@ -230,7 +234,8 @@ export async function goto(t: Tab, url: string, timeoutMs = 25_000, log?: (s: st
 
 /** A real (trusted) mouse click on the element marked [data-zrz-next] — what a visitor's click looks like. */
 async function trustedClick(t: Tab) {
-  const box = await evaluate<{ x: number, y: number } | null>(t, `(() => { const el = document.querySelector('[data-zrz-next]'); if (!el) return null; el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); if (r.width < 2 || r.height < 2) return null; return { x: r.left + r.width / 2, y: r.top + r.height / 2 } })()`, 5_000).catch(() => null)
+  // Only when the point really lands on the link (no cookie bar / chat bubble / sticky footer on top of it).
+  const box = await evaluate<{ x: number, y: number } | null>(t, `(() => { const el = document.querySelector('[data-zrz-next]'); if (!el) return null; el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); if (r.width < 2 || r.height < 2) return null; const x = r.left + r.width / 2, y = r.top + r.height / 2; const hit = document.elementFromPoint(x, y); if (!hit || !(hit === el || el.contains(hit) || hit.contains(el))) return null; return { x: x, y: y } })()`, 5_000).catch(() => null)
   if (!box) return false
   await sleep(250 + Math.round(Math.random() * 450))
   await t.conn.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x - 30, y: box.y - 12 }, t.sid).catch(() => {})
@@ -248,6 +253,19 @@ async function isBlockedPage(t: Tab) {
   if (!r) return false
   return /^access denied$|attention required|just a moment|request blocked|pardon our interruption|are you a robot|verify you are human/i.test(r.title.trim()) || (/access denied/i.test(r.text) && /reference #|you don.t have permission/i.test(r.text))
 }
+/** A fingerprint of what the result list shows (address + first vehicle links) — tells whether "next" really moved. */
+const PAGE_SIG_JS = `(() => { var hs = []; var as = document.querySelectorAll('a[href]'); for (var i = 0; i < as.length && hs.length < 12; i++) { var h = as[i].href; if (/vin|vehicle|inventory\\/[^?#]*\\d|detail|vdp|stock|\\/(used|new|certified)[-/][^?#]*\\d{4}/i.test(h) && hs.indexOf(h) < 0) hs.push(h) } return location.href + '|' + hs.join('|') })()`
+async function pageSig(t: Tab) { return evaluate<string>(t, PAGE_SIG_JS, 5_000).catch(() => '') }
+/** After a click: wait (up to ~8 s) until the list really changed — single-page sites swap the cards without a page load. */
+async function waitForChange(t: Tab, before: string) {
+  for (let i = 0; i < 16; i++) {
+    await sleep(500)
+    if (t.loading) await waitForSettle(t, 3_000)
+    const now = await pageSig(t)
+    if (now && now !== before && now.split('|').slice(1).join('|') !== before.split('|').slice(1).join('|')) { await sleep(600); return true }
+  }
+  return false
+}
 /** Wait for a navigation the page itself started (link click / location change) to finish. */
 async function settleAfterInPageNav(t: Tab, urlBefore: string) {
   for (let i = 0; i < 20 && t.url === urlBefore && !t.loading; i++) await sleep(150)
@@ -262,21 +280,34 @@ async function settleAfterInPageNav(t: Tab, urlBefore: string) {
  * 3. still blocked → fresh session (cookies cleared), via the home page, then the result page
  * Returns false when the site keeps refusing — the caller keeps a checkpoint so a later retry continues here.
  */
-async function followNextLink(t: Tab, href: string, lastGood: string, log: (s: string) => void) {
-  const attempt = async (how: 'click' | 'assign') => {
-    const before = t.url
+async function followNextLink(t: Tab, href: string, lastGood: string, log: (s: string) => void): Promise<boolean | 'same'> {
+  const attempt = async (how: 'click' | 'assign'): Promise<boolean | 'same'> => {
+    const before = await pageSig(t)
+    const urlBefore = t.url
     t.status = null
     const clicked = how === 'click' ? await trustedClick(t) : false
     if (!clicked) await evaluate(t, `location.assign(${JSON.stringify(href)})`, 5_000).catch(() => {})
-    await settleAfterInPageNav(t, before)
-    return !(await isBlockedPage(t))
+    await settleAfterInPageNav(t, urlBefore)
+    if (await isBlockedPage(t)) return false
+    if (await waitForChange(t, before)) return true
+    // The click did nothing (an overlay, a dead link) — open the address from the page itself.
+    if (how === 'click') {
+      t.status = null
+      await evaluate(t, `location.assign(${JSON.stringify(href)})`, 5_000).catch(() => {})
+      await settleAfterInPageNav(t, t.url)
+      if (await isBlockedPage(t)) return false
+      if (await waitForChange(t, before)) return true
+    }
+    return 'same'
   }
-  if (await attempt('click')) return true
+  const first = await attempt('click')
+  if (first === 'same') return 'same'
+  if (first) return true
   log('The dealer\'s site blocked that page (bot protection) — pausing, then trying again like a visitor')
   await sleep(8_000 + Math.round(Math.random() * 4_000))
   try { await goto(t, lastGood, 25_000, log, new URL(lastGood).origin + '/') } catch {}
   await evaluate(t, SCROLL_STEP_JS).catch(() => {}); await sleep(1_500); await evaluate(t, SCROLL_STEP_JS).catch(() => {}); await sleep(3_000)
-  if (!(await isBlockedPage(t)) && await attempt('assign')) { log('Got through on the second try'); return true }
+  if (!(await isBlockedPage(t)) && (await attempt('assign')) === true) { log('Got through on the second try'); return true }
   log('Still blocked — starting a fresh session through the home page')
   await t.conn.send('Network.clearBrowserCookies', {}, t.sid).catch(() => {})
   await sleep(5_000)
@@ -287,7 +318,7 @@ async function followNextLink(t: Tab, href: string, lastGood: string, log: (s: s
     await evaluate(t, `location.assign(${JSON.stringify(lastGood)})`, 5_000).catch(() => {})
     await settleAfterInPageNav(t, `${origin}/`)
     await sleep(3_000)
-    if (!(await isBlockedPage(t)) && await attempt('assign')) { log('Got through with a fresh session'); return true }
+    if (!(await isBlockedPage(t)) && (await attempt('assign')) === true) { log('Got through with a fresh session'); return true }
   } catch {}
   return false
 }
@@ -634,14 +665,14 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
         // This result page was refused last time: arrive the way a visitor does — list first, then the page.
         log('This page was blocked last time — going through the list page first')
         await goto(tab, startUrl, 25_000, log, `${new URL(startUrl).origin}/`)
-        if (!(await followNextLink(tab, target, startUrl, log))) openBlocked = true
+        if ((await followNextLink(tab, target, startUrl, log)) !== true) openBlocked = true
       }
       else {
         try { await goto(tab, target, 25_000, log, `${new URL(target).origin}/`) }
         catch (e: any) {
           if (e?.statusCode !== 403) throw e
           // Refused straight away: fresh session through the home page, then this page.
-          if (!(await followNextLink(tab, target, `${new URL(target).origin}/`, log))) openBlocked = true
+          if ((await followNextLink(tab, target, `${new URL(target).origin}/`, log)) !== true) openBlocked = true
         }
       }
       if (openBlocked) {
@@ -665,6 +696,9 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     let ckBase = resumeAt?.href || startUrl
     let ckClicks = resumeAt?.clicks || 0
     let blockedHere: { url: string, href: string, page: number, at: string } | null = null
+    const followed = new Set<string>()
+    let stuckPage = 0
+    let zeroStreak = 0
     for (let p = 1; p <= MAX_PAGES && !stop; p++) {
       const page = ++pageNo
       setProgress({ page, message: page === 1 ? 'Loading every vehicle on this page…' : `Page ${page}: loading vehicles…` })
@@ -721,7 +755,9 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       if (pageCards === 0 && p === 1) { log('No vehicle cards on this page — moving on'); break }
       if (!doc.allPages || doc.vehicles.length >= MAX_VEHICLES) break
       if (Date.now() >= collectUntil) { log('Time limit for collecting reached — checking the photos found so far'); stop = stop || u < urls.length - 1; break }
-      if (added === 0 && p > 1 && !revisit) break
+      // Nothing new twice in a row = going in circles (also right after a restart, where one repeat is normal).
+      zeroStreak = added === 0 && p > 1 ? zeroStreak + 1 : 0
+      if (added === 0 && p > 1 && (!revisit || zeroStreak >= 2)) break
       if (advertised && doc.vehicles.length - countBefore >= advertised) break
 
       const next = await evaluate<any>(tab, FIND_NEXT_JS).catch(() => null)
@@ -734,7 +770,15 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
         ckBase = String(next.href); ckClicks = 0
         doc.progress.resumeAt = { url: startUrl, href: ckBase, page: page + 1, clicks: 0 }
         await persist(true)
+        if (followed.has(String(next.href))) { log('The “next” link points to a page already read — end of this list'); break }
+        followed.add(String(next.href))
         const through = await followNextLink(tab, String(next.href), lastGood, log).catch((e: any) => { if (isBrowserGone(e)) throw e; log(`Could not open the next page (${e?.message})`); return false })
+        if (through === 'same') {
+          log('The site did not move to the next page — end of this list')
+          const adv = doc.progress.advertisedByUrl?.[startUrl]
+          if (adv && doc.vehicles.length - countBefore < adv) stuckPage = page + 1
+          break
+        }
         if (!through) { blockedHere = { url: startUrl, href: ckBase, page: page + 1, at: new Date().toISOString() }; break }
       }
       else {
@@ -755,6 +799,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     }
     // Each inventory page advertises its own total; the next one starts fresh.
     advertised = null
+    if (stuckPage) doc.progress.stuck = [...(doc.progress.stuck || []).filter(b => b.url !== startUrl), { url: startUrl, page: stuckPage }]
     if (blockedHere) {
       // Keep the checkpoint: a retry (autopilot does it automatically) continues from this exact result page.
       doc.progress.blocked = [...(doc.progress.blocked || []).filter(b => b.url !== startUrl), blockedHere]
@@ -784,14 +829,17 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     await col.updateOne({ _id: doc._id }, { $set: { vehicles: doc.vehicles, progress: doc.progress, heartbeatAt: new Date().toISOString() } }).catch(() => {})
 
     // ── Photos ──
-    try { await analyzePhotos(tab, doc, { setProgress, log, deadline: analyzeUntil }) }
-    catch (e: any) { if (!(await restartBrowser(e))) throw e; await analyzePhotos(tab, doc, { setProgress, log, deadline: analyzeUntil }) }
+    try { await analyzePhotos(tab, doc, { setProgress, log, deadline: analyzeUntil, db }) }
+    catch (e: any) { if (!(await restartBrowser(e))) throw e; await analyzePhotos(tab, doc, { setProgress, log, deadline: analyzeUntil, db }) }
     await reclassify(db, doc, log)
 
     const sum = summarize(doc.vehicles, doc.clusters, { countStockAsMissing: doc.countStockAsMissing })
     const blockedPages = doc.progress.blocked || []
     doc.status = stop || blockedPages.length ? 'stopped' : 'done'
-    doc.error = blockedPages.length ? `Blocked by the dealer's site on result page ${blockedPages.map(b => b.page).join(', ')} — ${coverageText(doc)}; a retry continues from there` : null
+    const stuck = doc.progress.stuck || []
+    doc.error = blockedPages.length ? `Blocked by the dealer's site on result page ${blockedPages.map(b => b.page).join(', ')} — ${coverageText(doc)}; a retry continues from there`
+      : stuck.length ? `Could not get past result page ${stuck.map(b => b.page - 1).join(', ')} — ${coverageText(doc)}` : null
+    if (!blockedPages.length && stuck.length) doc.status = 'stopped'
     Object.assign(doc.progress, { phase: doc.status, message: `${stop ? 'Stopped early — ' : blockedPages.length ? 'Partly blocked — ' : ''}${sum.total} vehicles · ${sum.withoutReal} without a real photo (${sum.withoutRealPct ?? 0}%)`, finishedAt: new Date().toISOString() })
     log(`Done in ${Math.round((Date.now() - t0) / 1000)}s`)
     await col.updateOne({ _id: doc._id }, { $set: { status: doc.status, error: doc.error, progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, images: doc.images.map(stripImage), clusters: doc.clusters, heartbeatAt: new Date().toISOString() } })
@@ -847,7 +895,7 @@ function coverageText(doc: ScanDoc) {
 }
 const stripImage = (i: ImageInfo): ImageInfo => { const { bytes, thumb, ...rest } = i as any; return rest }
 
-async function analyzePhotos(t: Tab, doc: ScanDoc, o: { setProgress: (p: Partial<ScanProgress>) => void, log: (s: string) => void, deadline: number }) {
+async function analyzePhotos(t: Tab, doc: ScanDoc, o: { setProgress: (p: Partial<ScanProgress>) => void, log: (s: string) => void, deadline: number, db?: Db | null }) {
   const images = new Map(doc.images.map(i => [i.id, i]))
   const byUrl = new Map<string, string>()
   for (const [id, info] of images) byUrl.set(info.url, id)
@@ -878,7 +926,7 @@ async function analyzePhotos(t: Tab, doc: ScanDoc, o: { setProgress: (p: Partial
           const dl = await Promise.all(batch.map(async (img) => {
             const r = await downloadImage(img.url, referer)
             if ('error' in r) { img.ok = false; img.error = r.error; return null }
-            return { id: img.id, b64: r.b64, mime: r.mime }
+            return { id: img.id, b64: r.b64, mime: r.mime, thumb: true }
           }))
           const items = dl.filter(Boolean) as { id: string, b64: string, mime: string }[]
           if (items.length) {
@@ -902,6 +950,13 @@ async function analyzePhotos(t: Tab, doc: ScanDoc, o: { setProgress: (p: Partial
       o.log(`Time limit reached — ${left.length} photos judged by their web address and text only`)
     }
   }
+  // AI photo check (Gemini): every photo, cached by fingerprint — instant for pictures seen before.
+  try {
+    const { visionCheck } = await import('./scanner-vision')
+    await visionCheck(o.db || null, [...images.values()], { log: o.log, deadline: Math.min(o.deadline, Date.now() + 90_000), onProgress: (d, n) => o.setProgress({ message: `AI photo check… ${d} of ${n}` }) })
+  }
+  catch (e: any) { o.log(`AI photo check skipped (${String(e?.message || e).slice(0, 100)})`) }
+  for (const i of images.values()) delete (i as any).thumb
   doc.images = [...images.values()].map(stripImage)
 }
 
@@ -933,6 +988,19 @@ export async function applyReview(db: Db, id: string, body: any) {
   if (Array.isArray(body?.clusters)) {
     for (const x of body.clusters) { const c = doc.clusters.find(c => c.id === x.id); if (c) c.override = ok(x.verdict) }
   }
+  // Corrections teach the AI cache too: the same picture on any future crawl gets this answer straight away.
+  try {
+    const { teachVision } = await import('./scanner-vision')
+    const imgs = new Map(doc.images.map(i => [i.id, i]))
+    for (const x of Array.isArray(body?.vehicles) ? body.vehicles : []) {
+      const v = doc.vehicles.find(v => v.key === String(x.key)); const im = v?.imageId ? imgs.get(v.imageId) : null
+      const f = ok(x.verdict); if (im && f) await teachVision(db, im, f)
+    }
+    for (const x of Array.isArray(body?.clusters) ? body.clusters : []) {
+      const c = doc.clusters.find(c => c.id === x.id); const f = ok(x.verdict)
+      if (c && f) for (const id of c.imageIds) { const im = imgs.get(id); if (im) await teachVision(db, im, f) }
+    }
+  } catch {}
   if (typeof body?.countStockAsMissing === 'boolean') doc.countStockAsMissing = body.countStockAsMissing
   if (body?.reapplyRules) await reclassify(db, doc)
   // Any change after saving makes it a draft again until saved once more.
