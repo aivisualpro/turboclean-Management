@@ -296,6 +296,21 @@ async function settleAfterInPageNav(t: Tab, urlBefore: string) {
  * 3. still blocked → fresh session (cookies cleared), via the home page, then the result page
  * Returns false when the site keeps refusing — the caller keeps a checkpoint so a later retry continues here.
  */
+/** Forget everything the site stored (cookies, cache, local/session storage) and open `url` as a first visit from Google. */
+async function freshVisit(t: Tab, url: string, log: (s: string) => void) {
+  try {
+    const origin = new URL(url).origin
+    await t.conn.send('Network.clearBrowserCookies', {}, t.sid).catch(() => {})
+    await t.conn.send('Network.clearBrowserCache', {}, t.sid).catch(() => {})
+    await t.conn.send('Storage.clearDataForOrigin', { origin, storageTypes: 'all' }, t.sid).catch(() => {})
+    await goto(t, 'about:blank', 10_000).catch(() => {})
+    await sleep(2_000 + Math.round(Math.random() * 2_000))
+    await goto(t, url, 25_000, log, 'https://www.google.com/')
+    await sleep(1_500)
+    return !(await isBlockedPage(t))
+  } catch (e: any) { if (isBrowserGone(e)) throw e; return false }
+}
+
 async function followNextLink(t: Tab, href: string, lastGood: string, log: (s: string) => void): Promise<boolean | 'same'> {
   const attempt = async (how: 'click' | 'assign'): Promise<boolean | 'same'> => {
     const before = await pageSig(t)
@@ -319,7 +334,11 @@ async function followNextLink(t: Tab, href: string, lastGood: string, log: (s: s
   const first = await attempt('click')
   if (first === 'same') return 'same'
   if (first) return true
-  log('The dealer\'s site blocked that page (bot protection) — pausing, then trying again like a visitor')
+  // The first page of a list always loads on a fresh visit — so open the blocked page the same way:
+  // as a brand-new visitor (no cookies, cache or site storage), arriving straight from a search.
+  log('The dealer\'s site blocked that page (bot protection) — opening it as a fresh first visit')
+  if (await freshVisit(t, href, log)) { log('Got through as a fresh visitor'); return true }
+  log('Still blocked — pausing, then trying again like a returning visitor')
   await sleep(8_000 + Math.round(Math.random() * 4_000))
   try { await goto(t, lastGood, 25_000, log, new URL(lastGood).origin + '/') } catch {}
   await evaluate(t, SCROLL_STEP_JS).catch(() => {}); await sleep(1_500); await evaluate(t, SCROLL_STEP_JS).catch(() => {}); await sleep(3_000)

@@ -19,7 +19,7 @@ import { auditPages, shortPath } from './crm-email-blocks'
 export const REPORTS_COLLECTION = 'turboCleanCrmAuditReports'
 export const PDF_COLLECTION = 'turboCleanCrmPdfs'
 const AUDITS = 'turboCleanCrmAudits'
-export const REPORT_VERSION = 2
+export const REPORT_VERSION = 3
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -207,122 +207,267 @@ function lineChartSvg(points: { label: string, p: number }[], accent: string) {
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Share of pre-owned listings without a real photo over time" style="display:block">${grid}<path d="${area}" fill="${accent}" opacity="0.08"/><path d="${path}" fill="none" stroke="${accent}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${dots}</svg>`
 }
 
+// Icons (lucide, MIT) inlined as SVG so the report has no outside requests.
+const ICON_PATHS: Record<string, string> = {
+  file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  car: '<path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/>',
+  camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+  pie: '<path d="M21 12c.552 0 1.005-.449.95-.998a10 10 0 0 0-8.953-8.951c-.55-.055-.998.398-.998.95v8a1 1 0 0 0 1 1z"/><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/>',
+  eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
+  layers: '<path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/>',
+  chart: '<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
+  pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  swap: '<path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>',
+}
+const icon = (name: string, cls = 'ic') => `<span class="${cls}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name] || ''}</svg></span>`
+
+/**
+ * The dealer report (web page + PDF) in the ZRZ OPS print look: Letter-size pages with the deep-green
+ * brand band, breadcrumb, big two-tone headline, then
+ *   1. Inventory review — executive summary, KPI cards, why it matters
+ *   2. The findings — by inventory page, then vs now, chart, what we found (only what has data)
+ *   3. Listings without a real photo — grouped by page, split over as many pages as needed
+ *   4. Recommended operating approach — 01 Identify · 02 Prep + Capture · 03 Verify + Maintain, next step
+ *   5. How ZRZ OPS helps — pain point vs response, the 4-step flow, daily accountability, the outcome
+ * Every page is exactly one sheet (fixed footer with "page / total"); nothing runs into the footer.
+ */
 export function buildReportHtml(o: { dealership: any, audit: any, history: any[], sender: { name: string, company: string, email: string, phone: string }, onePointPerDay?: boolean }) {
   const { dealership: d, audit: a, history, sender } = o
+  const name = esc(d.name || 'Your dealership')
+  const NAME = esc(String(d.name || 'Your dealership').toUpperCase())
   const base = pickBaseline(history, a)
   const prev = [...history].reverse().find(x => new Date(x.auditedAt).getTime() < new Date(a.auditedAt).getTime() - 86_400_000) || null
   const b = a.photoBreakdown || null
-  const usedP = a.usedMissingPhotoPct ?? pct1(num(a.usedMissingPhotos), num(a.usedTotal))
+  const usedT = num(a.usedTotal), usedM = num(a.usedMissingPhotos)
+  const usedP = a.usedMissingPhotoPct ?? pct1(usedM, usedT)
   const newP = a.newMissingPhotoPct ?? pct1(num(a.newMissingPhotos), num(a.newTotal))
-  const worse = base ? num(a.usedMissingPhotos) > num(base.usedMissingPhotos) : false
-  const accent = '#16a34a'
-  const kpi = (label: string, value: string, sub: string, tone = '#101828') => `<div class="kpi"><div class="kpi-l">${label}</div><div class="kpi-v" style="color:${tone}">${value}</div><div class="kpi-s">${sub}</div></div>`
-  const cmpRow = (label: string, x: any, highlight = false) => x ? `<tr${highlight ? ' class="hl"' : ''}><td>${label}</td><td>${dayLabel(x.auditedAt)}</td><td class="r">${fmt(num(x.usedTotal))}</td><td class="r">${fmt(num(x.usedMissingPhotos))}</td><td class="r">${x.usedMissingPhotoPct ?? pct1(num(x.usedMissingPhotos), num(x.usedTotal)) ?? '—'}%</td><td class="r">${fmt(num(x.totalVehicles))}</td><td class="r">${fmt(num(x.totalMissingPhotos))}</td></tr>` : ''
+  const worse = base ? usedM > num(base.usedMissingPhotos) : false
   const points = (o.onePointPerDay === false ? history : onePerDay(history)).filter(x => num(x.usedTotal) > 0).slice(-10).map(x => ({ label: dayLabel(x.auditedAt).replace(/, (\d{4})$/, " '$1").replace(/'(\d\d)(\d\d)$/, "'$2"), p: x.usedMissingPhotoPct ?? pct1(num(x.usedMissingPhotos), num(x.usedTotal)) ?? 0 }))
   const examples = (Array.isArray(a.examples) ? a.examples : []).filter((e: any) => e?.url).slice(0, 40)
   const pages = auditPages(a)
   const byPage = pages.length >= 2
   const norm = (u: string) => String(u || '').replace(/[?#].*$/, '').replace(/\/$/, '').toLowerCase()
-  const toneOf = (p: number) => p >= 15 ? '#c62a2f' : p >= 5 ? '#b54708' : '#15803d'
   const pagePct = (pg: any) => pg.withoutRealPct ?? pct1(num(pg.withoutReal), num(pg.total)) ?? 0
   const verdict = (e: any) => e.verdict === 'stock' ? ['Stock image', 'b-stock'] : e.verdict === 'placeholder' ? ['Placeholder', 'b-red'] : /stock/i.test(e.label || '') ? ['Stock image', 'b-stock'] : ['No photo', 'b-red']
-  const exampleTable = (list: any[]) => `<table class="t"><thead><tr><th>Vehicle</th><th>Stock #</th><th class="r">Price</th><th>Issue</th><th></th></tr></thead><tbody>
-      ${list.map((e: any) => { const [label, cls] = verdict(e); const title = e.title || String(e.label || '').split(' — ')[0]!.replace(/\s+#\S+$/, ''); const stock = e.stock || (String(e.label || '').match(/#(\S+)/)?.[1] || ''); return `<tr><td>${esc(title) || 'Vehicle'}</td><td>${esc(stock)}</td><td class="r">${esc(e.price || '')}</td><td><span class="badge ${cls}">${label}</span></td><td class="r"><a href="${esc(e.url)}" target="_blank" rel="noopener">View &rarr;</a></td></tr>` }).join('')}
-    </tbody></table>`
   const issues = [...(a.merchandisingIssues || []), ...(a.websiteIssues || [])]
   const period = base ? periodLabel(base.auditedAt, a.auditedAt) : ''
+  const cov = a.coverage && num(a.coverage.advertised) > num(a.coverage.checked) ? a.coverage : null
+  const date = dayLabel(a.auditedAt)
+  const DATE = dayUpper(a.auditedAt).replace(/ 0(\d),/, ' $1,')
+
+  // ── Page frame ──
+  const band = `<header class="band"><div class="brand">ZRZ <span>OPS</span></div><div class="tag">DEALERSHIP INVENTORY INTELLIGENCE</div></header><div class="rule"></div>`
+  const pageHtml = (crumb: string, body: string) => `<section class="page">${band}<div class="content"><p class="crumb">${crumb}</p>${body}</div><footer class="foot"><span>ZRZ OPS &nbsp;/&nbsp; RECONDITIONING + INVENTORY OPERATIONS</span><b class="pn">__PAGE__</b></footer></section>`
+  const sections: string[] = []
+
+  // 1 ── Inventory review
+  const summary = usedT
+    ? `We reviewed ${name}&rsquo;s publicly listed pre-owned inventory and identified ${usedM ? 'a visible online merchandising gap' : 'how complete the online photo coverage is'}: <b>${fmt(usedM)} of ${fmt(usedT)}</b> pre-owned listings are currently missing vehicle photos.${cov ? ` <span class="muted">(The website lists ${fmt(num(cov.advertised))} vehicles; ${fmt(num(cov.checked))} could be checked${num(cov.blockedPages) ? ' &mdash; the rest sat behind pages the site would not show us' : ''}.)</span>` : ''}`
+    : `We reviewed ${name}&rsquo;s publicly listed inventory: <b>${fmt(num(a.totalMissingPhotos))} of ${fmt(num(a.totalVehicles))}</b> listings are currently missing vehicle photos.`
+  sections.push(pageHtml(`${NAME} &nbsp;/&nbsp; INVENTORY REVIEW &nbsp;/&nbsp; ${DATE}`, `
+    <h1>Your online inventory.<br><em>A measurable opportunity.</em></h1>
+    <p class="lead">Prepared for ${name} | A focused review of pre-owned vehicle photography and merchandising consistency.</p>
+    <div class="card summary"><p class="eyebrow">EXECUTIVE SUMMARY</p><div class="row">${icon('file', 'ic lg')}<p>${summary}</p></div></div>
+    <p class="eyebrow">YOUR INVENTORY, AT A GLANCE</p>
+    <div class="kpis">
+      <div class="kpi">${icon('car')}<div><b>${fmt(usedT || num(a.totalVehicles))}</b><span>VISIBLE ${usedT ? 'PRE&#8209;OWNED ' : ''}VEHICLES</span></div></div>
+      <div class="kpi">${icon('camera')}<div><b class="g">${fmt(usedT ? usedM : num(a.totalMissingPhotos))}</b><span>LISTINGS FLAGGED FOR MISSING PHOTOS</span></div></div>
+      <div class="kpi">${icon('pie')}<div><b class="g">${Math.round(num(usedT ? usedP : a.missingPhotoPct))}%</b><span>MISSING-PHOTO RATE</span></div></div>
+    </div>
+    <p class="eyebrow">WHY THIS MATTERS</p>
+    <div class="why">
+      <div class="card">${icon('eye')}<h4>First impression</h4><p>Listings without photos create friction before a shopper even clicks.</p></div>
+      <div class="card">${icon('layers')}<h4>Merchandising consistency</h4><p>Incomplete photo coverage makes inventory look less curated and less market-ready.</p></div>
+      <div class="card">${icon('chart')}<h4>Missed opportunity</h4><p>Every unphotographed unit is a vehicle that can underperform online.</p></div>
+    </div>
+    <div class="band-card mint">${icon('pencil', 'ic lg solid')}<p>ZRZ OPS helps dealerships close these gaps with detailing, photography, and repeatable inventory support.</p></div>`))
+
+  // 2 ── Findings (only the parts that have data)
+  // Each block has an estimated height (px) so the findings split over as many sheets as needed.
+  const findings: { h: number, html: string }[] = []
+  const add = (h: number, html: string) => findings.push({ h, html })
+  add(100, `<div class="mini-kpis"><div><span>PRE-OWNED</span><b>${fmt(usedM)} / ${fmt(usedT)}</b><i>${usedP ?? '—'}% without a real photo</i></div><div><span>NEW</span><b>${fmt(num(a.newMissingPhotos))} / ${fmt(num(a.newTotal))}</b><i>${newP ?? '—'}% without a real photo</i></div><div><span>ALL LISTINGS</span><b>${fmt(num(a.totalMissingPhotos))} / ${fmt(num(a.totalVehicles))}</b><i>${a.missingPhotoPct ?? '—'}% without a real photo</i></div></div>`)
+  if (byPage) {
+    add(70 + 44 * Math.min(8, pages.length), `<p class="eyebrow">BY INVENTORY PAGE</p><table class="t"><thead><tr><th>Page</th><th class="r">Vehicles</th><th class="r">No real photo</th><th style="width:34%">Share</th></tr></thead><tbody>${pages.slice(0, 8).map((pg: any) => { const p = pagePct(pg); return `<tr><td><b>${esc(pg.label || 'Inventory')}</b><br><a href="${esc(pg.url)}" class="path">${esc(shortPath(pg.url))}</a></td><td class="r">${fmt(num(pg.total))}</td><td class="r g"><b>${fmt(num(pg.withoutReal))}</b></td><td><div class="bar"><i style="width:${Math.max(p > 0 ? 2 : 0, Math.min(100, p))}%"></i></div><small>${p}%</small></td></tr>` }).join('')}</tbody></table>`)
+  }
+  if (base) add(80, `<div class="callout${worse ? ' warn' : ''}"><b>Then vs now (${esc(period)}):</b> on ${dayLabel(base.auditedAt)}, ${fmt(num(base.usedMissingPhotos))} of ${fmt(num(base.usedTotal))} pre-owned listings had no real photo. On ${date} it was <b>${fmt(usedM)} of ${fmt(usedT)}</b> (${signed(usedM - num(base.usedMissingPhotos))} cars${usedP != null && (base.usedMissingPhotoPct ?? null) != null ? `, ${signed(usedP - base.usedMissingPhotoPct, ' pts')}` : ''}).</div>`)
+  if (points.length >= 2) add(290, `${HISTORY_OPEN}<p class="eyebrow">PRE-OWNED LISTINGS WITHOUT A REAL PHOTO, OVER TIME</p><div class="chart">${lineChartSvg(points, worse ? '#c2453b' : '#128a5e')}</div>${HISTORY_CLOSE}`)
+  if (base || prev) {
+    const cmpRow = (label: string, x: any, hl = false) => x ? `<tr${hl ? ' class="hl"' : ''}><td>${label}</td><td>${dayLabel(x.auditedAt)}</td><td class="r">${fmt(num(x.usedTotal))}</td><td class="r">${fmt(num(x.usedMissingPhotos))}</td><td class="r">${x.usedMissingPhotoPct ?? pct1(num(x.usedMissingPhotos), num(x.usedTotal)) ?? '—'}%</td></tr>` : ''
+    add(70 + 34 * 3, `<p class="eyebrow">REVIEW HISTORY</p><table class="t"><thead><tr><th></th><th>Date</th><th class="r">Pre-owned</th><th class="r">No real photo</th><th class="r">Share</th></tr></thead><tbody>${base ? cmpRow(`~${esc(period)} ago`, base) : ''}${prev && (!base || String(prev._id ?? prev.id) !== String(base._id ?? base.id)) ? cmpRow('Previous review', prev) : ''}${cmpRow('This review', a, true)}</tbody></table>`)
+  }
+  if (b) add(100, `<p class="eyebrow">WHAT WE FOUND</p><div class="chips"><span><b>${fmt(num(b.real))}</b> real photos</span>${num(b.placeholder) ? `<span><b class="r">${fmt(num(b.placeholder))}</b> &ldquo;photos coming soon&rdquo; placeholders</span>` : ''}${num(b.missing) ? `<span><b class="r">${fmt(num(b.missing))}</b> with no image at all</span>` : ''}${num(b.stock) ? `<span><b class="p">${fmt(num(b.stock))}</b> stock / catalog images${b.countStockAsMissing === false ? '' : ' (counted as no real photo)'}</span>` : ''}</div>`)
+  if (issues.length) add(60 + 34 * Math.ceil(issues.length / 3), `<p class="eyebrow">MERCHANDISING &amp; WEBSITE ISSUES</p><div class="chips">${issues.map((i: string) => `<span>${esc(i)}</span>`).join('')}</div>`)
+  if (cov) add(80, `<div class="callout warn"><b>Coverage:</b> we checked ${fmt(num(cov.checked))} of the ${fmt(num(cov.advertised))} vehicles the website lists${num(cov.blockedPages) ? ' &mdash; the site would not show us the rest' : ''}. The percentages are of the vehicles checked.</div>`)
+  add(90, `<p class="method"><b>How we measured.</b> We reviewed every publicly listed vehicle on ${byPage ? `the ${pages.length} inventory pages above` : 'the dealership&rsquo;s website'} on ${date} and checked the main photo of each one. A listing counts as &ldquo;without a real photo&rdquo; when the image is missing, a &ldquo;photos coming soon&rdquo; placeholder${b?.countStockAsMissing === false ? '' : ', or a stock / catalog image instead of the actual car'}. Counts change as inventory is updated. Report ${esc(String(a._id ?? a.id).slice(-8).toUpperCase())} &middot; v${REPORT_VERSION}.</p>`)
+  const fPages: string[][] = [[]]
+  let room = 700 // first sheet: below the headline
+  for (const f of findings) {
+    if (f.h > room && fPages[fPages.length - 1]!.length) { fPages.push([]); room = 830 }
+    fPages[fPages.length - 1]!.push(f.html)
+    room -= f.h
+  }
+  fPages.forEach((blocks, i) => sections.push(pageHtml(`THE FINDINGS &nbsp;/&nbsp; ${NAME}${fPages.length > 1 ? ` &nbsp;/&nbsp; ${i + 1} OF ${fPages.length}` : ''}`, `${i === 0 ? `<h1 class="h1s">Where the gaps are.<br><em>${usedT ? `${fmt(usedM)} pre-owned listings to fix.` : 'Listing by listing.'}</em></h1>` : ''}${blocks.join('')}`)))
+
+  // 3 ── Listings (grouped by crawl page, 18 rows per sheet)
+  if (examples.length) {
+    type Row = { kind: 'head', html: string } | { kind: 'row', e: any }
+    const rows: Row[] = []
+    const groups = byPage && examples.some((e: any) => e.listUrl)
+      ? [...pages.map((pg: any) => ({ pg, list: examples.filter((e: any) => norm(e.listUrl) === norm(pg.url)) })), { pg: null as any, list: examples.filter((e: any) => !pages.some((pg: any) => norm(pg.url) === norm(e.listUrl))) }].filter(g => g.list.length)
+      : [{ pg: null as any, list: examples }]
+    for (const g of groups) {
+      if (g.pg) rows.push({ kind: 'head', html: `<tr class="grp"><td colspan="4"><b>${esc(g.pg.label || 'Inventory')}</b> <span class="path">${esc(shortPath(g.pg.url))}</span></td><td class="r">${fmt(num(g.pg.withoutReal))} of ${fmt(num(g.pg.total))} &middot; ${pagePct(g.pg)}%</td></tr>` })
+      for (const e of g.list) rows.push({ kind: 'row', e })
+    }
+    const PER = 18
+    const chunks: Row[][] = []
+    for (let i = 0; i < rows.length; i += PER) chunks.push(rows.slice(i, i + PER))
+    chunks.forEach((chunk, ci) => {
+      const body = chunk.map((r) => {
+        if (r.kind === 'head') return r.html
+        const e = r.e
+        const [label, cls] = verdict(e)
+        const title = e.title || String(e.label || '').split(' — ')[0]!.replace(/\s+#\S+$/, '')
+        const stock = e.stock || (String(e.label || '').match(/#(\S+)/)?.[1] || '')
+        return `<tr><td>${esc(title) || 'Vehicle'}</td><td>${esc(stock)}</td><td class="r">${esc(e.price || '')}</td><td><span class="badge ${cls}">${label}</span></td><td class="r"><a href="${esc(e.url)}" target="_blank" rel="noopener">View listing &rarr;</a></td></tr>`
+      }).join('')
+      const head = ci === 0
+        ? `<h1 class="h1s">See it for yourself.<br><em>${examples.length < num(a.totalMissingPhotos) ? `${examples.length} of ${fmt(num(a.totalMissingPhotos))} listings` : `${examples.length} listing${examples.length === 1 ? '' : 's'}`} without a real photo.</em></h1><p class="lead">Every row links to the live listing on ${name}&rsquo;s website, as it appeared on ${date}.</p>`
+        : ''
+      sections.push(pageHtml(`LISTINGS WITHOUT A REAL PHOTO &nbsp;/&nbsp; ${NAME}${chunks.length > 1 ? ` &nbsp;/&nbsp; ${ci + 1} OF ${chunks.length}` : ''}`, `${head}<table class="t list"><thead><tr><th>Vehicle</th><th>Stock #</th><th class="r">Price</th><th>Issue</th><th></th></tr></thead><tbody>${body}</tbody></table>`))
+    })
+  }
+
+  // 4 ── Recommended operating approach
+  const step = (n: string, t: string, s: string) => `<div class="card step"><span class="num">${n}</span><div><h3>${t}</h3><p>${s}</p></div></div>`
+  sections.push(pageHtml(`RECOMMENDED OPERATING APPROACH &nbsp;/&nbsp; ${NAME}`, `
+    <h1>From missing photos<br><em>to a repeatable process.</em></h1>
+    <p class="lead">ZRZ OPS supports dealerships with reconditioning, vehicle photography, and an accountable workflow from ready-for-sale to online presentation.</p>
+    ${step('01', 'IDENTIFY', 'Review the active pre-owned inventory and flag missing-photo or incomplete listings.')}
+    ${step('02', 'PREP + CAPTURE', 'Coordinate vehicle readiness and complete consistent exterior and interior photos.')}
+    ${step('03', 'VERIFY + MAINTAIN', 'Track open exceptions, confirm photo publication, and repeat the check for new arrivals.')}
+    <div class="band-card dark">${icon('chart', 'ic lg solid')}<div><p class="eyebrow">WHAT ${NAME} GETS</p><p>Clear exceptions &bull; consistent merchandising standards &bull; fewer units slipping through the cracks</p></div></div>
+    <div class="band-card mint">${icon('pencil', 'ic lg solid')}<div><p class="eyebrow">NEXT STEP</p><p>A 15-minute walkthrough to validate the inventory data and discuss how a photo-ready workflow could fit ${name}&rsquo;s current operation.</p>${sender.name || sender.phone || sender.email ? `<p class="contact"><b>${esc(sender.name || sender.company)}</b>${sender.company && sender.name ? ` &middot; ${esc(sender.company)}` : ''}${sender.phone ? ` &middot; ${esc(sender.phone)}` : ''}${sender.email ? ` &middot; <a href="mailto:${esc(sender.email)}">${esc(sender.email)}</a>` : ''}</p>` : ''}</div></div>`))
+
+  // 5 ── How ZRZ OPS helps
+  const flow = (ic: string, n: string, t: string, s: string) => `<div class="card flow">${icon(ic)}<span class="num-s">${n}</span><h5>${t}</h5><p>${s}</p></div>`
+  sections.push(pageHtml(`HOW ZRZ OPS HELPS &nbsp;/&nbsp; THE OPERATING SYSTEM BEHIND THE DETAIL`, `
+    <h1>We do more than detail cars.</h1>
+    <h2 class="sub">We manage the handoffs<br>that slow inventory down.</h2>
+    <p class="lead">The goal is simple: when a vehicle hits the ground, every department knows where it is, what it needs, and what happens next &mdash; so the vehicle can be cleaned, photographed, merchandised, and online as quickly as possible.</p>
+    <div class="duo"><div class="card pain"><p class="eyebrow">THE PAIN POINT</p><p>Detailers can be waiting for work while vehicles sit in service, on the lot, or between departments. Management may think recon is behind when the real issue is handoff and communication.</p></div><div class="card resp"><p class="eyebrow">THE ZRZ RESPONSE</p><p>ZRZ actively coordinates with service, the foreman, dispatcher, and used-car management to keep the next available vehicle moving instead of waiting in a queue.</p></div></div>
+    <div class="flows">${flow('car', '01', 'VEHICLE ARRIVES', 'Used or new inventory hits the ground.')}${flow('users', '02', 'SERVICE / SAFETY', 'If service can only work on part of the queue, ZRZ pulls available units forward.')}${flow('camera', '03', 'RECON + PHOTO', 'Available units are detailed, photographed, and merchandised immediately.')}${flow('swap', '04', 'BACK TO SERVICE', 'Vehicle returns quickly for remaining service work once a bay is ready.')}</div>
+    <div class="band-card dark">${icon('clock', 'ic lg solid')}<div><p class="eyebrow">DAILY ACCOUNTABILITY</p><p>ZRZ works closely with the used-car manager and provides clear daily updates on what was completed, what is waiting, and what is blocked. That visibility makes it easier to push the missing-photo percentage toward the lowest practical level.</p></div></div>
+    <div class="card outcome"><p class="eyebrow">THE OUTCOME</p><p>Less idle time. Fewer lost vehicles. Faster merchandising. Better communication between departments. More inventory online while sales and service finish the rest of the decision process.</p></div>
+`))
+
+  const total = sections.length
+  const html = sections.map((s, i) => s.replace('__PAGE__', `${i + 1} / ${total}`)).join('\n')
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
-<title>${esc(d.name)} — Inventory photo report · ${dayLabel(a.auditedAt)}</title>
+<title>${esc(d.name)} — Inventory review · ${date}</title>
 <style>
-  @page { size: Letter; margin: 0.45in; }
+  @page { size: Letter; margin: 0; }
   * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  body { margin: 0; background: #eef1ef; color: #101828; ${FONT} }
-  .sheet { max-width: 860px; margin: 24px auto; background: #fff; border-radius: 16px; overflow: hidden; box-shadow: 0 24px 60px -30px rgba(0,0,0,.35); }
-  @media print { body { background: #fff; } .sheet { margin: 0; max-width: none; border-radius: 0; box-shadow: none; } .noprint { display: none !important; } }
-  .hero { background: #0e1714; color: #fff; padding: 32px 40px 30px; border-bottom: 3px solid #22c55e; }
-  .brand { font-weight: 800; letter-spacing: 4px; font-size: 16px; } .brand span { color: #4ade80; }
-  .eyebrow { margin-top: 22px; font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #86efac; text-transform: uppercase; }
-  h1 { margin: 8px 0 0; font-size: 32px; line-height: 38px; letter-spacing: -.6px; }
-  .hero p { margin: 10px 0 0; color: #c9d6d0; font-size: 14px; line-height: 21px; }
-  .body { padding: 28px 40px 34px; }
-  h2 { margin: 30px 0 12px; font-size: 18px; letter-spacing: -.2px; } h2:first-child { margin-top: 0; }
-  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-  .kpi { border: 1px solid #eaecf0; border-radius: 12px; padding: 14px; background: #f9fafb; }
-  .kpi-l { font-size: 10px; font-weight: 700; letter-spacing: 1px; color: #667085; text-transform: uppercase; }
-  .kpi-v { margin-top: 4px; font-size: 28px; font-weight: 800; letter-spacing: -.6px; }
-  .kpi-s { font-size: 11px; color: #667085; margin-top: 2px; }
-  .callout { margin-top: 14px; border-left: 4px solid ${worse ? '#e5484d' : accent}; background: ${worse ? '#fff7f7' : '#effaf3'}; border-radius: 0 10px 10px 0; padding: 12px 16px; font-size: 14px; line-height: 21px; color: #344054; }
-  table.t { width: 100%; border-collapse: collapse; font-size: 12px; }
-  table.t th { text-align: left; font-size: 10px; letter-spacing: .8px; text-transform: uppercase; color: #667085; font-weight: 700; padding: 8px 10px; background: #f6f8f7; border-bottom: 1px solid #eaecf0; }
-  table.t td { padding: 8px 10px; border-bottom: 1px solid #f0f2f4; } table.t .r { text-align: right; font-variant-numeric: tabular-nums; }
-  table.t tr.hl td { background: #effaf3; font-weight: 700; }
-  .bar { height: 6px; border-radius: 3px; background: #eaecf0; overflow: hidden; margin: 2px 0 3px; } .bar i { display: block; height: 100%; border-radius: 3px; }
-  .grp { border: 1px solid #eaecf0; border-radius: 12px; overflow: hidden; margin-top: 12px; break-inside: avoid; } .grp .t td:first-child, .grp .t th:first-child { padding-left: 14px; }
-  .grp-h { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 14px; background: #f6f8f7; border-bottom: 1px solid #eaecf0; font-size: 13px; } .grp-h a { color: #667085; font-size: 11px; margin-left: 6px; }
-  .chart { border: 1px solid #eaecf0; border-radius: 12px; padding: 12px 12px 4px; }
-  .chips { display: flex; gap: 8px; flex-wrap: wrap; } .chip { border: 1px solid #eaecf0; border-radius: 999px; padding: 6px 12px; font-size: 12px; background: #f9fafb; } .chip b { font-size: 14px; }
-  .badge { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 10px; font-weight: 700; letter-spacing: .4px; }
+  :root { --ink: #111827; --muted: #667085; --green: #128a5e; --deep: #0f4a3e; --mint: #4ad6a0; --line: #d7ebe2; --soft: #f3faf7; --mintbg: #dcf5ea; }
+  body { margin: 0; background: #e9eeec; color: var(--ink); ${FONT} }
+  a { color: var(--green); text-decoration: none; }
+  .actions { position: sticky; top: 0; z-index: 2; display: flex; gap: 8px; justify-content: flex-end; max-width: 8.5in; margin: 0 auto; padding: 12px 0 0; }
+  .actions a { background: var(--deep); color: #fff; border-radius: 10px; padding: 9px 14px; font-size: 13px; font-weight: 600; }
+  .page { position: relative; width: 8.5in; height: 11in; margin: 20px auto; background: #fff; overflow: hidden; box-shadow: 0 20px 50px -28px rgba(0,0,0,.4); border-radius: 6px; }
+  @media print { body { background: #fff; } .page { margin: 0; border-radius: 0; box-shadow: none; page-break-after: always; break-after: page; } .page:last-child { page-break-after: auto; break-after: auto; } .noprint { display: none !important; } }
+  .band { height: 1.15in; background: var(--deep); display: flex; align-items: center; justify-content: space-between; padding: 0 .5in; }
+  .brand { color: #fff; font-size: 32px; font-weight: 800; letter-spacing: 1px; } .brand span { color: #5fd3a3; margin-left: 18px; }
+  .tag { color: #fff; font-size: 12px; font-weight: 800; letter-spacing: .4px; }
+  .rule { height: 3px; background: var(--mint); margin: 0 .5in; }
+  .content { padding: 22px .5in 0; }
+  .crumb { margin: 0 0 30px; font-size: 12px; font-weight: 800; letter-spacing: .6px; color: var(--green); }
+  h1 { margin: 0; font-size: 40px; line-height: 1.18; letter-spacing: -.3px; font-weight: 800; color: var(--ink); }
+  h1 em, .sub { font-style: normal; color: var(--green); }
+  h1.h1s { font-size: 34px; }
+  .sub { margin: 10px 0 0; font-size: 32px; line-height: 1.18; font-weight: 800; }
+  .lead { margin: 20px 0 22px; font-size: 14.5px; line-height: 1.55; color: var(--muted); }
+  .muted { color: var(--muted); }
+  .eyebrow { margin: 22px 0 10px; font-size: 13px; font-weight: 800; letter-spacing: .4px; color: var(--green); }
+  .card { border: 1.5px solid var(--line); border-radius: 12px; background: #fff; }
+  .card .eyebrow { margin-top: 0; }
+  .ic { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 52px; height: 52px; border-radius: 50%; background: #e2f5ec; color: var(--deep); }
+  .ic svg { width: 26px; height: 26px; }
+  .ic.lg { width: 56px; height: 56px; } .ic.lg svg { width: 28px; height: 28px; }
+  .summary { margin-top: 34px; border-left: 9px solid var(--green); padding: 20px 26px 22px; }
+  .summary .row { display: flex; align-items: center; gap: 22px; }
+  .summary .row p { margin: 0; padding-left: 22px; border-left: 1.5px solid var(--line); font-size: 15px; line-height: 1.5; }
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .kpi { display: flex; align-items: center; gap: 14px; background: var(--soft); border: 1.5px solid var(--line); border-radius: 12px; padding: 14px 18px; }
+  .kpi > div { padding-left: 14px; border-left: 1.5px solid var(--line); }
+  .kpi b { display: block; font-size: 30px; line-height: 1; letter-spacing: -.5px; }
+  .kpi b.g, .g { color: var(--green); }
+  .kpi > div span { display: block; margin-top: 8px; font-size: 10.5px; font-weight: 800; letter-spacing: .3px; line-height: 1.35; }
+  .why { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .why .card { padding: 14px 18px 20px; position: relative; min-height: 1.3in; }
+  .why .ic { width: 46px; height: 46px; position: absolute; left: 16px; top: 12px; } .why .ic svg { width: 24px; height: 24px; }
+  .why h4 { margin: 4px 0 0 60px; font-size: 13.5px; line-height: 1.3; min-height: 34px; }
+  .why p { margin: 12px 0 0 4px; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
+  .band-card { display: flex; align-items: center; gap: 24px; border-radius: 12px; padding: 22px 28px; margin-top: 16px; }
+  .band-card > div, .band-card > p { border-left: 1.5px solid; padding-left: 26px; }
+  .band-card p { margin: 0; font-size: 14px; line-height: 1.5; }
+  .band-card .eyebrow { margin: 0 0 6px; }
+  .band-card.mint { background: var(--mintbg); } .band-card.mint > div, .band-card.mint > p { border-color: #b8e6d0; }
+  .band-card.mint .ic.solid { background: #8fe3bc; color: #0f3d33; }
+  .band-card.dark { background: var(--deep); color: #fff; } .band-card.dark > div { border-color: #2f6f60; }
+  .band-card.dark .eyebrow { color: #5fd3a3; } .band-card.dark .ic.solid { background: #138a5e; color: #0d3a30; }
+  .contact { margin-top: 10px !important; font-size: 12.5px !important; color: #344054; }
+  .step { display: flex; align-items: center; gap: 28px; padding: 22px 28px; margin-top: 18px; }
+  .step > div { border-left: 1.5px solid var(--line); padding-left: 28px; }
+  .num { flex: none; width: 56px; height: 56px; border-radius: 50%; background: #e2f5ec; color: var(--green); font-weight: 800; font-size: 19px; display: inline-flex; align-items: center; justify-content: center; }
+  .step h3 { margin: 0; font-size: 17px; letter-spacing: .3px; } .step p { margin: 10px 0 0; font-size: 12.5px; color: var(--muted); }
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .duo .card { padding: 22px 22px 46px; } .duo p { margin: 0; font-size: 13px; line-height: 1.55; }
+  .pain { background: #fbe5e2; border-color: #f0c2bb; } .pain .eyebrow { color: #c2453b; }
+  .resp { background: var(--soft); }
+  .flows { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: -26px; position: relative; }
+  .flow { text-align: center; padding: 14px 10px 14px; }
+  .flow .ic { width: 46px; height: 46px; } .flow .ic svg { width: 24px; height: 24px; }
+  .num-s { display: block; margin-top: 6px; font-size: 11px; font-weight: 800; color: var(--green); }
+  .flow h5 { margin: 6px 0 0; font-size: 10.5px; letter-spacing: .3px; } .flow p { margin: 8px 0 0; font-size: 10px; line-height: 1.45; color: var(--muted); }
+  .outcome { background: var(--mintbg); border-color: var(--mintbg); padding: 20px 26px; margin-top: 14px; } .outcome p { margin: 0; font-size: 13.5px; line-height: 1.5; }
+  .ref { margin: 12px 0 0; font-size: 10px; color: #98a2b3; text-align: right; }
+  .mini-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 20px; }
+  .mini-kpis > div { background: var(--soft); border: 1.5px solid var(--line); border-radius: 12px; padding: 12px 16px; }
+  .mini-kpis span { display: block; font-size: 10px; font-weight: 800; letter-spacing: .6px; color: var(--muted); }
+  .mini-kpis b { display: block; margin-top: 4px; font-size: 22px; } .mini-kpis i { display: block; font-style: normal; font-size: 11px; color: var(--green); font-weight: 700; }
+  table.t { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  table.t th { text-align: left; font-size: 9.5px; letter-spacing: .8px; text-transform: uppercase; color: var(--muted); font-weight: 800; padding: 8px 10px; background: var(--soft); border-bottom: 1.5px solid var(--line); }
+  table.t td { padding: 7px 10px; border-bottom: 1px solid #edf3f0; vertical-align: middle; } table.t .r { text-align: right; }
+  table.t tr.hl td { background: #ecf8f2; font-weight: 700; }
+  table.t tr.grp td { background: #f0f7f4; font-size: 11.5px; padding-top: 10px; }
+  table.list td { padding: 8px 10px; }
+  .path { color: var(--muted); font-size: 10px; }
+  .bar { height: 6px; border-radius: 3px; background: #e5ece9; overflow: hidden; margin: 2px 0 2px; } .bar i { display: block; height: 100%; background: var(--green); border-radius: 3px; }
+  .callout { margin-top: 16px; border-left: 5px solid var(--green); background: var(--soft); border-radius: 0 10px 10px 0; padding: 12px 16px; font-size: 12.5px; line-height: 1.5; }
+  .callout.warn { border-left-color: #f59e0b; background: #fffbeb; }
+  .chart { border: 1.5px solid var(--line); border-radius: 12px; padding: 10px 10px 2px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; } .chips span { border: 1.5px solid var(--line); border-radius: 999px; padding: 5px 12px; font-size: 11.5px; background: var(--soft); }
+  .chips b.r { color: #c2453b; } .chips b.p { color: #5b3cc4; }
+  .badge { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 9.5px; font-weight: 800; letter-spacing: .3px; }
   .b-red { background: #fde8e8; color: #b42318; } .b-stock { background: #f1ecfe; color: #5b3cc4; }
-  a { color: #15803d; text-decoration: none; }
-  .foot { margin-top: 30px; padding-top: 16px; border-top: 1px solid #eaecf0; font-size: 11px; line-height: 17px; color: #667085; display: flex; gap: 20px; justify-content: space-between; flex-wrap: wrap; }
-  .actions { position: sticky; top: 0; z-index: 2; display: flex; gap: 8px; justify-content: flex-end; max-width: 860px; margin: 0 auto; padding: 12px 0 0; }
-  .actions a { background: #0e1714; color: #fff; border-radius: 10px; padding: 9px 14px; font-size: 13px; font-weight: 600; }
-  @media (max-width: 640px) { .kpis { grid-template-columns: repeat(2, 1fr); } .hero, .body { padding-left: 20px; padding-right: 20px; } h1 { font-size: 26px; line-height: 31px; } }
+  .method { margin-top: 18px; font-size: 10.5px; line-height: 1.55; color: var(--muted); }
+  .foot { position: absolute; left: .5in; right: .5in; bottom: .32in; display: flex; justify-content: space-between; padding-top: 10px; border-top: 1px solid #e5ece9; font-size: 9.5px; letter-spacing: .3px; color: var(--muted); }
+  .foot .pn { color: #344054; }
+  @media screen and (max-width: 860px) {
+    .page { width: auto; height: auto; min-height: 0; margin: 12px; padding-bottom: 60px; }
+    .band { padding: 0 20px; height: 84px; } .brand { font-size: 24px; } .tag { display: none; } .rule { margin: 0 20px; } .content { padding: 18px 20px 0; }
+    h1 { font-size: 30px; } h1.h1s { font-size: 26px; } .sub { font-size: 24px; }
+    .kpis, .why, .duo, .flows, .mini-kpis { grid-template-columns: 1fr; } .flows { margin-top: 10px; }
+    .foot { left: 20px; right: 20px; bottom: 16px; }
+  }
 </style></head>
 <body>
 <div class="actions noprint">__REPORT_ACTIONS__</div>
-<div class="sheet">
-  <div class="hero">
-    <div class="brand">ZRZ<span>&nbsp;OPS</span></div>
-    <div class="eyebrow">Inventory photo report &middot; ${dayUpper(a.auditedAt)}</div>
-    <h1>${esc(d.name)}</h1>
-    <p>${[d.city, d.state].filter(Boolean).map(esc).join(', ')}${byPage ? ` &middot; reviewed ${pages.length} inventory pages` : ''}${!byPage && a.inventoryUrl ? ` &middot; reviewed <a href="${esc(a.inventoryUrl)}" style="color:#86efac">${esc(String(a.inventoryUrl).replace(/^https?:\/\/(www\.)?/, '').slice(0, 70))}</a>` : ''}</p>
-  </div>
-  <div class="body">
-    <h2>At a glance</h2>
-    <div class="kpis">
-      ${kpi('Vehicles listed', fmt(num(a.totalVehicles)), `${fmt(num(a.newTotal))} new · ${fmt(num(a.usedTotal))} pre-owned`)}
-      ${kpi('Without a real photo', fmt(num(a.totalMissingPhotos)), `${a.missingPhotoPct ?? '—'}% of all listings`, '#c62a2f')}
-      ${kpi('Pre-owned gap', usedP == null ? '—' : `${usedP}%`, `${fmt(num(a.usedMissingPhotos))} of ${fmt(num(a.usedTotal))} cars`, '#c62a2f')}
-      ${kpi('New-car gap', newP == null ? '—' : `${newP}%`, `${fmt(num(a.newMissingPhotos))} of ${fmt(num(a.newTotal))} cars`)}
-    </div>
-    ${a.coverage?.advertised && num(a.coverage.advertised) > num(a.coverage.checked) ? `<div class="callout" style="border-left-color:#f59e0b;background:#fffbeb"><strong>Coverage:</strong> we checked ${fmt(num(a.coverage.checked))} of the ${fmt(num(a.coverage.advertised))} vehicles the website lists${num(a.coverage.blockedPages) ? ' &mdash; the site would not show us the rest' : ''}. The percentages above are of the ${fmt(num(a.coverage.checked))} vehicles checked.</div>` : ''}
-    ${base ? `<div class="callout"><strong>Then vs now (${esc(period)}):</strong> on ${dayLabel(base.auditedAt)}, ${fmt(num(base.usedMissingPhotos))} of ${fmt(num(base.usedTotal))} pre-owned listings had no real photo. On ${dayLabel(a.auditedAt)} it was <strong>${fmt(num(a.usedMissingPhotos))} of ${fmt(num(a.usedTotal))}</strong> (${signed(num(a.usedMissingPhotos) - num(base.usedMissingPhotos))} cars${usedP != null && (base.usedMissingPhotoPct ?? null) != null ? `, ${signed(usedP - base.usedMissingPhotoPct, ' pts')}` : ''}).</div>` : `<div class="callout"><strong>Baseline review.</strong> This is the first review on record &mdash; future reviews will show how the gap changes over time.</div>`}
-
-    ${points.length >= 2 ? `${HISTORY_OPEN}<h2>Pre-owned listings without a real photo, over time</h2><div class="chart">${lineChartSvg(points, worse ? '#e5484d' : accent)}</div>${HISTORY_CLOSE}` : ''}
-
-    ${base || prev ? `<h2>Review history</h2><table class="t"><thead><tr><th></th><th>Date</th><th class="r">Pre-owned</th><th class="r">No real photo</th><th class="r">Share</th><th class="r">All listings</th><th class="r">All without</th></tr></thead><tbody>
-      ${base ? cmpRow(`~${esc(period)} ago`, base) : ''}${prev && (!base || String(prev._id ?? prev.id) !== String(base._id ?? base.id)) ? cmpRow('Previous review', prev) : ''}${cmpRow('This review', a, true)}
-    </tbody></table>` : ''}
-
-    ${b ? `<h2>What we found</h2><div class="chips">
-      <span class="chip"><b>${fmt(num(b.real))}</b> real photos</span>
-      ${num(b.placeholder) ? `<span class="chip"><b style="color:#c62a2f">${fmt(num(b.placeholder))}</b> &ldquo;photos coming soon&rdquo; placeholders</span>` : ''}
-      ${num(b.missing) ? `<span class="chip"><b style="color:#c62a2f">${fmt(num(b.missing))}</b> with no image at all</span>` : ''}
-      ${num(b.stock) ? `<span class="chip"><b style="color:#5b3cc4">${fmt(num(b.stock))}</b> stock / catalog images${b.countStockAsMissing === false ? '' : ' (counted as no real photo)'}</span>` : ''}
-    </div>` : ''}
-
-    ${issues.length ? `<h2>Merchandising &amp; website issues</h2><div class="chips">${issues.map((i: string) => `<span class="chip">${esc(i)}</span>`).join('')}</div>` : ''}
-
-    ${byPage ? `<h2>By inventory page</h2>
-    <table class="t pages"><thead><tr><th>Page</th><th class="r">Vehicles</th><th class="r">No real photo</th><th style="width:34%">Share</th></tr></thead><tbody>
-      ${pages.map((pg: any) => { const p = pagePct(pg); return `<tr><td><div style="font-weight:700;color:#101828">${esc(pg.label || 'Inventory')}</div><a href="${esc(pg.url)}" target="_blank" rel="noopener" style="color:#667085;font-size:11px">${esc(shortPath(pg.url))}</a></td><td class="r">${fmt(num(pg.total))}</td><td class="r" style="color:${toneOf(p)};font-weight:700">${fmt(num(pg.withoutReal))}</td><td><div class="bar"><i style="width:${Math.max(p > 0 ? 2 : 0, Math.min(100, p))}%;background:${toneOf(p)}"></i></div><span style="font-size:11px;color:${toneOf(p)};font-weight:700">${p}%</span>${num(pg.placeholder) || num(pg.missing) || num(pg.stock) ? `<span style="font-size:11px;color:#667085"> &middot; ${[num(pg.placeholder) ? `${fmt(num(pg.placeholder))} placeholder` : '', num(pg.missing) ? `${fmt(num(pg.missing))} no image` : '', num(pg.stock) ? `${fmt(num(pg.stock))} stock` : ''].filter(Boolean).join(', ')}</span>` : ''}</td></tr>` }).join('')}
-    </tbody></table>` : ''}
-
-    ${examples.length ? `<h2>Listings without a real photo${num(a.totalMissingPhotos) > examples.length ? ` <span style="font-weight:400;color:#667085;font-size:13px">(${examples.length} of ${fmt(num(a.totalMissingPhotos))})</span>` : ''}</h2>
-    ${byPage && examples.some((e: any) => e.listUrl)
-      ? [...pages.map((pg: any) => ({ pg, list: examples.filter((e: any) => norm(e.listUrl) === norm(pg.url)) })), { pg: null as any, list: examples.filter((e: any) => !pages.some((pg: any) => norm(pg.url) === norm(e.listUrl))) }]
-          .filter(g => g.list.length)
-          .map(g => `<div class="grp"><div class="grp-h"><div><b>${esc(g.pg ? g.pg.label || 'Inventory' : 'Other pages')}</b>${g.pg ? ` <a href="${esc(g.pg.url)}" target="_blank" rel="noopener">${esc(shortPath(g.pg.url))}</a>` : ''}</div>${g.pg ? `<span style="color:${toneOf(pagePct(g.pg))}"><b>${fmt(num(g.pg.withoutReal))}</b> of ${fmt(num(g.pg.total))} &middot; ${pagePct(g.pg)}%</span>` : ''}</div>${exampleTable(g.list)}</div>`).join('')
-      : exampleTable(examples)}` : ''}
-
-    <div class="foot">
-      <div style="max-width:520px"><strong style="color:#344054">How we measured.</strong> We reviewed every publicly listed vehicle on ${byPage ? `the ${pages.length} inventory pages above` : 'the dealership&rsquo;s website'} on ${dayLabel(a.auditedAt)} and checked the main photo of each one. A listing counts as &ldquo;without a real photo&rdquo; when the image is missing, a &ldquo;photos coming soon&rdquo; placeholder${b?.countStockAsMissing === false ? '' : ', or a stock / catalog image instead of the actual car'}. Counts change as inventory is updated.</div>
-      <div><strong style="color:#344054">${esc(sender.name || sender.company)}</strong><br>${esc(sender.company)}${sender.phone ? `<br>${esc(sender.phone)}` : ''}${sender.email ? `<br><a href="mailto:${esc(sender.email)}">${esc(sender.email)}</a>` : ''}<br><span style="color:#98a2b3">Report ${esc(String(a._id ?? a.id).slice(-8).toUpperCase())} &middot; v${REPORT_VERSION}</span></div>
-    </div>
-  </div>
-</div>
+${html}
 </body></html>`
 }
 

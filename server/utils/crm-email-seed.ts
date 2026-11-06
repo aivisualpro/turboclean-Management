@@ -416,3 +416,236 @@ export const THEN_VS_NOW_HTML = `<!doctype html>
 </table>
 </body>
 </html>`
+
+/**
+ * "Missing Photos" V3 — the branded inventory review (matches the "Branhaven CDJR" print piece):
+ * deep-green brand band, breadcrumb, "Your online inventory. A measurable opportunity.", executive
+ * summary, KPI cards, why it matters, the recommended operating approach (01 Identify · 02 Prep +
+ * Capture · 03 Verify + Maintain), how ZRZ OPS manages the handoffs, daily accountability, next step.
+ * Icons are small PNGs served from /email/icons on the app (`__ICONS__` is replaced when seeded).
+ */
+const V3_FONT = `font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;`
+const v3Icon = (name: string, size = 46) => `<img src="__ICONS__/${name}.png" width="${size}" height="${size}" alt="" style="display:block;width:${size}px;height:${size}px;border:0;">`
+const v3Kpi = (icon: string, value: string, label: string, color: string) => `<td class="stack" width="32%" valign="top" style="background:#f3faf7;border:1px solid #d7ebe2;border-radius:12px;padding:14px 12px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td width="46" valign="middle">${v3Icon(icon, 40)}</td>
+          <td valign="middle" style="padding-left:10px;border-left:1px solid #d7ebe2;">
+            <div class="kpi-num" style="${V3_FONT}font-size:30px;line-height:34px;font-weight:800;letter-spacing:-.6px;color:${color};">${value}</div>
+            <div style="${V3_FONT}margin-top:4px;font-size:10px;line-height:13px;font-weight:700;letter-spacing:.6px;color:#101828;">${label}</div>
+          </td>
+        </tr></table>
+      </td>`
+const v3Why = (icon: string, title: string, text: string) => `<td class="stack" width="32%" valign="top" style="border:1px solid #d7ebe2;border-radius:12px;padding:16px 14px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="40" valign="top">${v3Icon(icon, 34)}</td><td valign="middle" style="${V3_FONT}padding-left:8px;font-size:14px;line-height:18px;font-weight:700;color:#101828;">${title}</td></tr></table>
+        <div style="${V3_FONT}margin-top:10px;font-size:12px;line-height:18px;color:#667085;">${text}</div>
+      </td>`
+const v3Step = (n: string, title: string, text: string) => `<tr><td style="padding:0 0 12px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #d7ebe2;border-radius:12px;"><tr>
+        <td width="64" align="center" valign="middle" style="padding:16px 0 16px 14px;"><div style="${V3_FONT}width:46px;height:46px;line-height:46px;border-radius:23px;background:#e2f5ec;color:#128a5e;font-size:16px;font-weight:800;text-align:center;">${n}</div></td>
+        <td valign="middle" style="padding:16px 18px 16px 14px;border-left:1px solid #d7ebe2;">
+          <div style="${V3_FONT}font-size:15px;font-weight:800;letter-spacing:.4px;color:#101828;">${title}</div>
+          <div style="${V3_FONT}margin-top:4px;font-size:13px;line-height:19px;color:#667085;">${text}</div>
+        </td>
+      </tr></table>
+    </td></tr>`
+const v3Flow = (icon: string, n: string, title: string, text: string) => `<td class="stack" width="49%" valign="top" align="center" style="border:1px solid #d7ebe2;border-radius:12px;padding:16px 12px;">
+        ${v3Icon(icon, 44).replace('display:block;', 'display:inline-block;')}
+        <div style="${V3_FONT}margin-top:6px;font-size:12px;font-weight:800;color:#128a5e;">${n}</div>
+        <div style="${V3_FONT}margin-top:2px;font-size:12px;font-weight:800;letter-spacing:.4px;color:#101828;">${title}</div>
+        <div style="${V3_FONT}margin-top:6px;font-size:12px;line-height:17px;color:#667085;">${text}</div>
+      </td>`
+const v3Eyebrow = (text: string) => `<p style="${V3_FONT}margin:0;font-size:11px;font-weight:800;letter-spacing:1.4px;color:#128a5e;text-transform:uppercase;">${text}</p>`
+const v3Band = (icon: string, title: string, text: string, dark: boolean) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${dark ? '#0f4a3e' : '#dcf5ea'};border-radius:12px;"><tr>
+      <td width="76" align="center" valign="middle" style="padding:18px 0 18px 16px;">${v3Icon(icon, 50)}</td>
+      <td valign="middle" style="padding:18px 22px 18px 16px;border-left:1px solid ${dark ? '#2f6f60' : '#b8e6d0'};">
+        ${title ? `<div style="${V3_FONT}font-size:12px;font-weight:800;letter-spacing:1.2px;color:${dark ? '#5fd3a3' : '#128a5e'};">${title}</div>` : ''}
+        <div style="${V3_FONT}${title ? 'margin-top:6px;' : ''}font-size:14px;line-height:21px;color:${dark ? '#ffffff' : '#101828'};">${text}</div>
+      </td>
+    </tr></table>`
+
+export const MISSING_PHOTOS_HTML_V3 = `<!doctype html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+<meta name="color-scheme" content="light only">
+<meta name="supported-color-schemes" content="light only">
+<title>{{dealership}} — inventory review</title>
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+  body, table, td, a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+  table, td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
+  a[x-apple-data-detectors] { color:inherit !important; text-decoration:none !important; }
+  @media only screen and (max-width:620px) {
+    .container { width:100% !important; }
+    .px { padding-left:20px !important; padding-right:20px !important; }
+    .hero-h1 { font-size:30px !important; line-height:36px !important; }
+    .h2 { font-size:24px !important; line-height:30px !important; }
+    .stack { display:block !important; width:100% !important; box-sizing:border-box; }
+    .stack-gap { display:block !important; width:100% !important; height:10px !important; }
+    .kpi-num { font-size:28px !important; line-height:32px !important; }
+    .hide-sm { display:none !important; }
+    .btn a { display:block !important; text-align:center !important; }
+  }
+</style>
+</head>
+<body style="margin:0;padding:0;background:#eef2f0;word-spacing:normal;">
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">Inventory review for {{dealership}}: {{usedMissingPhotos}} of {{usedTotal}} pre-owned listings are missing vehicle photos — and a simple way to close the gap.&#8199;&#65279;&#847;&#8199;&#65279;&#847;&#8199;&#65279;&#847;&#8199;&#65279;&#847;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef2f0;">
+<tr><td align="center" style="padding:24px 10px 40px;">
+<!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+<table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;${V3_FONT}">
+
+  <!-- Brand band -->
+  <tr><td class="px" style="background:#0f4a3e;padding:26px 36px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td style="${V3_FONT}font-size:26px;font-weight:800;letter-spacing:1px;color:#ffffff;">ZRZ&nbsp;&nbsp;<span style="color:#5fd3a3;">OPS</span></td>
+      <td align="right" class="hide-sm" style="${V3_FONT}font-size:11px;font-weight:800;letter-spacing:.6px;color:#ffffff;">DEALERSHIP INVENTORY INTELLIGENCE</td>
+    </tr></table>
+  </td></tr>
+  <tr><td class="px" style="padding:0 36px;"><div style="height:3px;line-height:3px;font-size:0;background:#4ad6a0;">&nbsp;</div></td></tr>
+
+  <!-- Hero -->
+  <tr><td class="px" style="padding:22px 36px 0;">
+    ${v3Eyebrow('{{dealership}} &nbsp;/&nbsp; Inventory review &nbsp;/&nbsp; {{auditDateUpper}}')}
+    <h1 class="hero-h1" style="${V3_FONT}margin:22px 0 0;font-size:38px;line-height:44px;font-weight:800;letter-spacing:-.6px;color:#111827;">Your online inventory.<br><span style="color:#128a5e;">A measurable opportunity.</span></h1>
+    <p style="${V3_FONT}margin:16px 0 0;font-size:15px;line-height:23px;color:#667085;">Prepared for {{dealership}} | A focused review of pre-owned vehicle photography and merchandising consistency.</p>
+  </td></tr>
+
+  <!-- Executive summary -->
+  <tr><td class="px" style="padding:28px 36px 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #d7ebe2;border-left:5px solid #128a5e;border-radius:12px;"><tr><td style="padding:18px 20px 20px;">
+      ${v3Eyebrow('Executive summary')}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;"><tr>
+        <td width="58" valign="middle">${v3Icon('file-text-light', 46)}</td>
+        <td valign="middle" style="${V3_FONT}padding-left:16px;border-left:1px solid #d7ebe2;font-size:15px;line-height:23px;color:#111827;">Hi {{firstName|there}} &mdash; we reviewed {{dealership}}&rsquo;s publicly listed pre-owned inventory and identified a visible online merchandising gap: <strong>{{usedMissingPhotos}} of {{usedTotal}}</strong> pre-owned listings are currently missing vehicle photos.</td>
+      </tr></table>
+    </td></tr></table>
+  </td></tr>
+
+  <!-- At a glance -->
+  <tr><td class="px" style="padding:26px 36px 0;">
+    ${v3Eyebrow('Your inventory, at a glance')}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;"><tr>
+      ${v3Kpi('car-light', '{{usedTotal}}', 'VISIBLE PRE-OWNED VEHICLES', '#111827')}
+      <td class="stack-gap" width="2%" style="font-size:0;line-height:0;">&nbsp;</td>
+      ${v3Kpi('camera-light', '{{usedMissingPhotos}}', 'LISTINGS FLAGGED FOR MISSING PHOTOS', '#128a5e')}
+      <td class="stack-gap" width="2%" style="font-size:0;line-height:0;">&nbsp;</td>
+      ${v3Kpi('chart-pie-light', '{{usedMissingPhotoPct}}', 'MISSING-PHOTO RATE', '#128a5e')}
+    </tr></table>
+  </td></tr>
+  <tr><td class="px" style="padding:16px 36px 0;">{{inventoryByPage}}</td></tr>
+
+  <!-- Why this matters -->
+  <tr><td class="px" style="padding:22px 36px 0;">
+    ${v3Eyebrow('Why this matters')}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;"><tr>
+      ${v3Why('eye-light', 'First impression', 'Listings without photos create friction before a shopper even clicks.')}
+      <td class="stack-gap" width="2%" style="font-size:0;line-height:0;">&nbsp;</td>
+      ${v3Why('layers-light', 'Merchandising consistency', 'Incomplete photo coverage makes inventory look less curated and less market-ready.')}
+      <td class="stack-gap" width="2%" style="font-size:0;line-height:0;">&nbsp;</td>
+      ${v3Why('chart-column-light', 'Missed opportunity', 'Every unphotographed unit is a vehicle that can underperform online.')}
+    </tr></table>
+  </td></tr>
+  <tr><td class="px" style="padding:16px 36px 0;">${v3Band('pencil-mint', '', 'ZRZ OPS helps dealerships close these gaps with detailing, photography, and repeatable inventory support.', false)}</td></tr>
+
+  <!-- Evidence + history (render only when there is data) -->
+  <tr><td class="px" style="padding:24px 36px 0;">{{auditEvidence}}</td></tr>
+  <tr><td class="px" style="padding:20px 36px 0;">{{auditTrend}}</td></tr>
+
+  <!-- Recommended operating approach -->
+  <tr><td class="px" style="padding:36px 36px 0;">
+    <div style="height:3px;line-height:3px;font-size:0;background:#4ad6a0;margin-bottom:22px;">&nbsp;</div>
+    ${v3Eyebrow('Recommended operating approach &nbsp;/&nbsp; {{dealership}}')}
+    <h2 class="h2" style="${V3_FONT}margin:18px 0 0;font-size:30px;line-height:36px;font-weight:800;letter-spacing:-.5px;color:#111827;">From missing photos<br><span style="color:#128a5e;">to a repeatable process.</span></h2>
+    <p style="${V3_FONT}margin:14px 0 18px;font-size:15px;line-height:23px;color:#667085;">ZRZ OPS supports dealerships with reconditioning, vehicle photography, and an accountable workflow from ready-for-sale to online presentation.</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+      ${v3Step('01', 'IDENTIFY', 'Review the active pre-owned inventory and flag missing-photo or incomplete listings.')}
+      ${v3Step('02', 'PREP + CAPTURE', 'Coordinate vehicle readiness and complete consistent exterior and interior photos.')}
+      ${v3Step('03', 'VERIFY + MAINTAIN', 'Track open exceptions, confirm photo publication, and repeat the check for new arrivals.')}
+    </table>
+  </td></tr>
+  <tr><td class="px" style="padding:6px 36px 0;">${v3Band('chart-column-dark', '<span style="text-transform:uppercase;">WHAT {{dealership}} GETS</span>', 'Clear exceptions &bull; consistent merchandising standards &bull; fewer units slipping through the cracks', true)}</td></tr>
+
+  <!-- How ZRZ OPS helps -->
+  <tr><td class="px" style="padding:36px 36px 0;">
+    <div style="height:3px;line-height:3px;font-size:0;background:#4ad6a0;margin-bottom:22px;">&nbsp;</div>
+    ${v3Eyebrow('How ZRZ OPS helps &nbsp;/&nbsp; The operating system behind the detail')}
+    <h2 class="h2" style="${V3_FONT}margin:18px 0 0;font-size:30px;line-height:36px;font-weight:800;letter-spacing:-.5px;color:#111827;">We do more than detail cars.</h2>
+    <h3 style="${V3_FONT}margin:8px 0 0;font-size:22px;line-height:28px;font-weight:800;color:#128a5e;">We manage the handoffs that slow inventory down.</h3>
+    <p style="${V3_FONT}margin:14px 0 18px;font-size:15px;line-height:23px;color:#667085;">The goal is simple: when a vehicle hits the ground, every department knows where it is, what it needs, and what happens next &mdash; so the vehicle can be cleaned, photographed, merchandised, and online as quickly as possible.</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td class="stack" width="49%" valign="top" style="background:#fbe5e2;border:1px solid #f3c6c0;border-radius:12px;padding:18px 18px;">
+        <div style="${V3_FONT}font-size:12px;font-weight:800;letter-spacing:1.2px;color:#c2453b;">THE PAIN POINT</div>
+        <div style="${V3_FONT}margin-top:10px;font-size:13px;line-height:20px;color:#111827;">Detailers can be waiting for work while vehicles sit in service, on the lot, or between departments. Management may think recon is behind when the real issue is handoff and communication.</div>
+      </td>
+      <td class="stack-gap" width="2%" style="font-size:0;line-height:0;">&nbsp;</td>
+      <td class="stack" width="49%" valign="top" style="background:#f3faf7;border:1px solid #d7ebe2;border-radius:12px;padding:18px 18px;">
+        <div style="${V3_FONT}font-size:12px;font-weight:800;letter-spacing:1.2px;color:#128a5e;">THE ZRZ RESPONSE</div>
+        <div style="${V3_FONT}margin-top:10px;font-size:13px;line-height:20px;color:#111827;">ZRZ actively coordinates with service, the foreman, dispatcher, and used-car management to keep the next available vehicle moving instead of waiting in a queue.</div>
+      </td>
+    </tr></table>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;"><tr>
+      ${v3Flow('car-light', '01', 'VEHICLE ARRIVES', 'Used or new inventory hits the ground.')}
+      <td class="stack-gap" width="2%" style="font-size:0;line-height:0;">&nbsp;</td>
+      ${v3Flow('users-light', '02', 'SERVICE / SAFETY', 'If service can only work on part of the queue, ZRZ pulls available units forward.')}
+    </tr></table>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;"><tr>
+      ${v3Flow('camera-light', '03', 'RECON + PHOTO', 'Available units are detailed, photographed, and merchandised immediately.')}
+      <td class="stack-gap" width="2%" style="font-size:0;line-height:0;">&nbsp;</td>
+      ${v3Flow('arrow-left-right-light', '04', 'BACK TO SERVICE', 'Vehicle returns quickly for remaining service work once a bay is ready.')}
+    </tr></table>
+  </td></tr>
+  <tr><td class="px" style="padding:14px 36px 0;">${v3Band('clock-dark', 'DAILY ACCOUNTABILITY', 'ZRZ works closely with the used-car manager and provides clear daily updates on what was completed, what is waiting, and what is blocked. That visibility makes it easier to push the missing-photo percentage toward the lowest practical level.', true)}</td></tr>
+  <tr><td class="px" style="padding:14px 36px 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#dcf5ea;border-radius:12px;"><tr><td style="padding:18px 22px;">
+      <div style="${V3_FONT}font-size:12px;font-weight:800;letter-spacing:1.2px;color:#128a5e;">THE OUTCOME</div>
+      <div style="${V3_FONT}margin-top:8px;font-size:14px;line-height:21px;color:#111827;">Less idle time. Fewer lost vehicles. Faster merchandising. Better communication between departments. More inventory online while sales and service finish the rest of the decision process.</div>
+    </td></tr></table>
+  </td></tr>
+
+  <!-- Next step -->
+  <tr><td class="px" style="padding:28px 36px 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#dcf5ea;border-radius:12px;"><tr>
+      <td width="76" align="center" valign="top" style="padding:20px 0 20px 16px;">${v3Icon('pencil-mint', 50)}</td>
+      <td valign="top" style="padding:20px 22px 22px 16px;border-left:1px solid #b8e6d0;">
+        <div style="${V3_FONT}font-size:12px;font-weight:800;letter-spacing:1.2px;color:#128a5e;">NEXT STEP</div>
+        <div style="${V3_FONT}margin-top:6px;font-size:14px;line-height:21px;color:#111827;">A 15-minute walkthrough to validate the inventory data and discuss how a photo-ready workflow could fit {{dealership}}&rsquo;s current operation.</div>
+        <table role="presentation" class="btn" cellpadding="0" cellspacing="0" border="0" style="margin-top:16px;"><tr><td style="border-radius:10px;background:#0f4a3e;">
+          <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="{{replyMailto}}" style="height:46px;v-text-anchor:middle;width:300px;" arcsize="20%" stroke="f" fillcolor="#0f4a3e"><w:anchorlock/><center style="color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:bold;">Book a 15-minute walkthrough &rarr;</center></v:roundrect><![endif]-->
+          <!--[if !mso]><!--><a href="{{replyMailto}}" style="display:inline-block;padding:14px 24px;border-radius:10px;${V3_FONT}font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;">Book a 15-minute walkthrough &rarr;</a><!--<![endif]-->
+        </td></tr></table>
+        <div style="${V3_FONT}margin-top:12px;font-size:13px;line-height:19px;"><a href="{{reportUrl}}" style="color:#128a5e;font-weight:700;text-decoration:none;">Open the full inventory report &rarr;</a></div>
+      </td>
+    </tr></table>
+  </td></tr>
+
+  <!-- Signature -->
+  <tr><td class="px" style="padding:30px 36px 34px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #e5ece9;"><tr><td style="padding-top:22px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td width="52" valign="top"><div style="${V3_FONT}width:44px;height:44px;line-height:44px;border-radius:22px;background:#0f4a3e;color:#5fd3a3;font-size:16px;font-weight:800;text-align:center;">{{senderInitials|ZO}}</div></td>
+        <td valign="top" style="padding-left:12px;">
+          <div style="${V3_FONT}font-size:16px;font-weight:800;color:#111827;">{{senderName}}</div>
+          <div style="${V3_FONT}margin-top:2px;font-size:13px;color:#667085;">{{senderTitle|Owner}} &middot; {{senderCompany}}</div>
+          <div style="${V3_FONT}margin-top:8px;font-size:13px;line-height:20px;color:#344054;"><a href="tel:{{senderPhone}}" style="color:#344054;text-decoration:none;">{{senderPhone}}</a> &nbsp;&middot;&nbsp; <a href="mailto:{{senderEmail}}" style="color:#128a5e;text-decoration:none;">{{senderEmail}}</a></div>
+        </td>
+      </tr></table>
+    </td></tr></table>
+  </td></tr>
+
+  <!-- Footer -->
+  <tr><td class="px" style="padding:16px 36px 22px;border-top:1px solid #e5ece9;">
+    <p style="${V3_FONT}margin:0;font-size:10px;line-height:15px;letter-spacing:.6px;color:#667085;">ZRZ OPS &nbsp;/&nbsp; RECONDITIONING + INVENTORY OPERATIONS</p>
+    <p style="${V3_FONT}margin:6px 0 0;font-size:11px;line-height:16px;color:#98a2b3;">Snapshot of publicly visible listings on {{auditDate}}; counts change as inventory is updated. Sent to {{dealership}} by {{senderCompany}}, {{senderRegion|Connecticut & Massachusetts}}. Not the right person, or not interested? Reply &ldquo;no thanks&rdquo; and we won&rsquo;t follow up.</p>
+  </td></tr>
+
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</td></tr>
+</table>
+</body>
+</html>`

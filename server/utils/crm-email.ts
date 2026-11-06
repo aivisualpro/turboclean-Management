@@ -1389,6 +1389,44 @@ export async function seedDefaultTemplates(db: Db) {
   await seedMissingPhotosV1(db)
   await seedMissingPhotosV2(db)
   await seedThenVsNow(db)
+  await seedMissingPhotosV3(db)
+}
+/**
+ * V3 of "Missing Photos": the branded inventory review (deep-green ZRZ OPS look from the
+ * "Branhaven CDJR" print piece). Added once as the new active version — earlier versions stay in
+ * the history and can be re-activated from the Templates tab.
+ */
+async function seedMissingPhotosV3(db: Db) {
+  const counters = db.collection(CRM_COLLECTIONS.counters)
+  const flag = await counters.findOne({ _id: 'crmEmailSeedV3' as any })
+  if (flag?.done) return
+  const claim = await counters.updateOne({ _id: 'crmEmailSeedV3' as any, startedAt: { $exists: false } }, { $set: { startedAt: new Date().toISOString() } }, { upsert: true }).catch(() => null)
+  if (!claim || (!claim.upsertedCount && !claim.modifiedCount)) return
+  try {
+    const { templates } = await emailDb(db)
+    const { MISSING_PHOTOS_HTML_V3 } = await import('./crm-email-seed')
+    const html = MISSING_PHOTOS_HTML_V3.replace(/__ICONS__/g, `${PUBLIC_URL()}/email/icons`)
+    const note = 'Branded inventory review — deep-green ZRZ OPS look (executive summary, KPI cards, operating approach, handoffs, next step)'
+    const existing = await templates.findOne({ name: 'Missing Photos' })
+    if (!existing) {
+      await createTemplate(db, {
+        name: 'Missing Photos', category: 'First touch',
+        description: 'Branded inventory review from the latest audit: pre-owned vehicles missing photos, evidence, operating approach, 15-minute walkthrough CTA.',
+        subject: '{{usedMissingPhotos}} vehicles at {{dealership}} are missing photos',
+        format: 'html', html, label: 'V3', note,
+      }, null)
+    }
+    else if (!normalizeTemplate(existing).versions.some((v: any) => v.note === note)) {
+      await updateTemplate(db, existing._id.toString(), {
+        newVersion: { format: 'html', html, label: `V${Math.max(0, ...normalizeTemplate(existing).versions.map((v: any) => Number(v.version) || 0)) + 1}`, note, retireOthers: true },
+      }, null)
+    }
+    await counters.updateOne({ _id: 'crmEmailSeedV3' as any }, { $set: { done: true, finishedAt: new Date().toISOString() } })
+  }
+  catch (e: any) {
+    await counters.deleteOne({ _id: 'crmEmailSeedV3' as any }).catch(() => {})
+    throw e
+  }
 }
 /** "Then vs Now" — check-in email built on the audit history (latest vs ~3 months earlier). */
 async function seedThenVsNow(db: Db) {
