@@ -372,7 +372,7 @@ export async function getAuditReport(db: Db, auditId: string) {
 /** Print HTML to PDF with headless Chromium (same browser as the Inventory Scanner). */
 export async function htmlToPdf(html: string): Promise<Buffer> {
   const { openBrowser } = await import('./scanner-cdp')
-  const browser = await openBrowser()
+  const browser = await openBrowser({ proxy: false })
   try {
     const { conn } = browser
     const { targetId } = await conn.send('Target.createTarget', { url: 'about:blank' })

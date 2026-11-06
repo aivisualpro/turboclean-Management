@@ -110,6 +110,8 @@ export interface BrowserHandle {
   conn: CdpConnection
   kind: 'local' | 'remote' | 'serverless'
   binary: string | null
+  /** Set when pages go through SCANNER_PROXY with a user name / password (answered per tab via CDP Fetch). */
+  proxyAuth?: { username: string, password: string } | null
   close: () => Promise<void>
 }
 
@@ -128,10 +130,29 @@ async function serverlessChromium(): Promise<{ binary: string, args: string[] }>
   return { binary, args: Chromium.args as string[] }
 }
 
-/** Launch local Chrome over a pipe, or connect to SCANNER_BROWSER_WS. */
-export async function openBrowser(): Promise<BrowserHandle> {
+/**
+ * SCANNER_PROXY — send the crawler's page traffic through a proxy (e.g. a US residential proxy, so dealer
+ * sites protected by Akamai / Cloudflare see a normal home visitor instead of a cloud server):
+ *   http://USER:PASS@host:port   ·   socks5://host:port
+ * "{session}" anywhere in it is replaced by a random id per browser → one sticky IP for a whole crawl
+ * (e.g. Bright Data: brd-customer-…-zone-…-session-{session}; Decodo: user-…-session-{session}).
+ */
+export function scannerProxy() {
+  const raw = (process.env.SCANNER_PROXY || '').trim()
+  if (!raw) return null
+  try {
+    const u = new URL(raw.replace(/\{session\}/g, Math.random().toString(36).slice(2, 10)))
+    const scheme = u.protocol.replace(':', '') || 'http'
+    return { server: `${scheme}://${u.hostname}:${u.port || (scheme === 'https' ? 443 : scheme.startsWith('socks') ? 1080 : 80)}`, username: decodeURIComponent(u.username), password: decodeURIComponent(u.password), host: u.hostname }
+  } catch { console.warn('[Scanner] SCANNER_PROXY is not a valid URL — ignored'); return null }
+}
+
+/** Launch local Chrome over a pipe, or connect to SCANNER_BROWSER_WS. `proxy: false` = never through SCANNER_PROXY (PDF printing). */
+export async function openBrowser(opts: { proxy?: boolean } = {}): Promise<BrowserHandle> {
   const ws = process.env.SCANNER_BROWSER_WS
   if (ws) return connectRemote(ws)
+  const proxy = opts.proxy === false ? null : scannerProxy()
+  const proxyArgs = proxy ? [`--proxy-server=${proxy.server}`, '--proxy-bypass-list=<-loopback>'] : []
   const profile = mkdtempSync(join(tmpdir(), 'zrz-scanner-'))
   let binary: string | null
   let args: string[]
@@ -149,6 +170,7 @@ export async function openBrowser(): Promise<BrowserHandle> {
       '--disable-site-isolation-trials', '--renderer-process-limit=2', '--disk-cache-size=1', '--media-cache-size=1',
       '--js-flags=--max-old-space-size=512', '--disable-features=Translate,MediaRouter,OptimizationHints,BackForwardCache,IsolateOrigins,site-per-process',
       '--remote-debugging-pipe',
+      ...proxyArgs,
       `--user-data-dir=${profile}`,
       '--no-first-run', '--disable-background-networking', '--disable-sync', '--disable-extensions', '--disable-component-update',
       '--mute-audio', '--hide-scrollbars', '--force-color-profile=srgb', '--lang=en-US',
@@ -162,6 +184,7 @@ export async function openBrowser(): Promise<BrowserHandle> {
   args = [
     process.env.SCANNER_HEADFUL === '1' ? '' : '--headless=new',
     '--remote-debugging-pipe',
+    ...proxyArgs,
     `--user-data-dir=${profile}`,
     '--no-first-run', '--no-default-browser-check', '--disable-default-apps',
     '--disable-background-networking', '--disable-sync', '--disable-extensions', '--disable-component-update',
@@ -208,6 +231,7 @@ export async function openBrowser(): Promise<BrowserHandle> {
   }
   return {
     conn, kind: isServerless() && !process.env.SCANNER_CHROME_PATH ? 'serverless' : 'local', binary,
+    proxyAuth: proxy && proxy.username ? { username: proxy.username, password: proxy.password } : null,
     close: async () => {
       try { await conn.send('Browser.close', {}, undefined, 3000) } catch {}
       // Wait briefly for a clean exit, then make sure no Chromium outlives the request.

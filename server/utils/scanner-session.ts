@@ -21,7 +21,7 @@ import process from 'node:process'
 import type { Db } from 'mongodb'
 import type { SessionActor } from './crm'
 import { CRM_COLLECTIONS, str } from './crm'
-import { isServerless, openBrowser, SCANNER_VIEWPORT } from './scanner-cdp'
+import { isServerless, openBrowser, SCANNER_VIEWPORT, scannerProxy } from './scanner-cdp'
 import type { BrowserHandle, CdpConnection } from './scanner-cdp'
 import { ANALYZE_FN_JS, EXTRACT_JS, FIND_NEXT_JS, HOTSPOTS_JS, NAV_LINKS_JS, SCANNER_BOOTSTRAP_JS, SCROLL_STEP_JS } from './scanner-page'
 import { classify, countable, downloadImage, finalVerdict, listRules, RULES_COLLECTION, summarize, VERDICT_LABEL } from './scanner-images'
@@ -158,6 +158,16 @@ export async function openTab(): Promise<Tab> {
       conn.send('Network.setBlockedURLs', { urls: BLOCKED_URLS }, sid).catch(() => {}),
       conn.send('Network.setCacheDisabled', { cacheDisabled: false }, sid).catch(() => {}),
     ])
+    // SCANNER_PROXY with a user name / password: answer the proxy's login for every request of this tab.
+    if (browser.proxyAuth) {
+      const auth = browser.proxyAuth
+      conn.on(`${sid}:Fetch.requestPaused`, (p: any) => { conn.send('Fetch.continueRequest', { requestId: p.requestId }, sid).catch(() => {}) })
+      conn.on(`${sid}:Fetch.authRequired`, (p: any) => {
+        const own = p.authChallenge?.source === 'Proxy'
+        conn.send('Fetch.continueWithAuth', { requestId: p.requestId, authChallengeResponse: own ? { response: 'ProvideCredentials', username: auth.username, password: auth.password } : { response: 'CancelAuth' } }, sid).catch(() => {})
+      })
+      await conn.send('Fetch.enable', { handleAuthRequests: true, patterns: [{ urlPattern: '*', requestStage: 'Request' }] }, sid)
+    }
     const tree = await conn.send('Page.getFrameTree', {}, sid).catch(() => null)
     t.mainFrameId = tree?.frameTree?.frame?.id || ''
     conn.on(`${sid}:Page.frameStartedLoading`, (p: any) => { if (!t.mainFrameId || p.frameId === t.mainFrameId) { t.loading = true; t.status = null } })
@@ -214,12 +224,18 @@ export async function goto(t: Tab, url: string, timeoutMs = 25_000, log?: (s: st
       if (!alive) throw createError({ statusCode: 504, statusMessage: 'The website did not respond', message: `${url.replace(/^https?:\/\//, '')} did not respond within ${Math.round((timeoutMs + 20_000) / 1000)} s. Try again later or check the address.` })
       return
     }
-    if (r?.errorText) throw createError({ statusCode: 502, statusMessage: 'Could not open the site', message: `Could not open ${url.replace(/^https?:\/\//, '')} (${r.errorText})` })
+    if (r?.errorText) {
+      if (process.env.SCANNER_PROXY && /PROXY|TUNNEL|TOO_MANY_RETRIES|SOCKS/i.test(r.errorText)) throw createError({ statusCode: 502, statusMessage: 'The proxy refused the connection', message: `SCANNER_PROXY did not work (${r.errorText}) — check the proxy address, user name and password in Vercel, and that the plan has traffic left.` })
+      throw createError({ statusCode: 502, statusMessage: 'Could not open the site', message: `Could not open ${url.replace(/^https?:\/\//, '')} (${r.errorText})` })
+    }
     await waitForSettle(t, timeoutMs)
-    // Akamai / Cloudflare "Access Denied": most US dealer sites refuse visitors from outside the US.
+    // Akamai / Cloudflare "Access Denied": the site's bot protection refused this visitor.
     if (t.status === 403) {
       const title = await evaluate<string>(t, 'document.title', 5_000).catch(() => '')
-      throw createError({ statusCode: 403, statusMessage: 'The website blocked this visit', message: `${url.replace(/^https?:\/\//, '')} answered "Access Denied" (HTTP 403${title ? `, "${title}"` : ''}). Dealer websites usually block traffic from outside the US — run this from zrzops.com (US servers) or through a US VPN.` })
+      const where = process.env.SCANNER_PROXY ? 'even through SCANNER_PROXY — try another proxy location / a residential proxy, or try again later'
+        : isServerless() ? 'from our cloud server — many dealer sites block cloud (data-centre) addresses. Set SCANNER_PROXY to a US residential proxy in Vercel so the crawler visits like a normal US home visitor'
+          : 'from this computer — dealer websites usually block traffic from outside the US. Run it from zrzops.com, or set SCANNER_PROXY to a US residential proxy'
+      throw createError({ statusCode: 403, statusMessage: 'The website blocked this visit', message: `${url.replace(/^https?:\/\//, '')} answered "Access Denied" (HTTP 403${title ? `, "${title}"` : ''}) ${where}.` })
     }
     const limited = t.status === 429 || t.status === 503 || t.status === 509
     if (!limited || attempt >= RATE_LIMIT_WAITS.length) {
@@ -596,7 +612,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
   try {
     emit('scan', { id: String(doc._id) })
     emit('progress', doc.progress)
-    log(`Starting a private browser${isServerless() ? ' in the cloud' : ''}…`)
+    log(`Starting a private browser${isServerless() ? ' in the cloud' : ''}${scannerProxy() ? ` · through proxy ${scannerProxy()!.host}` : ''}…`)
     t = await openTab()
     let tab = t
     let restarts = 0
