@@ -45,7 +45,7 @@ export interface ImageInfo {
   text?: string
   ocr?: boolean
   /** Gemini's look at the photo (cached by fingerprint). */
-  ai?: { v: 'real' | 'placeholder' | 'stock', c: number, why: string, text: string, model: string, cached?: boolean }
+  ai?: { v: 'real' | 'placeholder' | 'stock', c: number, why: string, text: string, model: string, ad?: boolean, adWhy?: string, cached?: boolean }
   bytes?: number
 }
 export interface ScanVehicle {
@@ -74,6 +74,26 @@ export interface ScanVehicle {
   reasons: string[]
   clusterId: string | null
   override: Exclude<PhotoVerdict, 'review'> | null
+  /** First words of the card (helps tell a vehicle from a promo tile). */
+  cardText?: string
+  /** Set when the card looks like an advertisement / promo tile, not a vehicle — left out of every count. */
+  adReason?: string | null
+  /** A person's call: 'ad' (leave out) or 'vehicle' (count it) — beats the automatic one. */
+  listing?: 'ad' | 'vehicle' | null
+}
+/** Is this card an advertisement (not part of the inventory)? A person's call wins. */
+export const isAd = (v: ScanVehicle) => v.listing ? v.listing === 'ad' : !!v.adReason
+/** The vehicles that count (ads left out). */
+export const countable = (vs: ScanVehicle[]) => vs.filter(v => !isAd(v))
+const AD_TEXT = /pre-?approv|value your trade|trade[- ]in value|get approved|apply (now|online)|financ|special offers?|lease (special|offer|deal)|sell (us )?your (car|vehicle)|we buy cars|schedule (a )?(test drive|service)|service (special|coupon)|coupon|rebate|shop online|can.t find|not finding|sign up|subscribe|gift card|award|why buy|learn more|explore (the|our)|build (&|and) price|view (all )?specials/i
+/** Built-in ad check: no VIN, no stock #, no year and no price — or promo wording without a VIN / stock #. */
+export function adSignal(v: ScanVehicle): string | null {
+  if (v.vin || v.stock) return null
+  // Promo wording in the card's TITLE (button text like "Get financing" sits on real cards too, so the body is not used).
+  const m = (v.title || '').match(AD_TEXT) || (v.title || '').match(/\b(lease|special|event|offer|sale|deal)s?\b/i)
+  if (m) return `Promo tile (“${short(v.title, 50)}”) — no VIN or stock #`
+  if (!v.year && !v.price) return 'No year, price, VIN or stock # — looks like a banner, not a vehicle'
+  return null
 }
 export interface ImageCluster { id: string, imageIds: string[], hash: string, hash2?: string, vehicles: number, models: number, modelNames: string[], thumb: string, url: string, verdict: PhotoVerdict, reason: string, override: Exclude<PhotoVerdict, 'review'> | null }
 
@@ -209,6 +229,9 @@ export function classify(vehicles: ScanVehicle[], images: Map<string, ImageInfo>
     const cluster = v.imageId ? clusterOf.get(v.imageId) : undefined
     v.clusterId = cluster?.id || null
     v.reasons = []
+    // Advertisement / promo tile in the grid? The AI's call (it sees picture + card) first, else the built-in check.
+    const aiAd = info?.ok && typeof info.ai?.ad === 'boolean' ? info.ai : null
+    v.adReason = aiAd ? (aiAd.ad && !(v.vin && v.stock) ? `AI check: advertisement, not a vehicle${aiAd.adWhy ? ` — ${short(aiAd.adWhy, 60)}` : ''}` : null) : adSignal(v)
     const decide = (verdict: Exclude<PhotoVerdict, 'review'>, confidence: number, reasons: string[]) => { v.verdict = verdict; v.suggested = verdict; v.confidence = confidence; v.reasons = reasons }
 
     if (!img || !img.url) { decide('missing', 1, [v.noPhotoText ? `No photo — the card says “${short(v.noPhotoText)}”` : 'No photo on the vehicle card']); continue }
@@ -288,8 +311,10 @@ export function classify(vehicles: ScanVehicle[], images: Map<string, ImageInfo>
 export const finalVerdict = (v: ScanVehicle, clusters?: Map<string, ImageCluster>): Exclude<PhotoVerdict, 'review'> =>
   v.override || (v.clusterId && clusters?.get(v.clusterId)?.override) || (v.verdict === 'review' ? v.suggested : v.verdict)
 
-export function summarize(vehicles: ScanVehicle[], clusters: ImageCluster[], opts: { countStockAsMissing: boolean }) {
+export function summarize(all: ScanVehicle[], clusters: ImageCluster[], opts: { countStockAsMissing: boolean }) {
   const cmap = new Map(clusters.map(c => [c.id, c]))
+  const vehicles = countable(all)
+  const ads = all.length - vehicles.length
   const by = { real: 0, placeholder: 0, stock: 0, missing: 0 }
   const isNew = (v: ScanVehicle) => v.condition === 'new'
   const counts = { newTotal: 0, usedTotal: 0, newMissingPhotos: 0, usedMissingPhotos: 0 }
@@ -303,7 +328,7 @@ export function summarize(vehicles: ScanVehicle[], clusters: ImageCluster[], opt
   const total = vehicles.length
   const withoutReal = by.missing + by.placeholder + (opts.countStockAsMissing ? by.stock : 0)
   return {
-    total, by, withoutReal,
+    total, by, withoutReal, ads,
     withoutRealPct: total ? Math.round((withoutReal / total) * 1000) / 10 : null,
     review: vehicles.filter(v => v.verdict === 'review' && !v.override && !(v.clusterId && cmap.get(v.clusterId)?.override)).length,
     counts,

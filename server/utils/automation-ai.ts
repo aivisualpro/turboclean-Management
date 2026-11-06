@@ -289,6 +289,52 @@ export async function askGeminiVision(opts: { system: string, prompt: string, im
   finally { t.clear() }
 }
 
+/** Claude vision for the photo check — the most capable model by default, falling back if it is unavailable. */
+export const claudeVisionConfigured = () => !!anthropicKey()
+export const claudeVisionModels = () => [process.env.SCANNER_VISION_MODEL && /^claude/.test(process.env.SCANNER_VISION_MODEL) ? process.env.SCANNER_VISION_MODEL : 'claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5'].filter((m, i, a) => a.indexOf(m) === i)
+let claudeEffortOk = true
+/**
+ * One Claude call with several images → JSON. Adaptive thinking (always on for the top models) +
+ * `output_config.effort` (SCANNER_VISION_EFFORT, default "medium" — photo judging needs care, not essays).
+ * Overloaded / unknown model → next model in the chain.
+ */
+export async function askClaudeVision(opts: { system: string, prompt: string, images: { label: string, mime: string, b64: string }[], maxTokens?: number, timeoutMs?: number, purpose?: string }) {
+  if (!anthropicKey()) throw new Error('ANTHROPIC_API_KEY is not set')
+  const t = withTimeout(opts.timeoutMs ?? 90_000)
+  const t0 = Date.now()
+  const content: any[] = [{ type: 'text', text: opts.prompt }]
+  for (const im of opts.images) { content.push({ type: 'text', text: im.label }); content.push({ type: 'image', source: { type: 'base64', media_type: im.mime, data: im.b64 } }) }
+  const effort = (['low', 'medium', 'high', 'xhigh', 'max'].includes(String(process.env.SCANNER_VISION_EFFORT)) ? process.env.SCANNER_VISION_EFFORT : 'medium') as string
+  let lastErr: any = null
+  try {
+    for (const model of claudeVisionModels()) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const body: any = { model, max_tokens: opts.maxTokens ?? 8000, system: [{ type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content }] }
+        if (claudeEffortOk) body.output_config = { effort }
+        const res = await anthropicPost(body, t.signal)
+        if (res.ok) {
+          const data: any = await res.json()
+          const text = (data?.content || []).filter((c: any) => c?.type === 'text').map((c: any) => c.text).join('').trim()
+          logCall({ provider: 'anthropic', purpose: opts.purpose || 'vision', brain: null, model: String(data?.model || model), ms: Date.now() - t0, ok: true, images: opts.images.length, ...anthropicUsage(data) })
+          return { data: parseJsonBlock(text), model: String(data?.model || model), ms: Date.now() - t0 }
+        }
+        const txt = await res.text()
+        lastErr = new Error(`Claude API ${res.status} (${model}): ${txt.slice(0, 240)}`)
+        if (res.status === 400 && claudeEffortOk && /output_config|effort/i.test(txt)) { claudeEffortOk = false; continue }
+        if (res.status === 404 || (res.status === 400 && /model/i.test(txt)) || res.status === 403) break // model not available → next model
+        if (res.status === 429 || res.status === 529 || res.status >= 500) { await new Promise(r => setTimeout(r, [2000, 5000, 9000][attempt])); continue }
+        throw lastErr
+      }
+    }
+    throw lastErr || new Error('No Claude model answered')
+  }
+  catch (e: any) {
+    logCall({ provider: 'anthropic', purpose: opts.purpose || 'vision', brain: null, model: claudeVisionModels()[0], ms: Date.now() - t0, ok: false, images: opts.images.length, error: String(e?.message || e).slice(0, 300) })
+    throw e
+  }
+  finally { t.clear() }
+}
+
 // ───────────────────────── Public API ─────────────────────────
 export async function askClaude(opts: AskOptions) {
   const provider = aiProvider()

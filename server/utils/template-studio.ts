@@ -30,6 +30,7 @@ const FIELD_HELP: Record<string, string> = {
   prevAuditDate: 'date of the earlier review used for "then vs now" (closest to ~3 months before the latest)', prevUsedTotal: 'pre-owned listed back then', prevUsedMissingPhotos: 'pre-owned without real photo back then', prevUsedMissingPhotoPct: 'pre-owned % without real photo back then',
   prevTotalMissingPhotos: 'all listings without real photo back then', usedMissingChange: 'change in pre-owned without real photo, e.g. "+16" or "−5"', usedMissingPctChange: 'change in share, e.g. "+8.5 pts"',
   auditPeriod: 'time between the two reviews, e.g. "3 months"', trendWord: '"more" / "fewer" / "the same number of"',
+  auditHistoryChart: 'HTML BLOCK: "Over time" column chart — share of pre-owned listings without a real photo at each review (one per day, up to 8). Renders nothing with fewer than two reviews or when switched off in Email → Settings.',
   auditTrend: 'HTML BLOCK: "Then vs now" card (then → now numbers, mini history bars, one sentence) — renders nothing when there is only one review',
   reportUrl: 'link to the dealer\'s own full inventory report (public, signed) — great for a "See your full report" button',
 }

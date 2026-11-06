@@ -8,7 +8,7 @@
  */
 
 /** Merge fields whose value is HTML and must not be escaped. */
-export const RAW_HTML_FIELDS = new Set(['auditScreenshot', 'auditEvidence', 'auditBreakdown', 'usedPhotoBar', 'newInventoryNote', 'auditTrend', 'inventoryByPage'])
+export const RAW_HTML_FIELDS = new Set(['auditScreenshot', 'auditEvidence', 'auditBreakdown', 'usedPhotoBar', 'newInventoryNote', 'auditTrend', 'inventoryByPage', 'auditHistoryChart'])
 
 const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const FONT = `font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;`

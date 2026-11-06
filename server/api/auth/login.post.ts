@@ -1,6 +1,6 @@
-import { Buffer } from 'node:buffer'
 import process from 'node:process'
 import { connectToDatabase } from '../../utils/mongodb'
+import { createSessionToken } from '../../utils/auth'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
@@ -32,15 +32,8 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 403, statusMessage: 'Your account is inactive. Please contact an administrator.' })
   }
 
-  // Create a simple session token (base64 of id + timestamp)
-  const sessionPayload = JSON.stringify({
-    userId: user._id.toString(),
-    email: user.email,
-    name: user.name || '',
-    role: user.role || 'User',
-    iat: Date.now(),
-  })
-  const token = Buffer.from(sessionPayload).toString('base64url')
+  // Signed session token (HMAC with NUXT_SESSION_PASSWORD) — can't be edited or made up.
+  const token = createSessionToken(user)
 
   // Set session cookie (HTTP-only, 7-day expiry)
   setCookie(event, 'turbo_session', token, {

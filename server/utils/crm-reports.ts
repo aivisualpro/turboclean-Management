@@ -30,6 +30,39 @@ const dayUpper = (iso: string) => { const d = new Date(iso); return `${MONTHS[d.
 const pct1 = (part: number, whole: number) => whole > 0 ? Math.round((part / whole) * 1000) / 10 : null
 const FONT = `font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;`
 
+// ───────────────────────── Settings ─────────────────────────
+/**
+ * Where the "over time" chart appears (Email → Settings → Reports & emails). Stored once for the team.
+ * The chart sits between markers in stored reports and email blocks, so switching it off takes effect
+ * immediately — also for reports already stored.
+ */
+export interface ReportSettings { historyChartInReport: boolean, historyChartInEmail: boolean, onePointPerDay: boolean }
+export const REPORT_SETTINGS_DEFAULTS: ReportSettings = { historyChartInReport: true, historyChartInEmail: true, onePointPerDay: true }
+const SETTINGS = 'turboCleanCrmSettings'
+export async function getReportSettings(db: Db): Promise<ReportSettings> {
+  try {
+    const d: any = await db.collection(SETTINGS).findOne({ _id: 'reports' as any })
+    return { ...REPORT_SETTINGS_DEFAULTS, ...Object.fromEntries(Object.entries(d || {}).filter(([k, v]) => k in REPORT_SETTINGS_DEFAULTS && typeof v === 'boolean')) }
+  } catch { return { ...REPORT_SETTINGS_DEFAULTS } }
+}
+export async function saveReportSettings(db: Db, body: any, actor: { id: string, name: string } | null) {
+  const next = { ...(await getReportSettings(db)) }
+  for (const k of Object.keys(REPORT_SETTINGS_DEFAULTS) as (keyof ReportSettings)[]) if (typeof body?.[k] === 'boolean') next[k] = body[k]
+  await db.collection(SETTINGS).updateOne({ _id: 'reports' as any }, { $set: { ...next, updatedAt: new Date().toISOString(), updatedBy: actor } }, { upsert: true })
+  return next
+}
+const HISTORY_OPEN = '<!--zrz-history-->', HISTORY_CLOSE = '<!--/zrz-history-->'
+/** Remove the over-time chart (between the markers) from a report or an email block. */
+export const stripHistory = (html: string) => String(html || '').replace(/<!--zrz-history-->[\s\S]*?<!--\/zrz-history-->/g, '')
+/** Apply the settings to a stored report before it is shown or printed. */
+export const applyReportSettings = (html: string, s: ReportSettings) => s.historyChartInReport ? html : stripHistory(html)
+/** Several reviews on the same day (re-crawls) → keep the last one of each day, so the chart shows days, not attempts. */
+export function onePerDay<T extends { auditedAt: string }>(history: T[]): T[] {
+  const byDay = new Map<string, T>()
+  for (const a of history) byDay.set(String(a.auditedAt).slice(0, 10), a)
+  return [...byDay.values()].sort((a, b) => String(a.auditedAt).localeCompare(String(b.auditedAt)))
+}
+
 // ───────────────────────── Trend ─────────────────────────
 /** Audits for one dealership, oldest → newest (only audits at or before `upTo`). */
 export async function auditHistory(db: Db, dealershipId: string, upTo?: string) {
@@ -57,8 +90,8 @@ export function periodLabel(fromIso: string, toIso: string) {
 const signed = (n: number, unit = '') => `${n > 0 ? '+' : n < 0 ? '−' : '±'}${Math.abs(Math.round(n * 10) / 10)}${unit}`
 
 /** Merge values + the "Then vs now" email block. Everything is blank when there is no earlier audit. */
-export function trendVars(latest: any | null, history: any[]) {
-  const blank = { prevAuditDate: '', prevUsedTotal: '', prevUsedMissingPhotos: '', prevUsedMissingPhotoPct: '', prevTotalMissingPhotos: '', usedMissingChange: '', usedMissingPctChange: '', auditPeriod: '', trendWord: '', auditTrend: '' }
+export function trendVars(latest: any | null, history: any[], opts: { onePerDay?: boolean } = {}) {
+  const blank = { prevAuditDate: '', prevUsedTotal: '', prevUsedMissingPhotos: '', prevUsedMissingPhotoPct: '', prevTotalMissingPhotos: '', usedMissingChange: '', usedMissingPctChange: '', auditPeriod: '', trendWord: '', auditTrend: '', auditHistoryChart: '' }
   if (!latest) return blank
   const base = pickBaseline(history, latest)
   if (!base) return blank
@@ -77,7 +110,8 @@ export function trendVars(latest: any | null, history: any[]) {
     usedMissingPctChange: pctChange == null ? '' : signed(pctChange, ' pts'),
     auditPeriod: period,
     trendWord: change > 0 ? 'more' : change < 0 ? 'fewer' : 'the same number of',
-    auditTrend: trendBlock(base, latest, history, { period, change, nowP, thenP }),
+    auditTrend: trendBlock(base, latest, opts.onePerDay === false ? history : onePerDay(history), { period, change, nowP, thenP }),
+    auditHistoryChart: historyChartEmail(latest, opts.onePerDay === false ? history : onePerDay(history)),
   }
 }
 
@@ -101,7 +135,7 @@ function trendBlock(base: any, latest: any, history: any[], t: { period: string,
   const points = history.filter(a => num(a.usedTotal) > 0).slice(-6)
   const maxP = Math.max(1, ...points.map(a => a.usedMissingPhotoPct ?? pct1(num(a.usedMissingPhotos), num(a.usedTotal)) ?? 0))
   const bars = points.length >= 3
-    ? `<tr><td colspan="3" style="padding:16px 0 0;">
+    ? `${HISTORY_OPEN}<tr><td colspan="3" style="padding:16px 0 0;">
         <div style="${FONT}font-size:11px;font-weight:700;letter-spacing:1.4px;color:#667085;padding-bottom:6px;">EVERY REVIEW SO FAR</div>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${points.map((a) => {
           const p = a.usedMissingPhotoPct ?? pct1(num(a.usedMissingPhotos), num(a.usedTotal)) ?? 0
@@ -111,7 +145,7 @@ function trendBlock(base: any, latest: any, history: any[], t: { period: string,
             <td style="padding:3px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td width="${w}%" height="10" style="height:10px;line-height:10px;font-size:0;background:${isNow ? accent : '#cbd5e1'};border-radius:5px;">&nbsp;</td><td style="font-size:0;">&nbsp;</td></tr></table></td>
             <td width="54" align="right" style="${FONT}padding:3px 0 3px 8px;font-size:11px;font-weight:700;color:${isNow ? accent : '#475467'};">${p}%</td></tr>`
         }).join('')}</table>
-      </td></tr>`
+      </td></tr>${HISTORY_CLOSE}`
     : ''
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f6f8f7;border:1px solid #e4e9e6;border-radius:14px;border-collapse:separate;">
   <tr><td style="padding:18px 18px 4px;${FONT}font-size:11px;font-weight:700;letter-spacing:1.8px;color:#15803d;">THEN VS NOW &middot; ${esc(t.period.toUpperCase())}</td></tr>
@@ -126,6 +160,32 @@ function trendBlock(base: any, latest: any, history: any[], t: { period: string,
 </table>`
 }
 
+/**
+ * Email-safe "over time" column chart ({{auditHistoryChart}}): share of pre-owned listings without a
+ * real photo at each review (up to 8, one per day). Tables only — works in Outlook / Gmail / Apple Mail.
+ */
+export function historyChartEmail(latest: any, history: any[]) {
+  const pts = history.filter(a => num(a.usedTotal) > 0).slice(-8).map(a => ({ a, p: a.usedMissingPhotoPct ?? pct1(num(a.usedMissingPhotos), num(a.usedTotal)) ?? 0 }))
+  if (pts.length < 2) return ''
+  const maxP = Math.max(10, ...pts.map(x => x.p))
+  const H = 110
+  const first = pts[0]!.p, last = pts[pts.length - 1]!.p
+  const accent = last > first ? '#c62a2f' : last < first ? '#15803d' : '#344054'
+  const cols = pts.map(({ a, p }) => {
+    const isNow = String(a._id ?? a.id) === String(latest?._id ?? latest?.id)
+    const h = Math.max(4, Math.round((p / maxP) * H))
+    return `<td valign="bottom" align="center" style="padding:0 4px;">
+      <div style="${FONT}font-size:11px;font-weight:700;color:${isNow ? accent : '#475467'};padding-bottom:4px;">${p}%</div>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td height="${h}" style="height:${h}px;line-height:${h}px;font-size:0;background:${isNow ? accent : '#cbd5e1'};border-radius:6px 6px 0 0;">&nbsp;</td></tr></table>
+      <div style="${FONT}font-size:10px;color:#667085;padding-top:5px;white-space:nowrap;">${dayLabel(a.auditedAt).replace(/, \d{4}$/, '')}</div>
+    </td>`
+  }).join('')
+  return `${HISTORY_OPEN}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #eaecf0;border-radius:12px;border-collapse:separate;">
+  <tr><td style="padding:16px 18px 2px;${FONT}font-size:11px;font-weight:700;letter-spacing:1.6px;color:#15803d;">PRE-OWNED WITHOUT A REAL PHOTO &middot; OVER TIME</td></tr>
+  <tr><td style="padding:12px 14px 14px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>${cols}</tr></table></td></tr>
+</table>${HISTORY_CLOSE}`
+}
+
 // ───────────────────────── Public report links ─────────────────────────
 const PUBLIC_URL = () => (process.env.CRM_PUBLIC_URL || process.env.NUXT_PUBLIC_SITE_URL || 'https://zrzops.com').replace(/\/$/, '')
 const secret = () => process.env.CRM_REPORT_SECRET || process.env.CRM_UNSUBSCRIBE_SECRET || process.env.RESEND_WEBHOOK_SECRET || process.env.RESEND_API_KEY || 'zrz-report'
@@ -136,17 +196,18 @@ export const reportUrl = (auditId: string) => `${PUBLIC_URL()}/api/crm/audits/${
 function lineChartSvg(points: { label: string, p: number }[], accent: string) {
   if (points.length < 2) return ''
   const W = 640, H = 170, padL = 40, padR = 34, padT = 18, padB = 28
-  const max = Math.max(10, Math.ceil(Math.max(...points.map(p => p.p)) / 10) * 10)
+  // Head-room above the highest point so its value label never sits on the top grid label.
+  const max = Math.max(10, Math.ceil((Math.max(...points.map(p => p.p)) + 8) / 10) * 10)
   const x = (i: number) => padL + (i * (W - padL - padR)) / (points.length - 1)
   const y = (v: number) => padT + (1 - v / max) * (H - padT - padB)
   const grid = [0, max / 2, max].map(v => `<line x1="${padL}" x2="${W - padR}" y1="${y(v)}" y2="${y(v)}" stroke="#eaecf0"/><text x="${padL - 6}" y="${y(v) + 4}" font-size="10" text-anchor="end" fill="#98a2b3">${v}%</text>`).join('')
   const path = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.p).toFixed(1)}`).join(' ')
   const area = `${path} L${x(points.length - 1).toFixed(1)},${y(0)} L${x(0).toFixed(1)},${y(0)} Z`
-  const dots = points.map((p, i) => `<circle cx="${x(i)}" cy="${y(p.p)}" r="${i === points.length - 1 ? 5 : 3.5}" fill="${i === points.length - 1 ? accent : '#ffffff'}" stroke="${accent}" stroke-width="2"/><text x="${x(i)}" y="${H - 8}" font-size="10" text-anchor="middle" fill="#667085">${esc(p.label)}</text><text x="${x(i)}" y="${y(p.p) - 9}" font-size="10" font-weight="700" text-anchor="middle" fill="#344054">${p.p}%</text>`).join('')
+  const dots = points.map((p, i) => `<circle cx="${x(i)}" cy="${y(p.p)}" r="${i === points.length - 1 ? 5 : 3.5}" fill="${i === points.length - 1 ? accent : '#ffffff'}" stroke="${accent}" stroke-width="2"/><text x="${x(i)}" y="${H - 8}" font-size="10" text-anchor="middle" fill="#667085">${esc(p.label)}</text><text x="${x(i)}" y="${y(p.p) - 9}" font-size="10" font-weight="700" text-anchor="${i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle'}" fill="#344054">${p.p}%</text>`).join('')
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Share of pre-owned listings without a real photo over time" style="display:block">${grid}<path d="${area}" fill="${accent}" opacity="0.08"/><path d="${path}" fill="none" stroke="${accent}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${dots}</svg>`
 }
 
-export function buildReportHtml(o: { dealership: any, audit: any, history: any[], sender: { name: string, company: string, email: string, phone: string } }) {
+export function buildReportHtml(o: { dealership: any, audit: any, history: any[], sender: { name: string, company: string, email: string, phone: string }, onePointPerDay?: boolean }) {
   const { dealership: d, audit: a, history, sender } = o
   const base = pickBaseline(history, a)
   const prev = [...history].reverse().find(x => new Date(x.auditedAt).getTime() < new Date(a.auditedAt).getTime() - 86_400_000) || null
@@ -157,7 +218,7 @@ export function buildReportHtml(o: { dealership: any, audit: any, history: any[]
   const accent = '#16a34a'
   const kpi = (label: string, value: string, sub: string, tone = '#101828') => `<div class="kpi"><div class="kpi-l">${label}</div><div class="kpi-v" style="color:${tone}">${value}</div><div class="kpi-s">${sub}</div></div>`
   const cmpRow = (label: string, x: any, highlight = false) => x ? `<tr${highlight ? ' class="hl"' : ''}><td>${label}</td><td>${dayLabel(x.auditedAt)}</td><td class="r">${fmt(num(x.usedTotal))}</td><td class="r">${fmt(num(x.usedMissingPhotos))}</td><td class="r">${x.usedMissingPhotoPct ?? pct1(num(x.usedMissingPhotos), num(x.usedTotal)) ?? '—'}%</td><td class="r">${fmt(num(x.totalVehicles))}</td><td class="r">${fmt(num(x.totalMissingPhotos))}</td></tr>` : ''
-  const points = history.filter(x => num(x.usedTotal) > 0).slice(-10).map(x => ({ label: dayLabel(x.auditedAt).replace(/, (\d{4})$/, " '$1").replace(/'(\d\d)(\d\d)$/, "'$2"), p: x.usedMissingPhotoPct ?? pct1(num(x.usedMissingPhotos), num(x.usedTotal)) ?? 0 }))
+  const points = (o.onePointPerDay === false ? history : onePerDay(history)).filter(x => num(x.usedTotal) > 0).slice(-10).map(x => ({ label: dayLabel(x.auditedAt).replace(/, (\d{4})$/, " '$1").replace(/'(\d\d)(\d\d)$/, "'$2"), p: x.usedMissingPhotoPct ?? pct1(num(x.usedMissingPhotos), num(x.usedTotal)) ?? 0 }))
   const examples = (Array.isArray(a.examples) ? a.examples : []).filter((e: any) => e?.url).slice(0, 40)
   const pages = auditPages(a)
   const byPage = pages.length >= 2
@@ -229,7 +290,7 @@ export function buildReportHtml(o: { dealership: any, audit: any, history: any[]
     ${a.coverage?.advertised && num(a.coverage.advertised) > num(a.coverage.checked) ? `<div class="callout" style="border-left-color:#f59e0b;background:#fffbeb"><strong>Coverage:</strong> we checked ${fmt(num(a.coverage.checked))} of the ${fmt(num(a.coverage.advertised))} vehicles the website lists${num(a.coverage.blockedPages) ? ' &mdash; the site would not show us the rest' : ''}. The percentages above are of the ${fmt(num(a.coverage.checked))} vehicles checked.</div>` : ''}
     ${base ? `<div class="callout"><strong>Then vs now (${esc(period)}):</strong> on ${dayLabel(base.auditedAt)}, ${fmt(num(base.usedMissingPhotos))} of ${fmt(num(base.usedTotal))} pre-owned listings had no real photo. On ${dayLabel(a.auditedAt)} it was <strong>${fmt(num(a.usedMissingPhotos))} of ${fmt(num(a.usedTotal))}</strong> (${signed(num(a.usedMissingPhotos) - num(base.usedMissingPhotos))} cars${usedP != null && (base.usedMissingPhotoPct ?? null) != null ? `, ${signed(usedP - base.usedMissingPhotoPct, ' pts')}` : ''}).</div>` : `<div class="callout"><strong>Baseline review.</strong> This is the first review on record &mdash; future reviews will show how the gap changes over time.</div>`}
 
-    ${points.length >= 2 ? `<h2>Pre-owned listings without a real photo, over time</h2><div class="chart">${lineChartSvg(points, worse ? '#e5484d' : accent)}</div>` : ''}
+    ${points.length >= 2 ? `${HISTORY_OPEN}<h2>Pre-owned listings without a real photo, over time</h2><div class="chart">${lineChartSvg(points, worse ? '#e5484d' : accent)}</div>${HISTORY_CLOSE}` : ''}
 
     ${base || prev ? `<h2>Review history</h2><table class="t"><thead><tr><th></th><th>Date</th><th class="r">Pre-owned</th><th class="r">No real photo</th><th class="r">Share</th><th class="r">All listings</th><th class="r">All without</th></tr></thead><tbody>
       ${base ? cmpRow(`~${esc(period)} ago`, base) : ''}${prev && (!base || String(prev._id ?? prev.id) !== String(base._id ?? base.id)) ? cmpRow('Previous review', prev) : ''}${cmpRow('This review', a, true)}
@@ -285,7 +346,7 @@ export async function snapshotAuditReport(db: Db, dealership: any, audit: any) {
   if (existing) return existing
   const history = await auditHistory(db, String(dealership._id), audit.auditedAt)
   if (!history.some(h => String(h._id) === auditId)) history.push(audit)
-  const html = buildReportHtml({ dealership, audit, history, sender: await senderFor(db, audit) })
+  const html = buildReportHtml({ dealership, audit, history, sender: await senderFor(db, audit), onePointPerDay: (await getReportSettings(db)).onePointPerDay })
   const base = pickBaseline(history, audit)
   const doc = {
     auditId, dealershipId: String(dealership._id), dealershipName: dealership.name || '', auditedAt: audit.auditedAt,

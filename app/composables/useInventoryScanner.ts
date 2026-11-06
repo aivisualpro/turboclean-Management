@@ -28,6 +28,10 @@ export interface ScannedVehicle {
   url: string
   image: { url: string, alt: string, nw: number, nh: number } | null
   imageId: string | null
+  /** Advertisement / promo tile in the grid (not counted) — why. */
+  adReason?: string | null
+  /** A person's call: 'ad' or 'vehicle'. */
+  listing?: 'ad' | 'vehicle' | null
   imageCount: number
   photoCountText: string
   page: number
@@ -274,7 +278,7 @@ export function useInventoryScanner() {
     running.value = false
   }
 
-  async function review(body: { vehicles?: { key: string, verdict: FinalVerdict | null }[], clusters?: { id: string, verdict: FinalVerdict | null }[], countStockAsMissing?: boolean, reapplyRules?: boolean }) {
+  async function review(body: { listings?: { key: string, ad: boolean | null }[], vehicles?: { key: string, verdict: FinalVerdict | null }[], clusters?: { id: string, verdict: FinalVerdict | null }[], countStockAsMissing?: boolean, reapplyRules?: boolean }) {
     if (!results.value) return
     results.value = await $fetch<ScanResults>(`/api/scanner/scans/${results.value.scanId}/review`, { method: 'POST', body })
   }

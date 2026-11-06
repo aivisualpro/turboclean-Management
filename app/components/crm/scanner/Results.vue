@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { FinalVerdict, ImageGroup, ImageRule, PhotoVerdict, ScanResults, ScannedVehicle } from '~/composables/useInventoryScanner'
 import { VERDICT_META } from '~/composables/useInventoryScanner'
-import { ImageOff, Search, ExternalLink, Check, Brain, Layers, Trash2, Plus, Sparkles, ChevronDown, Info, ShieldCheck, Link2 } from 'lucide-vue-next'
+import { ImageOff, Search, ExternalLink, Check, Brain, Layers, Trash2, Plus, Sparkles, ChevronDown, Info, ShieldCheck, Link2, Ban } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 /** Review screen: KPIs, every vehicle with its photo verdict + reasons, repeated-image groups, saved rules. */
@@ -37,7 +37,7 @@ const C = 2 * Math.PI * 52
 const pct = (n: number, d: number) => d ? `${Math.round((n / d) * 1000) / 10}%` : '—'
 
 // ── Filters ──
-type Filter = 'all' | 'without' | 'nophoto' | FinalVerdict | 'review'
+type Filter = 'all' | 'without' | 'nophoto' | FinalVerdict | 'review' | 'ads'
 const filter = ref<Filter>('without')
 const q = ref('')
 const cond = ref<'all' | 'new' | 'used'>('all')
@@ -52,10 +52,21 @@ const tiles = computed(() => [
   { k: 'nophoto' as Filter, label: 'No photo', n: noPhotoCount.value, dot: VERDICT_META.missing.dot, hex: VERDICT_META.missing.hex, sub: `${s.value.by.placeholder} placeholder image${s.value.by.placeholder === 1 ? '' : 's'} · ${s.value.by.missing} with no image` },
   { k: 'stock' as Filter, label: 'Stock image', n: s.value.by.stock, dot: VERDICT_META.stock.dot, hex: VERDICT_META.stock.hex, sub: r.value.countStockAsMissing ? 'counted as no photo' : 'counted as photos' },
 ])
-const isWithout = (v: ScannedVehicle) => v.final === 'missing' || v.final === 'placeholder' || (r.value.countStockAsMissing && v.final === 'stock')
+/** Advertisement / promo tile — shown under "Ads", never counted. */
+const isAdCard = (v: ScannedVehicle) => v.listing ? v.listing === 'ad' : !!v.adReason
+const adCount = computed(() => r.value.vehicles.filter(isAdCard).length)
+async function setListing(v: ScannedVehicle, ad: boolean | null) {
+  busy.value = true
+  try {
+    await props.review({ listings: [{ key: v.key, ad }] })
+    toast.success(ad === true ? 'Left out — not counted as a vehicle' : ad === false ? 'Counted as a vehicle' : 'Back to the scanner’s call', { description: ad !== null ? 'Remembered for this picture on every future crawl.' : undefined })
+  } catch (e: any) { toast.error(e?.data?.statusMessage || 'Could not update') } finally { busy.value = false }
+}
+const isWithout = (v: ScannedVehicle) => !isAdCard(v) && (v.final === 'missing' || v.final === 'placeholder' || (r.value.countStockAsMissing && v.final === 'stock'))
 const filtered = computed(() => {
   const needle = q.value.trim().toLowerCase()
   return r.value.vehicles.filter((v) => {
+    if ((filter.value === 'ads') !== isAdCard(v)) return false
     if (filter.value === 'without' && !isWithout(v)) return false
     if (filter.value === 'review' && !(v.verdict === 'review' && !v.override)) return false
     if (filter.value === 'nophoto' && !noPhoto(v.final)) return false
@@ -74,6 +85,7 @@ const FILTERS = computed(() => [
   { k: 'nophoto' as Filter, label: 'No photo', n: noPhotoCount.value },
   { k: 'stock' as Filter, label: 'Stock', n: s.value.by.stock },
   { k: 'review' as Filter, label: 'Needs review', n: s.value.review },
+  ...(adCount.value ? [{ k: 'ads' as Filter, label: 'Ads (not counted)', n: adCount.value }] : []),
 ])
 
 const img = (v: ScannedVehicle) => v.imageId ? r.value.images[v.imageId] : null
@@ -173,7 +185,7 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
         <div class="min-w-0">
           <p class="text-[11px] uppercase tracking-wider text-muted-foreground">Without a real photo</p>
           <p class="text-4xl font-bold tabular-nums leading-tight" :class="(s.withoutRealPct ?? 0) >= 25 ? 'text-rose-600' : (s.withoutRealPct ?? 0) >= 10 ? 'text-amber-600' : 'text-emerald-600'">{{ s.withoutRealPct ?? 0 }}%</p>
-          <p class="text-xs text-muted-foreground"><span class="font-semibold text-foreground tabular-nums">{{ s.withoutReal }}</span> of {{ s.total }} vehicles</p>
+          <p class="text-xs text-muted-foreground"><span class="font-semibold text-foreground tabular-nums">{{ s.withoutReal }}</span> of {{ s.total }} vehicles<span v-if="adCount"> · {{ adCount }} ad{{ adCount === 1 ? '' : 's' }} left out</span></p>
           <p v-if="r.advertised && r.advertised > s.total" class="mt-1.5 rounded-md bg-amber-500/10 px-2 py-1 text-[11px] leading-snug text-amber-700 dark:text-amber-300">
             Checked <b>{{ s.total }}</b> of the <b>{{ r.advertised }}</b> vehicles the site lists — {{ r.advertised - s.total }} not reached{{ coverage?.blocked?.length ? ` (the site blocked result page ${coverage.blocked.map((b: any) => b.page).join(', ')})` : '' }}. The % is of the {{ s.total }} checked{{ coverage?.blocked?.length ? '; a retry continues from the blocked page' : '' }}.
           </p>
@@ -231,6 +243,7 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
                 <div v-else class="size-full flex flex-col items-center justify-center gap-1 text-muted-foreground"><ImageOff class="size-7" /><span class="text-[11px]">{{ v.image?.url ? 'Could not load' : 'No photo' }}</span></div>
                 <span class="absolute top-2 left-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 backdrop-blur bg-background/80" :class="VERDICT_META[pillFor(v)].pill">{{ v.override ? `${VERDICT_META[v.override].short} · set by you` : VERDICT_META[pillFor(v)].short }}{{ !v.override && v.verdict === 'review' ? ` → ${VERDICT_META[v.suggested].short}?` : '' }}</span>
                 <span v-if="!v.override" class="absolute top-2 right-2 rounded-full bg-black/55 text-white px-1.5 py-0.5 text-[10px] tabular-nums" title="How sure the scanner is">{{ conf(v) }}</span>
+                <span v-if="isAdCard(v)" class="absolute inset-x-2 top-9 rounded-md bg-zinc-900/85 text-white px-2 py-1 text-[10px] font-semibold text-center">AD — NOT COUNTED{{ v.listing === 'ad' ? ' · set by you' : '' }}</span>
                 <span v-if="img(v)?.text" class="absolute bottom-2 left-2 right-2 truncate rounded bg-black/60 text-white px-1.5 py-0.5 text-[10px]" title="Text read on the image">“{{ img(v)!.text }}”</span>
               </div>
               <div class="p-2.5 flex-1 flex flex-col gap-1">
@@ -241,7 +254,7 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
                   <span v-if="v.stock">#{{ v.stock }}</span>
                 </p>
                 <p v-if="v.vin" class="text-[10px] font-mono text-muted-foreground truncate">{{ v.vin }}</p>
-                <p class="text-[11px] text-muted-foreground line-clamp-2 mt-auto" :title="v.reasons.join('\n')">{{ v.reasons[0] }}</p>
+                <p class="text-[11px] text-muted-foreground line-clamp-2 mt-auto" :title="[v.adReason, ...v.reasons].filter(Boolean).join('\n')">{{ isAdCard(v) ? (v.adReason || 'Marked as an ad by you') : v.reasons[0] }}</p>
               </div>
               <footer class="border-t px-2 py-1.5 flex items-center gap-1">
                 <DropdownMenu>
@@ -249,6 +262,10 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
                   <DropdownMenuContent align="start" class="w-60">
                     <DropdownMenuItem v-for="k in CHOICES" :key="k" @click="setVerdict(v, k)"><span class="size-2 rounded-full" :class="VERDICT_META[k].dot" /> {{ VERDICT_META[k].label }}<Check v-if="k === 'placeholder' ? noPhoto(v.final) : v.final === k" class="size-3.5 ml-auto" /></DropdownMenuItem>
                     <DropdownMenuItem v-if="v.override" @click="setVerdict(v, null)">Undo my change</DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem v-if="!isAdCard(v)" @click="setListing(v, true)"><Ban class="size-4" /> Not a vehicle (ad / promo)</DropdownMenuItem>
+                    <DropdownMenuItem v-else @click="setListing(v, false)"><Check class="size-4" /> It's a vehicle — count it</DropdownMenuItem>
+                    <DropdownMenuItem v-if="v.listing" @click="setListing(v, null)">Undo ad / vehicle call</DropdownMenuItem>
                     <template v-if="img(v)?.hash">
                       <DropdownMenuSeparator />
                       <DropdownMenuItem @click="rememberVehicle(v, 'placeholder')"><Brain class="size-4" /> Always treat this image as “No photo”</DropdownMenuItem>

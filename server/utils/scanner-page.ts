@@ -200,6 +200,7 @@ export const EXTRACT_JS = `(() => {
       condition: condition(card, t, href) || pageCond, url: href,
       image: image, imageCount: Object.keys(srcs).length, photoCountText: pc ? pc[0] : '',
       noPhotoText: NO_PHOTO_TEXT.test(t) ? (t.match(NO_PHOTO_TEXT) || [''])[0] : '',
+      text: t.replace(/\s+/g, ' ').slice(0, 240),
       box: { x: Math.round(r.left + scrollX), y: Math.round(r.top + scrollY), w: Math.round(r.width), h: Math.round(r.height) },
     }
   })

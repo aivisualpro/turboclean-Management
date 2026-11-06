@@ -23,7 +23,8 @@
 import { createHash, createHmac as createHmacNode } from 'node:crypto'
 import { ObjectId } from 'mongodb'
 import { auditBreakdown, auditEvidence, auditPages, inventoryByPage, newInventoryNote, RAW_HTML_FIELDS, usedPhotoBar } from './crm-email-blocks'
-import { reportUrl as auditReportUrl, trendVars } from './crm-reports'
+import { getReportSettings, reportUrl as auditReportUrl, stripHistory, trendVars } from './crm-reports'
+import type { ReportSettings } from './crm-reports'
 import type { Db } from 'mongodb'
 import { Resend } from 'resend'
 import { CRM_COLLECTIONS, OPEN_STAGE_ORDER, logActivity, str } from './crm'
@@ -100,12 +101,12 @@ export const MERGE_FIELDS = [
   'usedWithPhotos', 'placeholderImages', 'noImageCount', 'stockImages',
   'auditEvidence', 'auditBreakdown', 'usedPhotoBar', 'newInventoryNote', 'inventoryByPage', 'inventoryPageCount', 'inventoryPageList',
   // Then vs now (vs the audit closest to ~3 months earlier) + public report link
-  'prevAuditDate', 'prevUsedTotal', 'prevUsedMissingPhotos', 'prevUsedMissingPhotoPct', 'prevTotalMissingPhotos', 'usedMissingChange', 'usedMissingPctChange', 'auditPeriod', 'trendWord', 'auditTrend', 'reportUrl',
+  'prevAuditDate', 'prevUsedTotal', 'prevUsedMissingPhotos', 'prevUsedMissingPhotoPct', 'prevTotalMissingPhotos', 'usedMissingChange', 'usedMissingPctChange', 'auditPeriod', 'trendWord', 'auditTrend', 'auditHistoryChart', 'reportUrl',
 ] as const
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 export interface SenderProfile { displayName: string, title: string, company: string, phone: string, email: string, tagline: string, region: string }
 
-export function mergeVars(dealership: any, contact: any, sender: Partial<SenderProfile> & { name?: string } | null, audit: any = null, extra: { replyTo?: string, subject?: string, history?: any[], reportUrl?: string } = {}) {
+export function mergeVars(dealership: any, contact: any, sender: Partial<SenderProfile> & { name?: string } | null, audit: any = null, extra: { replyTo?: string, subject?: string, history?: any[], reportUrl?: string, onePerDay?: boolean } = {}) {
   const senderName = sender?.displayName || sender?.name || ''
   const d = audit?.auditedAt ? new Date(audit.auditedAt) : null
   const n = (v: any) => (v === null || v === undefined || v === '') ? '' : String(v)
@@ -149,7 +150,7 @@ export function mergeVars(dealership: any, contact: any, sender: Partial<SenderP
     inventoryPageCount: audit && auditPages(audit).length ? String(auditPages(audit).length) : '',
     inventoryPageList: audit ? auditPages(audit).map((pg: any) => `${pg.label || 'Inventory'} (${pg.withoutReal || 0} of ${pg.total})`).join(', ') : '',
     // Then vs now (latest audit vs the one ~3 months earlier) + the dealer's own report link.
-    ...trendVars(audit, extra.history || (audit ? [audit] : [])),
+    ...trendVars(audit, extra.history || (audit ? [audit] : []), { onePerDay: extra.onePerDay }),
     reportUrl: extra.reportUrl || '',
     replyMailto: extra.replyTo ? `mailto:${extra.replyTo}?subject=${encodeURIComponent(`Re: ${extra.subject || ''}`)}` : '',
   } as Record<string, string>
@@ -446,7 +447,14 @@ export async function mergeContext(db: Db, dealership: any, contact: any, actor:
   ])
   const audit = recent[0] || null
   const history = [...recent].reverse()
-  return { vars: mergeVars(dealership, contact, sender, audit, { ...extra, history, reportUrl: audit ? auditReportUrl(audit._id.toString()) : '' }), sender, audit }
+  const rs = await getReportSettings(db)
+  const vars = applyEmailChartSetting(mergeVars(dealership, contact, sender, audit, { ...extra, history, reportUrl: audit ? auditReportUrl(audit._id.toString()) : '', onePerDay: rs.onePointPerDay }), rs)
+  return { vars, sender, audit }
+}
+/** "Over-time chart in emails" off → the chart leaves {{auditTrend}} and {{auditHistoryChart}} renders nothing. */
+export function applyEmailChartSetting(vars: Record<string, string>, rs: ReportSettings) {
+  if (rs.historyChartInEmail) return vars
+  return { ...vars, auditTrend: stripHistory(vars.auditTrend || ''), auditHistoryChart: '' }
 }
 
 export async function sendCrmEmail(db: Db, dealership: any, input: SendInput, actor: SessionActor | null) {
@@ -731,7 +739,8 @@ export async function templatePreviewContext(db: Db, input: any, actor: SessionA
     const mine = await getSenderProfile(db, actor)
     sender = { ...SAMPLE_SENDER, ...Object.fromEntries(Object.entries(mine).filter(([, v]) => v)) } as SenderProfile
     audit = SAMPLE_AUDIT
-    vars = mergeVars(SAMPLE_DEALERSHIP, SAMPLE_CONTACT, sender, SAMPLE_AUDIT, { replyTo, subject, history: SAMPLE_HISTORY, reportUrl: '#sample-report' })
+    const rs = await getReportSettings(db)
+    vars = applyEmailChartSetting(mergeVars(SAMPLE_DEALERSHIP, SAMPLE_CONTACT, sender, SAMPLE_AUDIT, { replyTo, subject, history: SAMPLE_HISTORY, reportUrl: '#sample-report', onePerDay: rs.onePointPerDay }), rs)
   }
   return {
     source, dealershipName, vars, rawFields: [...RAW_HTML_FIELDS],

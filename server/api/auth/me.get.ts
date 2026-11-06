@@ -1,5 +1,5 @@
-import { Buffer } from 'node:buffer'
 import { connectToDatabase } from '../../utils/mongodb'
+import { readSessionToken } from '../../utils/auth'
 import { ObjectId } from 'mongodb'
 
 export default defineEventHandler(async (event) => {
@@ -10,11 +10,9 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    const payloadText = Buffer.from(token, 'base64url').toString('utf-8')
-    const payload = JSON.parse(payloadText)
-
-    // Check if token is expired (7 days)
-    if (Date.now() - payload.iat > 7 * 24 * 60 * 60 * 1000) {
+    // Signed, unexpired cookie only (old unsigned cookies → sign in again).
+    const payload = readSessionToken(token)
+    if (!payload) {
       deleteCookie(event, 'turbo_session', { path: '/' })
       return { user: null }
     }
@@ -22,7 +20,7 @@ export default defineEventHandler(async (event) => {
     const { db } = await connectToDatabase()
     const dbUser = await db.collection('turboCleanAppUsers').findOne({ _id: new ObjectId(payload.userId) })
 
-    if (!dbUser) {
+    if (!dbUser || (dbUser.status && String(dbUser.status).toLowerCase() !== 'active')) {
       deleteCookie(event, 'turbo_session', { path: '/' })
       return { user: null }
     }

@@ -24,7 +24,7 @@ import { CRM_COLLECTIONS, str } from './crm'
 import { isServerless, openBrowser, SCANNER_VIEWPORT } from './scanner-cdp'
 import type { BrowserHandle, CdpConnection } from './scanner-cdp'
 import { ANALYZE_FN_JS, EXTRACT_JS, FIND_NEXT_JS, HOTSPOTS_JS, NAV_LINKS_JS, SCANNER_BOOTSTRAP_JS, SCROLL_STEP_JS } from './scanner-page'
-import { classify, downloadImage, finalVerdict, listRules, RULES_COLLECTION, summarize, VERDICT_LABEL } from './scanner-images'
+import { classify, countable, downloadImage, finalVerdict, listRules, RULES_COLLECTION, summarize, VERDICT_LABEL } from './scanner-images'
 import type { ImageCluster, ImageInfo, PhotoVerdict, ScanVehicle } from './scanner-images'
 
 export const SCANS_COLLECTION = 'turboCleanScannerScans'
@@ -430,7 +430,7 @@ export function resultsOf(doc: ScanDoc) {
   return {
     scanId: String(doc._id), summary, countStockAsMissing: doc.countStockAsMissing, advertised: advertisedTotal(doc), pages: doc.progress.pagesVisited,
     // Coverage: how much of what the site lists we could actually check (blocked pages are retried from their checkpoint).
-    coverage: { checked: doc.vehicles.length, advertised: advertisedTotal(doc), blocked: (doc.progress.blocked || []).map(b => ({ url: b.url, page: b.page })) },
+    coverage: { checked: countable(doc.vehicles).length, advertised: advertisedTotal(doc), blocked: (doc.progress.blocked || []).map(b => ({ url: b.url, page: b.page })) },
     vehicles: doc.vehicles.map(v => ({ ...v, listUrl: listKey(v, doc), final: finalVerdict(v, cmap) })), clusters: doc.clusters, images,
     // Results per crawl page (URL) — the review screen can filter by page.
     crawlPages: pageBreakdown(doc, null, cmap).map(p => ({ url: p.url, label: p.label, total: p.total, withoutReal: p.withoutReal, withoutRealPct: p.withoutRealPct })),
@@ -718,7 +718,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
           const v: ScanVehicle = {
             key, title: c.title || '', year: c.year ?? null, make: c.make || '', model: c.model || '', vin: c.vin || '', stock: c.stock || '', price: c.price || '',
             condition: (['new', 'used', 'certified'].includes(c.condition) ? c.condition : '') as any, url: c.url || '', image: c.image || null, imageId: null,
-            imageCount: c.imageCount || 0, photoCountText: c.photoCountText || '', noPhotoText: c.noPhotoText || '', page, sourceUrl: r.url, listUrl: startUrl,
+            imageCount: c.imageCount || 0, photoCountText: c.photoCountText || '', noPhotoText: c.noPhotoText || '', cardText: String(c.text || '').slice(0, 240), page, sourceUrl: r.url, listUrl: startUrl,
             verdict: 'review', suggested: 'real', confidence: 0, reasons: [], clusterId: null, override: null,
           }
           seen.set(key, v)
@@ -891,7 +891,8 @@ export function advertisedTotal(doc: ScanDoc): number | null {
 }
 function coverageText(doc: ScanDoc) {
   const adv = advertisedTotal(doc)
-  return adv && adv > doc.vehicles.length ? `checked ${doc.vehicles.length} of the ${adv} vehicles listed` : `checked ${doc.vehicles.length} vehicles`
+  const n = countable(doc.vehicles).length
+  return adv && adv > n ? `checked ${n} of the ${adv} vehicles listed` : `checked ${n} vehicles`
 }
 const stripImage = (i: ImageInfo): ImageInfo => { const { bytes, thumb, ...rest } = i as any; return rest }
 
@@ -953,7 +954,7 @@ async function analyzePhotos(t: Tab, doc: ScanDoc, o: { setProgress: (p: Partial
   // AI photo check (Gemini): every photo, cached by fingerprint — instant for pictures seen before.
   try {
     const { visionCheck } = await import('./scanner-vision')
-    await visionCheck(o.db || null, [...images.values()], { log: o.log, deadline: Math.min(o.deadline, Date.now() + 90_000), onProgress: (d, n) => o.setProgress({ message: `AI photo check… ${d} of ${n}` }) })
+    await visionCheck(o.db || null, [...images.values()], doc.vehicles, { log: o.log, deadline: Math.min(o.deadline, Date.now() + 90_000), onProgress: (d, n) => o.setProgress({ message: `AI photo check… ${d} of ${n}` }) })
   }
   catch (e: any) { o.log(`AI photo check skipped (${String(e?.message || e).slice(0, 100)})`) }
   for (const i of images.values()) delete (i as any).thumb
@@ -1001,6 +1002,17 @@ export async function applyReview(db: Db, id: string, body: any) {
       if (c && f) for (const id of c.imageIds) { const im = imgs.get(id); if (im) await teachVision(db, im, f) }
     }
   } catch {}
+  // "This is an ad" / "This is a vehicle" — a person's call, remembered for that picture on every future crawl.
+  if (Array.isArray(body?.listings)) {
+    const imgs = new Map(doc.images.map(i => [i.id, i]))
+    for (const x of body.listings) {
+      const v = doc.vehicles.find(v => v.key === String(x?.key))
+      if (!v) continue
+      v.listing = x?.ad === true ? 'ad' : x?.ad === false ? 'vehicle' : null
+      const im = v.imageId ? imgs.get(v.imageId) : null
+      if (im && v.listing) { try { const { teachVision } = await import('./scanner-vision'); await teachVision(db, im, null, v.listing === 'ad') } catch {} }
+    }
+  }
   if (typeof body?.countStockAsMissing === 'boolean') doc.countStockAsMissing = body.countStockAsMissing
   if (body?.reapplyRules) await reclassify(db, doc)
   // Any change after saving makes it a draft again until saved once more.
@@ -1040,7 +1052,7 @@ function pageKind(url: string, vs: ScanVehicle[]) {
 /** Per crawl page: how many vehicles and how many without a real photo — the report and emails group by this. */
 export function pageBreakdown(doc: ScanDoc, d: any, cmap: Map<string, any>) {
   const groups = new Map<string, ScanVehicle[]>()
-  for (const v of doc.vehicles) { const k = listKey(v, doc); groups.set(k, [...(groups.get(k) || []), v]) }
+  for (const v of countable(doc.vehicles)) { const k = listKey(v, doc); groups.set(k, [...(groups.get(k) || []), v]) }
   const saved = new Map<string, string>((Array.isArray(d?.scanPages) ? d.scanPages : []).map((p: any) => [String(p?.url || '').replace(/\/$/, ''), String(p?.label || '')]))
   const order = doc.urls?.length ? doc.urls : [doc.startUrl]
   return [...groups.entries()]
@@ -1061,7 +1073,7 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
   const d = await loadDealership(db, doc.dealershipId)
   const sum = summarize(doc.vehicles, doc.clusters, { countStockAsMissing: doc.countStockAsMissing })
   const cmap = new Map(doc.clusters.map(c => [c.id, c]))
-  const without = doc.vehicles.filter((v) => { const f = finalVerdict(v, cmap); return f === 'missing' || f === 'placeholder' || (doc.countStockAsMissing && f === 'stock') })
+  const without = countable(doc.vehicles).filter((v) => { const f = finalVerdict(v, cmap); return f === 'missing' || f === 'placeholder' || (doc.countStockAsMissing && f === 'stock') })
   const pages = doc.progress.pagesVisited
   const parts = [
     `Inventory Scanner: ${sum.total} vehicles on ${pages.length} page${pages.length === 1 ? '' : 's'}${doc.progress.advertised ? ` (site advertises ${doc.progress.advertised})` : ''}.`,

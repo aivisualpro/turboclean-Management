@@ -1,6 +1,6 @@
 import { getCrmDb } from '../../../../utils/crm'
 import { getUserSession } from '../../../../utils/auth'
-import { cachedPdf, getAuditReport, reportToken } from '../../../../utils/crm-reports'
+import { applyReportSettings, cachedPdf, getAuditReport, getReportSettings, reportToken } from '../../../../utils/crm-reports'
 
 /**
  * GET /api/crm/audits/:id/report?format=html|pdf&download=1[&t=token]
@@ -15,6 +15,8 @@ export default defineEventHandler(async (event) => {
   if (isPublic ? token !== reportToken(id) : !(await getUserSession(event))) throw createError({ statusCode: isPublic ? 404 : 401, statusMessage: isPublic ? 'Report not found' : 'Sign in first' })
   const db = await getCrmDb()
   const report: any = await getAuditReport(db, id)
+  // Team settings (e.g. the over-time chart switched off) apply to stored reports too.
+  report.html = applyReportSettings(report.html, await getReportSettings(db))
   const name = `${String(report.dealershipName || 'dealer').replace(/[^\w]+/g, '-')}_inventory-report_${String(report.auditedAt).slice(0, 10)}`
   setHeader(event, 'Cache-Control', 'private, no-store')
   setHeader(event, 'X-Robots-Tag', 'noindex')

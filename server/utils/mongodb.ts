@@ -9,7 +9,8 @@ declare global {
 }
 
 // Dedicated M10 cluster (AWS us-east-1, same region as Vercel's default iad1).
-const uri = process.env.MONGODB_URI || 'mongodb+srv://shamsturboclean_db_user:hbgsYPMDLe8p@cluster0.xoavnc.mongodb.net/'
+// The connection string lives ONLY in the environment (MONGODB_URI) — never in the code.
+const uri = process.env.MONGODB_URI || ''
 
 const options = {
   serverApi: {
@@ -34,6 +35,7 @@ function getClientPromise(): Promise<MongoClient> {
   // Use global cache in ALL environments to reuse connections
   // across Vercel warm invocations and dev HMR reloads
   if (!globalThis._mongoClientPromise) {
+    if (!uri) throw new Error('MONGODB_URI is not set — add it to .env (local) and to Vercel → Settings → Environment Variables')
     const client = new MongoClient(uri, options)
     globalThis._mongoClientPromise = client.connect().catch((err) => {
       // Reset the cache so the next request retries
