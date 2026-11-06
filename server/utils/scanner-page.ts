@@ -234,9 +234,10 @@ export const FIND_NEXT_JS = `(() => {
   function result(pick, kind) {
     var a = pick.tagName === 'A' ? pick : pick.closest('a') || pick.querySelector('a')
     var href = a ? a.getAttribute('href') : ''
-    if (a && usable(href ? a.href : '')) return { kind: 'href', href: a.href, label: kind }
-    var target = a || pick
     Array.prototype.slice.call(document.querySelectorAll('[data-zrz-next]')).forEach(function (e) { e.removeAttribute('data-zrz-next') })
+    // The link is marked too, so the crawler can click it like a visitor instead of jumping to the address.
+    if (a && usable(href ? a.href : '')) { a.setAttribute('data-zrz-next', '1'); return { kind: 'href', href: a.href, label: kind } }
+    var target = a || pick
     target.setAttribute('data-zrz-next', '1')
     target.scrollIntoView({ block: 'center' })
     var r = target.getBoundingClientRect()
@@ -244,7 +245,7 @@ export const FIND_NEXT_JS = `(() => {
   }
   var NEXT = /^(next|next page|go to next page|›|»|>|→|next ›|next »|next >|>>)$|\\bnext page\\b|^next\\b(?!.*(image|photo|slide|picture|item))/
   var rel = document.querySelector('a[rel~="next"]')
-  if (rel && shown(rel) && !disabled(rel) && usable(rel.href)) return { kind: 'href', href: rel.href, label: 'Next page' }
+  if (rel && shown(rel) && !disabled(rel) && usable(rel.href)) { Array.prototype.slice.call(document.querySelectorAll('[data-zrz-next]')).forEach(function (e) { e.removeAttribute('data-zrz-next') }); rel.setAttribute('data-zrz-next', '1'); return { kind: 'href', href: rel.href, label: 'Next page' } }
   // The site's own pagination control
   var pagers = Array.prototype.slice.call(document.querySelectorAll('[class*="paginat" i], [class*="pager" i], nav[aria-label*="pag" i], [aria-label*="pagination" i], [role="navigation"]')).filter(function (p) { return shown(p) && !inCarousel(p) })
   for (var i = 0; i < pagers.length; i++) {
@@ -434,9 +435,22 @@ export const ANALYZE_FN_JS = `async (items) => {
       }
       var hash = ''
       for (var h = 0; h < 64; h += 4) hash += parseInt(bits.slice(h, h + 4), 2).toString(16)
+      // Detail hash (17x16 dHash = 256 bits) of the centre of the picture — skips dealer banners /
+      // frames along the edges, so two different cars in the same frame do not look like one photo.
+      var cx = Math.round(bmp.width * 0.08), cy = Math.round(bmp.height * 0.16), cw = Math.max(1, Math.round(bmp.width * 0.84)), ch = Math.max(1, Math.round(bmp.height * 0.68))
+      var dc = new OffscreenCanvas(17, 16); var dx = dc.getContext('2d', { willReadFrequently: true })
+      dx.drawImage(bmp, cx, cy, cw, ch, 0, 0, 17, 16)
+      var dd = dx.getImageData(0, 0, 17, 16).data, bits2 = ''
+      for (var r2 = 0; r2 < 16; r2++) for (var c2 = 0; c2 < 16; c2++) {
+        var b1 = (r2 * 17 + c2) * 4, b2 = (r2 * 17 + c2 + 1) * 4
+        var m1 = dd[b1] * 0.299 + dd[b1 + 1] * 0.587 + dd[b1 + 2] * 0.114, m2 = dd[b2] * 0.299 + dd[b2 + 1] * 0.587 + dd[b2 + 2] * 0.114
+        bits2 += m1 > m2 ? '1' : '0'
+      }
+      var hash2 = ''
+      for (var h2 = 0; h2 < 256; h2 += 4) hash2 += parseInt(bits2.slice(h2, h2 + 4), 2).toString(16)
       var text = ''
       if (detector) { try { var found = await detector.detect(bmp); text = found.map(function (f) { return f.rawValue }).join(' ').slice(0, 300) } catch (e) {} }
-      out.push({ id: it.id, ok: true, w: bmp.width, h: bmp.height, hash: hash, whiteRatio: white / (W * H), grayRatio: gray / (W * H), colorfulness: Math.round(colorfulness * 10) / 10, edgeDensity: edges / ((W - 2) * (H - 2)), borderWhite: border ? borderWhite / border : 0, uniqueColors: Object.keys(q).length, text: text, ocr: !!detector })
+      out.push({ id: it.id, ok: true, w: bmp.width, h: bmp.height, hash: hash, hash2: hash2, whiteRatio: white / (W * H), grayRatio: gray / (W * H), colorfulness: Math.round(colorfulness * 10) / 10, edgeDensity: edges / ((W - 2) * (H - 2)), borderWhite: border ? borderWhite / border : 0, uniqueColors: Object.keys(q).length, text: text, ocr: !!detector })
       bmp.close && bmp.close()
     } catch (e) { out.push({ id: it.id, ok: false, error: String(e && e.message || e) }) }
   }

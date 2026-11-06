@@ -39,8 +39,8 @@ export interface ScannedVehicle {
   clusterId: string | null
   override: FinalVerdict | null
 }
-export interface ScannedImage { id: string, url: string, ok: boolean, error: string | null, w: number | null, h: number | null, hash: string | null, text: string, ocr: boolean }
-export interface ImageGroup { id: string, imageIds: string[], hash: string, vehicles: number, models: number, modelNames: string[], thumb: string, url: string, verdict: PhotoVerdict, reason: string, override: FinalVerdict | null }
+export interface ScannedImage { id: string, url: string, ok: boolean, error: string | null, w: number | null, h: number | null, hash: string | null, hash2?: string | null, text: string, ocr: boolean }
+export interface ImageGroup { id: string, imageIds: string[], hash: string, hash2?: string, vehicles: number, models: number, modelNames: string[], thumb: string, url: string, verdict: PhotoVerdict, reason: string, override: FinalVerdict | null }
 export interface ScanResults {
   scanId: string
   summary: { total: number, by: Record<FinalVerdict, number>, withoutReal: number, withoutRealPct: number | null, review: number, counts: { newTotal: number, usedTotal: number, newMissingPhotos: number, usedMissingPhotos: number }, newPct: number | null, usedPct: number | null }
@@ -286,7 +286,7 @@ export function useInventoryScanner() {
     return r
   }
   const listRules = () => $fetch<{ rules: ImageRule[] }>('/api/scanner/rules')
-  const addRule = (body: { hash?: string, urlContains?: string, verdict: FinalVerdict, label?: string, thumb?: string }) => $fetch<{ rule: ImageRule }>('/api/scanner/rules', { method: 'POST', body })
+  const addRule = (body: { hash?: string, hash2?: string, urlContains?: string, verdict: FinalVerdict, label?: string, thumb?: string }) => $fetch<{ rule: ImageRule }>('/api/scanner/rules', { method: 'POST', body })
   const removeRule = (id: string) => $fetch(`/api/scanner/rules/${id}`, { method: 'DELETE' })
 
   function reset() {

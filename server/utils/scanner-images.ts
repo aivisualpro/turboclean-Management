@@ -34,6 +34,8 @@ export interface ImageInfo {
   w?: number
   h?: number
   hash?: string
+  /** 256-bit detail hash of the picture's centre (edges / dealer banners ignored). */
+  hash2?: string
   whiteRatio?: number
   grayRatio?: number
   colorfulness?: number
@@ -71,7 +73,7 @@ export interface ScanVehicle {
   clusterId: string | null
   override: Exclude<PhotoVerdict, 'review'> | null
 }
-export interface ImageCluster { id: string, imageIds: string[], hash: string, vehicles: number, models: number, modelNames: string[], thumb: string, url: string, verdict: PhotoVerdict, reason: string, override: Exclude<PhotoVerdict, 'review'> | null }
+export interface ImageCluster { id: string, imageIds: string[], hash: string, hash2?: string, vehicles: number, models: number, modelNames: string[], thumb: string, url: string, verdict: PhotoVerdict, reason: string, override: Exclude<PhotoVerdict, 'review'> | null }
 
 export const RULES_COLLECTION = 'turboCleanScannerImageRules'
 
@@ -113,21 +115,35 @@ export function hamming(a?: string, b?: string) {
 }
 /** Same picture even if resized/re-encoded. */
 export const SAME_IMAGE_DISTANCE = 5
+/** Detail-hash distance (of 256 bits) below which two pictures are the same photo. Different cars in the same frame are ~80–130 apart. */
+export const SAME_DETAIL_DISTANCE = 40
+/**
+ * Same picture? The coarse 64-bit hash must match AND — when both images have one — the 256-bit
+ * detail hash of the centre too. The coarse hash alone confuses different cars shot in the same
+ * spot with the same dealer banner (e.g. HomeNet frames), which made real photos look like placeholders.
+ */
+export function samePicture(a: { hash?: string, hash2?: string } | undefined, b: { hash?: string, hash2?: string } | undefined) {
+  if (!a?.hash || !b?.hash) return false
+  if (hamming(a.hash, b.hash) > SAME_IMAGE_DISTANCE) return false
+  if (a.hash2 && b.hash2 && a.hash2.length === b.hash2.length) return hamming(a.hash2, b.hash2) <= SAME_DETAIL_DISTANCE
+  return true
+}
 
-export interface ImageRule { id: string, hash: string, urlContains: string, verdict: Exclude<PhotoVerdict, 'review'>, label: string, thumb: string, hits: number, createdAt: string, createdBy: { id: string, name: string } | null }
+export interface ImageRule { id: string, hash: string, hash2?: string, urlContains: string, verdict: Exclude<PhotoVerdict, 'review'>, label: string, thumb: string, hits: number, createdAt: string, createdBy: { id: string, name: string } | null }
 export async function listRules(db: Db): Promise<ImageRule[]> {
   const rows = await db.collection(RULES_COLLECTION).find({}).sort({ createdAt: -1 }).limit(500).toArray()
   return rows.map(({ _id, ...r }) => ({ id: _id.toString(), ...r } as any))
 }
-export async function saveRule(db: Db, body: { hash?: string, urlContains?: string, verdict: string, label?: string, thumb?: string }, actor: SessionActor | null) {
+export async function saveRule(db: Db, body: { hash?: string, hash2?: string, urlContains?: string, verdict: string, label?: string, thumb?: string }, actor: SessionActor | null) {
   const verdict = (['real', 'placeholder', 'stock', 'missing'].includes(body.verdict) ? body.verdict : null) as ImageRule['verdict'] | null
   if (!verdict) throw createError({ statusCode: 400, statusMessage: 'Pick what this image is' })
   const hash = /^[0-9a-f]{16}$/i.test(String(body.hash || '')) ? String(body.hash).toLowerCase() : ''
+  const hash2 = hash && /^[0-9a-f]{64}$/i.test(String(body.hash2 || '')) ? String(body.hash2).toLowerCase() : ''
   const urlContains = String(body.urlContains || '').trim().slice(0, 200)
   if (!hash && !urlContains) throw createError({ statusCode: 400, statusMessage: 'A rule needs an image or a piece of the image address' })
   const col = db.collection(RULES_COLLECTION)
-  const existing = hash ? await col.findOne({ hash }) : await col.findOne({ urlContains })
-  const doc = { hash, urlContains, verdict, label: String(body.label || '').slice(0, 120) || (verdict === 'real' ? 'Real photo' : verdict === 'stock' ? 'Stock image' : 'Placeholder image'), thumb: /^https?:\/\//i.test(String(body.thumb || '')) ? String(body.thumb).slice(0, 2000) : '', updatedAt: new Date().toISOString() }
+  const existing = hash ? await col.findOne(hash2 ? { hash, hash2 } : { hash, hash2: { $in: ['', null] } }) : await col.findOne({ urlContains })
+  const doc = { hash, hash2, urlContains, verdict, label: String(body.label || '').slice(0, 120) || (verdict === 'real' ? 'Real photo' : verdict === 'stock' ? 'Stock image' : 'Placeholder image'), thumb: /^https?:\/\//i.test(String(body.thumb || '')) ? String(body.thumb).slice(0, 2000) : '', updatedAt: new Date().toISOString() }
   if (existing) { await col.updateOne({ _id: existing._id }, { $set: doc }); return { id: existing._id.toString(), ...existing, ...doc } }
   const res = await col.insertOne({ ...doc, hits: 0, createdAt: doc.updatedAt, createdBy: actor ? { id: actor.id, name: actor.name } : null })
   return { id: res.insertedId.toString(), ...doc, hits: 0 }
@@ -156,7 +172,7 @@ export function buildClusters(vehicles: ScanVehicle[], images: Map<string, Image
   for (let i = 0; i < hashed.length; i++) {
     for (let j = i + 1; j < hashed.length; j++) {
       const a = images.get(hashed[i]!)!, b = images.get(hashed[j]!)!
-      if (hamming(a.hash, b.hash) <= SAME_IMAGE_DISTANCE) parent.set(find(hashed[i]!), find(hashed[j]!))
+      if (samePicture(a, b)) parent.set(find(hashed[i]!), find(hashed[j]!))
     }
   }
   const groups = new Map<string, string[]>()
@@ -168,7 +184,7 @@ export function buildClusters(vehicles: ScanVehicle[], images: Map<string, Image
     if (vs.length < 2) continue
     const models = [...new Set(vs.map(modelKey).filter(Boolean))]
     const first = images.get(imgIds[0]!)!
-    clusters.push({ id: `c${++n}`, imageIds: imgIds, hash: first.hash || '', vehicles: vs.length, models: models.length, modelNames: [...new Set(vs.map(v => `${v.make} ${v.model}`.trim() || modelKey(v)))].slice(0, 6), thumb: first.url, url: first.url, verdict: 'review', reason: '', override: null })
+    clusters.push({ id: `c${++n}`, imageIds: imgIds, hash: first.hash || '', hash2: first.hash2 || '', vehicles: vs.length, models: models.length, modelNames: [...new Set(vs.map(v => `${v.make} ${v.model}`.trim() || modelKey(v)))].slice(0, 6), thumb: first.url, url: first.url, verdict: 'review', reason: '', override: null })
   }
   return clusters.sort((a, b) => b.vehicles - a.vehicles)
 }
@@ -197,7 +213,7 @@ export function classify(vehicles: ScanVehicle[], images: Map<string, ImageInfo>
     if (img.complete && img.kind === 'img' && img.nw === 0 && info && !info.ok) { decide('missing', 0.97, [`The photo link is broken (${info.error || 'did not load'})`]); continue }
 
     // Your rules win.
-    const rule = rules.find(r => (r.hash && info?.hash && hamming(r.hash, info.hash) <= SAME_IMAGE_DISTANCE) || (r.urlContains && img.url.toLowerCase().includes(r.urlContains.toLowerCase())))
+    const rule = rules.find(r => (r.hash && info?.hash && samePicture(r, info)) || (r.urlContains && img.url.toLowerCase().includes(r.urlContains.toLowerCase())))
     if (rule) { ruleHits.set(rule.id, (ruleHits.get(rule.id) || 0) + 1); decide(rule.verdict as any, 1, [`Matches your saved rule “${rule.label}”`]); continue }
 
     const file = decodeURIComponent(img.url.split('?')[0]!.split('/').slice(-3).join('/'))

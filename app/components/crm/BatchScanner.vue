@@ -406,6 +406,7 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
                     </div>
                     <div v-if="i.status === 'running'" class="mt-1.5 h-1 rounded-full bg-white/10 overflow-hidden"><div class="h-full bg-gradient-to-r from-emerald-500 to-emerald-300 transition-all duration-500" :style="{ width: `${itemPct(i)}%` }" /></div>
                     <p v-else-if="i.summary" class="mt-0.5 text-[11px] text-zinc-500 font-mono">{{ i.summary.total }} vehicles · {{ i.summary.withoutReal }} without photo{{ i.email ? ` · ${i.email.status}` : '' }}</p>
+                    <p v-if="i.summary && i.error && i.status === 'stopped'" class="mt-0.5 text-[11px] leading-snug text-amber-300/90 line-clamp-2" :title="i.error">{{ i.error }}</p>
                     <p v-else-if="i.error" class="mt-0.5 text-[11px] text-rose-400/80 truncate">{{ i.error }}</p>
                     <p v-else class="mt-0.5 text-[11px] text-zinc-600 font-mono">{{ i.urls.length }} page{{ i.urls.length === 1 ? '' : 's' }}</p>
                   </button>

@@ -78,6 +78,9 @@ export function buildAuditDoc(body: any, dealershipId: string, actor: any) {
       })).filter((p: any) => p.url).slice(0, 30)
     : []
 
+  // Coverage: how many of the vehicles the site lists were actually checked (the rest sat behind blocked pages).
+  const cv = body.coverage && typeof body.coverage === 'object' ? body.coverage : null
+  const coverage = cv ? { checked: int(cv.checked) ?? 0, advertised: int(cv.advertised) ?? null, blockedPages: int(cv.blockedPages) ?? 0 } : null
   const source: AuditSource = AUDIT_SOURCES.includes(body.source) ? body.source : 'manual'
   const counts = { newTotal, usedTotal, newMissingPhotos, usedMissingPhotos }
   return {
@@ -97,6 +100,7 @@ export function buildAuditDoc(body: any, dealershipId: string, actor: any) {
     examples,
     photoBreakdown,
     pages,
+    coverage,
     // Evidence screenshot of the dealership's inventory page (turboCleanCrmFiles) — used by email templates as {{auditScreenshot}}.
     screenshotFileId: /^[a-f0-9]{24}$/i.test(String(body.screenshotFileId || '')) ? String(body.screenshotFileId) : null,
     // Provenance — ready for automated collectors to fill in.

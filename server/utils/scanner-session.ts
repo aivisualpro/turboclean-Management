@@ -43,7 +43,11 @@ function budgetMs() {
 export type ScanPhase = 'collecting' | 'analyzing' | 'done' | 'stopped' | 'error'
 export interface ScanProgress { phase: ScanPhase, page: number, vehicles: number, advertised: number | null, analyzed: number, toAnalyze: number, message: string, startedAt: string, finishedAt: string | null, pagesVisited: string[]
   /** Checkpoints — a resumed scan skips finished inventory pages and re-opens the exact result page it was on. */
-  doneUrls?: string[], resumeAt?: { url: string, href: string, page: number, clicks?: number } | null, memMb?: number, restarts?: number }
+  doneUrls?: string[], resumeAt?: { url: string, href: string, page: number, clicks?: number } | null, memMb?: number, restarts?: number
+  /** What each inventory list says it has ("42 vehicles") — coverage = collected vs these. */
+  advertisedByUrl?: Record<string, number>
+  /** Result pages the dealer's site refused (bot protection) — retried later from this exact page. */
+  blocked?: { url: string, href: string, page: number, at: string }[] }
 export type ScanStatus = 'running' | 'done' | 'stopped' | 'failed' | 'saved' | 'interrupted'
 
 const g = globalThis as any
@@ -133,12 +137,18 @@ export async function openTab(): Promise<Tab> {
     const t: Tab = { browser, conn, sid, targetId, loading: false, url: '', status: null, mainFrameId: '' }
     const version = await conn.send('Browser.getVersion')
     const ua = String(version.userAgent || '').replace(/HeadlessChrome/g, 'Chrome')
+    // Client hints must tell the same story as the user agent (Windows desktop Chrome) — bot managers
+    // (Akamai, Cloudflare) block visitors whose Sec-CH-UA-Platform says "Linux" but whose UA says Windows.
+    const full = ua.match(/Chrome\/([\d.]+)/)?.[1] || '130.0.0.0'
+    const major = full.split('.')[0]!
+    const brands = [{ brand: 'Chromium', version: major }, { brand: 'Google Chrome', version: major }, { brand: 'Not?A_Brand', version: '99' }]
+    const userAgentMetadata = { brands, fullVersionList: brands.map(b => ({ brand: b.brand, version: b.brand === 'Not?A_Brand' ? '99.0.0.0' : full })), fullVersion: full, platform: 'Windows', platformVersion: '15.0.0', architecture: 'x86', model: '', mobile: false, bitness: '64', wow64: false }
     await Promise.all([
       conn.send('Page.enable', {}, sid),
       conn.send('Runtime.enable', {}, sid),
       conn.send('Network.enable', {}, sid),
       // Present as a normal desktop Chrome on Windows — the most common dealer-site visitor.
-      conn.send('Network.setUserAgentOverride', { userAgent: ua.replace(/\(X11; Linux x86_64\)/, '(Windows NT 10.0; Win64; x64)'), acceptLanguage: 'en-US,en;q=0.9', platform: 'Windows' }, sid),
+      conn.send('Network.setUserAgentOverride', { userAgent: ua.replace(/\(X11; Linux x86_64\)/, '(Windows NT 10.0; Win64; x64)'), acceptLanguage: 'en-US,en;q=0.9', platform: 'Win32', userAgentMetadata }, sid),
       conn.send('Emulation.setDeviceMetricsOverride', { width: SCANNER_VIEWPORT.width, height: SCANNER_VIEWPORT.height, deviceScaleFactor: 1, mobile: false }, sid),
       conn.send('Page.addScriptToEvaluateOnNewDocument', { source: SCANNER_BOOTSTRAP_JS }, sid),
       // Skip what a crawler never needs (videos, fonts, chat widgets, trackers, ads): dealer sites load
@@ -184,12 +194,12 @@ async function waitForSettle(t: Tab, ms = 15_000) {
 
 /** Sites that say "too many requests" (429) or "busy" (503) get a polite pause and up to two retries. */
 const RATE_LIMIT_WAITS = [4000, 9000]
-export async function goto(t: Tab, url: string, timeoutMs = 25_000, log?: (s: string) => void) {
+export async function goto(t: Tab, url: string, timeoutMs = 25_000, log?: (s: string) => void, referrer?: string) {
   for (let attempt = 0; ; attempt++) {
     t.loading = true
     t.status = null
     let r: any
-    try { r = await t.conn.send('Page.navigate', { url }, t.sid, timeoutMs) }
+    try { r = await t.conn.send('Page.navigate', referrer ? { url, referrer } : { url }, t.sid, timeoutMs) }
     catch (e: any) {
       // Some dealer sites take ages to answer (bot checks, slow CDNs). Give the page one more
       // stretch; if anything rendered we carry on, otherwise it's a clear "did not respond".
@@ -216,6 +226,70 @@ export async function goto(t: Tab, url: string, timeoutMs = 25_000, log?: (s: st
     log?.(`The website answered HTTP ${t.status} (too many requests) — waiting ${Math.round(wait / 1000)} s and trying again`)
     await sleep(wait)
   }
+}
+
+/** A real (trusted) mouse click on the element marked [data-zrz-next] — what a visitor's click looks like. */
+async function trustedClick(t: Tab) {
+  const box = await evaluate<{ x: number, y: number } | null>(t, `(() => { const el = document.querySelector('[data-zrz-next]'); if (!el) return null; el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); if (r.width < 2 || r.height < 2) return null; return { x: r.left + r.width / 2, y: r.top + r.height / 2 } })()`, 5_000).catch(() => null)
+  if (!box) return false
+  await sleep(250 + Math.round(Math.random() * 450))
+  await t.conn.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x - 30, y: box.y - 12 }, t.sid).catch(() => {})
+  await sleep(80 + Math.round(Math.random() * 120))
+  await t.conn.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y }, t.sid).catch(() => {})
+  await t.conn.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: box.x, y: box.y, button: 'left', clickCount: 1 }, t.sid)
+  await sleep(60 + Math.round(Math.random() * 80))
+  await t.conn.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: box.x, y: box.y, button: 'left', clickCount: 1 }, t.sid)
+  return true
+}
+/** Did the site answer with a bot-protection block ("Access Denied", HTTP 403, a challenge page)? */
+async function isBlockedPage(t: Tab) {
+  if (t.status === 403 || t.status === 401) return true
+  const r = await evaluate<{ title: string, text: string }>(t, '({ title: document.title || "", text: (document.body ? document.body.innerText : "").slice(0, 400) })', 5_000).catch(() => null)
+  if (!r) return false
+  return /^access denied$|attention required|just a moment|request blocked|pardon our interruption|are you a robot|verify you are human/i.test(r.title.trim()) || (/access denied/i.test(r.text) && /reference #|you don.t have permission/i.test(r.text))
+}
+/** Wait for a navigation the page itself started (link click / location change) to finish. */
+async function settleAfterInPageNav(t: Tab, urlBefore: string) {
+  for (let i = 0; i < 20 && t.url === urlBefore && !t.loading; i++) await sleep(150)
+  await sleep(600)
+  await waitForSettle(t, 25_000)
+}
+
+/**
+ * Open the next result page the way a visitor would, and get past bot protection when it blocks us.
+ * 1. a real click on the link (same-site referrer, trusted event) — or the page's own navigation
+ * 2. blocked → pause, re-open the last good page (lets the site's bot check run), slow scroll, try again
+ * 3. still blocked → fresh session (cookies cleared), via the home page, then the result page
+ * Returns false when the site keeps refusing — the caller keeps a checkpoint so a later retry continues here.
+ */
+async function followNextLink(t: Tab, href: string, lastGood: string, log: (s: string) => void) {
+  const attempt = async (how: 'click' | 'assign') => {
+    const before = t.url
+    t.status = null
+    const clicked = how === 'click' ? await trustedClick(t) : false
+    if (!clicked) await evaluate(t, `location.assign(${JSON.stringify(href)})`, 5_000).catch(() => {})
+    await settleAfterInPageNav(t, before)
+    return !(await isBlockedPage(t))
+  }
+  if (await attempt('click')) return true
+  log('The dealer\'s site blocked that page (bot protection) — pausing, then trying again like a visitor')
+  await sleep(8_000 + Math.round(Math.random() * 4_000))
+  try { await goto(t, lastGood, 25_000, log, new URL(lastGood).origin + '/') } catch {}
+  await evaluate(t, SCROLL_STEP_JS).catch(() => {}); await sleep(1_500); await evaluate(t, SCROLL_STEP_JS).catch(() => {}); await sleep(3_000)
+  if (!(await isBlockedPage(t)) && await attempt('assign')) { log('Got through on the second try'); return true }
+  log('Still blocked — starting a fresh session through the home page')
+  await t.conn.send('Network.clearBrowserCookies', {}, t.sid).catch(() => {})
+  await sleep(5_000)
+  try {
+    const origin = new URL(lastGood).origin
+    await goto(t, `${origin}/`, 25_000, log, 'https://www.google.com/')
+    await evaluate(t, SCROLL_STEP_JS).catch(() => {}); await sleep(4_000)
+    await evaluate(t, `location.assign(${JSON.stringify(lastGood)})`, 5_000).catch(() => {})
+    await settleAfterInPageNav(t, `${origin}/`)
+    await sleep(3_000)
+    if (!(await isBlockedPage(t)) && await attempt('assign')) { log('Got through with a fresh session'); return true }
+  } catch {}
+  return false
 }
 
 // ───────────────────────── Preview ─────────────────────────
@@ -319,11 +393,13 @@ export function resultsOf(doc: ScanDoc) {
   const images: Record<string, any> = {}
   for (const i of doc.images) {
     if (!used.has(i.id)) continue
-    images[i.id] = { id: i.id, url: i.url, ok: i.ok, error: i.error || null, w: i.w || null, h: i.h || null, hash: i.hash || null, text: i.text || '', ocr: !!i.ocr }
+    images[i.id] = { id: i.id, url: i.url, ok: i.ok, error: i.error || null, w: i.w || null, h: i.h || null, hash: i.hash || null, hash2: i.hash2 || null, text: i.text || '', ocr: !!i.ocr }
   }
   const cmap = new Map(doc.clusters.map(c => [c.id, c]))
   return {
-    scanId: String(doc._id), summary, countStockAsMissing: doc.countStockAsMissing, advertised: doc.progress.advertised, pages: doc.progress.pagesVisited,
+    scanId: String(doc._id), summary, countStockAsMissing: doc.countStockAsMissing, advertised: advertisedTotal(doc), pages: doc.progress.pagesVisited,
+    // Coverage: how much of what the site lists we could actually check (blocked pages are retried from their checkpoint).
+    coverage: { checked: doc.vehicles.length, advertised: advertisedTotal(doc), blocked: (doc.progress.blocked || []).map(b => ({ url: b.url, page: b.page })) },
     vehicles: doc.vehicles.map(v => ({ ...v, listUrl: listKey(v, doc), final: finalVerdict(v, cmap) })), clusters: doc.clusters, images,
     // Results per crawl page (URL) — the review screen can filter by page.
     crawlPages: pageBreakdown(doc, null, cmap).map(p => ({ url: p.url, label: p.label, total: p.total, withoutReal: p.withoutReal, withoutRealPct: p.withoutRealPct })),
@@ -425,7 +501,7 @@ export async function createScan(db: Db, body: any, actor: SessionActor) {
   const base = body?.appendTo ? await getScan(db, str(body.appendTo, 40)) : null
   if (base && base.dealershipId !== dealershipId) throw createError({ statusCode: 400, statusMessage: 'That scan belongs to another dealership' })
   const now = new Date().toISOString()
-  const progress: ScanProgress = { phase: 'collecting', page: 0, vehicles: base?.vehicles.length || 0, advertised: base?.progress.advertised ?? null, analyzed: 0, toAnalyze: 0, message: 'Opening the website…', startedAt: now, finishedAt: null, pagesVisited: base ? [...base.progress.pagesVisited] : [], doneUrls: base ? [...(base.progress.doneUrls || [])] : [], resumeAt: base?.progress.resumeAt || null }
+  const progress: ScanProgress = { phase: 'collecting', page: 0, vehicles: base?.vehicles.length || 0, advertised: base?.progress.advertised ?? null, analyzed: 0, toAnalyze: 0, message: 'Opening the website…', startedAt: now, finishedAt: null, pagesVisited: base ? [...base.progress.pagesVisited] : [], doneUrls: base ? [...(base.progress.doneUrls || [])] : [], resumeAt: base?.progress.resumeAt || null, advertisedByUrl: { ...(base?.progress.advertisedByUrl || {}) }, blocked: [...(base?.progress.blocked || [])] }
   const doc: ScanDoc = {
     scannerVersion: ENGINE_VERSION, dealershipId, dealershipName: d.name || '', status: 'running', stopRequested: false, startUrl: url, urls, allPages: body?.allPages !== false,
     batchId: str(body?.batchId, 40) || null, autoSave: !!body?.autoSave,
@@ -434,9 +510,10 @@ export async function createScan(db: Db, body: any, actor: SessionActor) {
   }
   if (base) {
     // Continue the same scan record so one audit covers both lists.
-    await col.updateOne({ _id: base._id }, { $set: { status: 'running', stopRequested: false, startUrl: url, urls, progress, heartbeatAt: now, auditId: null, revisesAuditId: null, error: null, batchId: doc.batchId, autoSave: doc.autoSave } })
+    await col.updateOne({ _id: base._id }, { $set: { status: 'running', stopRequested: false, startUrl: url, urls, progress, heartbeatAt: now, auditId: null, revisesAuditId: base.auditId || base.revisesAuditId || null, error: null, batchId: doc.batchId, autoSave: doc.autoSave } })
     doc._id = base._id
     doc.log = base.log || []
+    doc.revisesAuditId = base.auditId || base.revisesAuditId || null
   }
   else {
     const r = await col.insertOne(doc as any)
@@ -549,8 +626,30 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     log(urls.length > 1 ? `Inventory page ${u + 1} of ${urls.length}: ${startUrl.replace(/^https?:\/\/[^/]+/, '') || '/'}` : `Opening ${startUrl.replace(/^https?:\/\//, '')}`)
     setProgress({ message: 'Loading the inventory page…' })
     if (resumeAt) { log(`Continuing from result page ${resumeAt.page} where the last run stopped`); pageNo = resumeAt.page - 1 }
+    let openBlocked = false
     try {
-      await goto(tab, resumeAt?.href || startUrl, 25_000, log)
+      const target = resumeAt?.href || startUrl
+      const wasBlocked = (doc.progress.blocked || []).some(b => b.url === startUrl)
+      if (wasBlocked && target !== startUrl) {
+        // This result page was refused last time: arrive the way a visitor does — list first, then the page.
+        log('This page was blocked last time — going through the list page first')
+        await goto(tab, startUrl, 25_000, log, `${new URL(startUrl).origin}/`)
+        if (!(await followNextLink(tab, target, startUrl, log))) openBlocked = true
+      }
+      else {
+        try { await goto(tab, target, 25_000, log, `${new URL(target).origin}/`) }
+        catch (e: any) {
+          if (e?.statusCode !== 403) throw e
+          // Refused straight away: fresh session through the home page, then this page.
+          if (!(await followNextLink(tab, target, `${new URL(target).origin}/`, log))) openBlocked = true
+        }
+      }
+      if (openBlocked) {
+        doc.progress.blocked = [...(doc.progress.blocked || []).filter(b => b.url !== startUrl), { url: startUrl, href: target, page: resumeAt?.page || 1, at: new Date().toISOString() }]
+        log(`The site refused ${target.replace(/^https?:\/\/[^/]+/, '') || '/'} — kept as a checkpoint for a retry`)
+        await persist(true)
+        continue
+      }
       // Click-paginated lists (no page address): fast-forward to the saved result page without re-reading the ones before it.
       if (resumeAt?.clicks) {
         log(`Fast-forwarding ${resumeAt.clicks} result page${resumeAt.clicks === 1 ? '' : 's'} to the checkpoint`)
@@ -565,6 +664,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     catch (e: any) { if (isBrowserGone(e)) throw e; if (urls.length > 1) { log(`Skipped: ${e?.message || e}`); continue } throw e }
     let ckBase = resumeAt?.href || startUrl
     let ckClicks = resumeAt?.clicks || 0
+    let blockedHere: { url: string, href: string, page: number, at: string } | null = null
     for (let p = 1; p <= MAX_PAGES && !stop; p++) {
       const page = ++pageNo
       setProgress({ page, message: page === 1 ? 'Loading every vehicle on this page…' : `Page ${page}: loading vehicles…` })
@@ -576,7 +676,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
         if (!r) return
         res = r
         pageCards = Math.max(pageCards, r.cards?.length || 0)
-        if (r.total) advertised = Math.max(advertised || 0, r.total)
+        if (r.total) { advertised = Math.max(advertised || 0, r.total); (doc.progress.advertisedByUrl ||= {})[startUrl] = advertised }
         for (const c of r.cards || []) {
           const key = vehicleKey(c)
           const had = seen.get(key)
@@ -630,16 +730,19 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       if (next.kind === 'href') {
         log(`${next.label} → ${String(next.href).replace(/^https?:\/\/[^/]+/, '')}`)
         // Checkpoint: a restart re-opens this exact result page instead of page 1.
+        const lastGood = tab.url || ckBase
         ckBase = String(next.href); ckClicks = 0
         doc.progress.resumeAt = { url: startUrl, href: ckBase, page: page + 1, clicks: 0 }
         await persist(true)
-        await goto(tab, next.href, 25_000, log).catch((e: any) => log(`Could not open the next page (${e?.message})`))
+        const through = await followNextLink(tab, String(next.href), lastGood, log).catch((e: any) => { if (isBrowserGone(e)) throw e; log(`Could not open the next page (${e?.message})`); return false })
+        if (!through) { blockedHere = { url: startUrl, href: ckBase, page: page + 1, at: new Date().toISOString() }; break }
       }
       else {
         log(`Clicking “${next.label}”`)
         await sleep(400)
         const urlBefore = tab.url
-        await evaluate(tab, `(() => { const el = document.querySelector('[data-zrz-next]'); if (el) el.click(); return !!el })()`)
+        // A real click first (trusted event); the element's own click() if that is not possible.
+        if (!(await trustedClick(tab))) await evaluate(tab, `(() => { const el = document.querySelector('[data-zrz-next]'); if (el) el.click(); return !!el })()`)
         await sleep(1500)
         await waitForSettle(tab, 15_000)
         // Checkpoint: if the click changed the address use it; otherwise remember how many clicks from the last address.
@@ -652,7 +755,13 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     }
     // Each inventory page advertises its own total; the next one starts fresh.
     advertised = null
-    if (!stop) { doc.progress.doneUrls.push(startUrl); doc.progress.resumeAt = null; await persist(true) }
+    if (blockedHere) {
+      // Keep the checkpoint: a retry (autopilot does it automatically) continues from this exact result page.
+      doc.progress.blocked = [...(doc.progress.blocked || []).filter(b => b.url !== startUrl), blockedHere]
+      log(`The site kept refusing result page ${blockedHere.page} — kept what was collected; a retry continues from page ${blockedHere.page}`)
+      await persist(true)
+    }
+    else if (!stop) { doc.progress.doneUrls.push(startUrl); doc.progress.resumeAt = null; doc.progress.blocked = (doc.progress.blocked || []).filter(b => b.url !== startUrl); await persist(true) }
     }
     catch (e: any) {
       // Same inventory page again on a fresh browser (already-collected vehicles are de-duplicated).
@@ -680,10 +789,12 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     await reclassify(db, doc, log)
 
     const sum = summarize(doc.vehicles, doc.clusters, { countStockAsMissing: doc.countStockAsMissing })
-    doc.status = stop ? 'stopped' : 'done'
-    Object.assign(doc.progress, { phase: doc.status, message: `${stop ? 'Stopped early — ' : ''}${sum.total} vehicles · ${sum.withoutReal} without a real photo (${sum.withoutRealPct ?? 0}%)`, finishedAt: new Date().toISOString() })
+    const blockedPages = doc.progress.blocked || []
+    doc.status = stop || blockedPages.length ? 'stopped' : 'done'
+    doc.error = blockedPages.length ? `Blocked by the dealer's site on result page ${blockedPages.map(b => b.page).join(', ')} — ${coverageText(doc)}; a retry continues from there` : null
+    Object.assign(doc.progress, { phase: doc.status, message: `${stop ? 'Stopped early — ' : blockedPages.length ? 'Partly blocked — ' : ''}${sum.total} vehicles · ${sum.withoutReal} without a real photo (${sum.withoutRealPct ?? 0}%)`, finishedAt: new Date().toISOString() })
     log(`Done in ${Math.round((Date.now() - t0) / 1000)}s`)
-    await col.updateOne({ _id: doc._id }, { $set: { status: doc.status, progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, images: doc.images.map(stripImage), clusters: doc.clusters, heartbeatAt: new Date().toISOString() } })
+    await col.updateOne({ _id: doc._id }, { $set: { status: doc.status, error: doc.error, progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, images: doc.images.map(stripImage), clusters: doc.clusters, heartbeatAt: new Date().toISOString() } })
     emit('progress', doc.progress)
     let auditId: string | null = null
     if (doc.autoSave) {
@@ -697,7 +808,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       catch (e: any) { log(`Could not save the audit: ${e?.message || e}`) }
     }
     emit('done', { id: String(doc._id), status: doc.status, summary: sum, auditId })
-    if (doc.batchId) batchNote(db, doc, doc.status === 'stopped' ? 'stopped' : 'done', { summary: { total: sum.total, withoutReal: sum.withoutReal, withoutRealPct: sum.withoutRealPct, by: sum.by }, auditId }).catch(() => {})
+    if (doc.batchId) batchNote(db, doc, doc.status === 'stopped' ? 'stopped' : 'done', { summary: { total: sum.total, withoutReal: sum.withoutReal, withoutRealPct: sum.withoutRealPct, by: sum.by, advertised: advertisedTotal(doc) }, auditId, error: doc.error || null }).catch(() => {})
   }
   catch (e: any) {
     const message = e?.message || e?.statusMessage || 'Scan failed'
@@ -724,6 +835,16 @@ async function batchNote(db: Db, doc: ScanDoc, status: 'running' | 'done' | 'sto
   await updateBatchItem(db, doc.batchId!, doc.dealershipId, { status, scanId: String(doc._id), ...extra })
 }
 
+/** What the dealer's lists say they have in total (sum over the inventory pages that showed a count). */
+export function advertisedTotal(doc: ScanDoc): number | null {
+  const by = doc.progress.advertisedByUrl || {}
+  const n = Object.values(by).reduce((a, b) => a + (Number(b) || 0), 0)
+  return n || doc.progress.advertised || null
+}
+function coverageText(doc: ScanDoc) {
+  const adv = advertisedTotal(doc)
+  return adv && adv > doc.vehicles.length ? `checked ${doc.vehicles.length} of the ${adv} vehicles listed` : `checked ${doc.vehicles.length} vehicles`
+}
 const stripImage = (i: ImageInfo): ImageInfo => { const { bytes, thumb, ...rest } = i as any; return rest }
 
 async function analyzePhotos(t: Tab, doc: ScanDoc, o: { setProgress: (p: Partial<ScanProgress>) => void, log: (s: string) => void, deadline: number }) {
@@ -878,6 +999,9 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
     `Inventory Scanner: ${sum.total} vehicles on ${pages.length} page${pages.length === 1 ? '' : 's'}${doc.progress.advertised ? ` (site advertises ${doc.progress.advertised})` : ''}.`,
     `${sum.by.real} real photos · ${sum.by.missing + sum.by.placeholder} no photo (${sum.by.placeholder} showing a placeholder image such as “photos unavailable”, ${sum.by.missing} with no image) · ${sum.by.stock} stock images${doc.countStockAsMissing ? ' (counted as no photo)' : ' (counted as photos)'}.`,
   ]
+  const adv = advertisedTotal(doc)
+  const blockedN = (doc.progress.blocked || []).length
+  if (adv && adv > sum.total) parts.push(`Coverage: checked ${sum.total} of the ${adv} vehicles the site lists${blockedN ? ` — the site's bot protection refused ${blockedN} result page${blockedN === 1 ? '' : 's'}` : ''}. Percentages are of the vehicles checked.`)
   const byPage = pageBreakdown(doc, d, cmap)
   if (byPage.length > 1) parts.push(`By crawl page: ${byPage.map(p => `${p.label} — ${p.total} vehicles, ${p.withoutReal} without a real photo`).join(' · ')}.`)
   // Used cars first, then "No photo" before stock images — the strongest evidence leads; spread across the crawl pages.
@@ -894,6 +1018,7 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
     source: 'automated',
     inventoryUrl: doc.urls?.[0] || pages[0] || doc.startUrl,
     pages: byPage,
+    coverage: { checked: sum.total, advertised: adv, blockedPages: blockedN },
     examples: picked.map((v) => { const f = finalVerdict(v, cmap); return { url: v.url, label: `${v.title}${v.stock ? ` #${v.stock}` : ''} — ${VERDICT_LABEL[f]}`, title: v.title, stock: v.stock, price: v.price, condition: v.condition, verdict: f, listUrl: listKey(v, doc) } }),
     photoBreakdown: { real: sum.by.real, placeholder: sum.by.placeholder, missing: sum.by.missing, stock: sum.by.stock, countStockAsMissing: doc.countStockAsMissing },
     merchandisingIssues: [

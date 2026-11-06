@@ -15,6 +15,7 @@ const props = defineProps<{
 
 const r = computed(() => props.results)
 const s = computed(() => r.value.summary)
+const coverage = computed<{ checked: number, advertised: number | null, blocked: { url: string, page: number }[] } | null>(() => (r.value as any).coverage || null)
 const FINALS: FinalVerdict[] = ['real', 'placeholder', 'stock', 'missing']
 /** What people choose from: a placeholder image means the car has no photo, so they are one choice. */
 const CHOICES: FinalVerdict[] = ['real', 'placeholder', 'stock']
@@ -97,28 +98,41 @@ async function toggleStock(v: boolean) {
 }
 
 // ── Repeated images & rules ──
+/**
+ * Choosing what a repeated image is also TEACHES the scanner (every dealership, every future crawl):
+ * the image's fingerprint is saved as a rule. Undo removes the rule again.
+ */
+const learned = ref<Record<string, string>>({})
 async function setGroup(g: ImageGroup, verdict: FinalVerdict | null) {
   busy.value = true
-  try { await props.review({ clusters: [{ id: g.id, verdict }] }) } finally { busy.value = false }
+  try {
+    await props.review({ clusters: [{ id: g.id, verdict }] })
+    if (verdict && g.hash) {
+      const { rule } = await props.addRule({ hash: g.hash, hash2: g.hash2 || undefined, verdict, thumb: g.url, label: `${VERDICT_META[verdict].label} (seen on ${g.vehicles} vehicles)` })
+      learned.value = { ...learned.value, [g.id]: rule.id }
+      await loadRules()
+      toast.success(`Learned: “${VERDICT_META[verdict].label}”`, {
+        description: 'Used on this crawl and on every future crawl, for every dealership.',
+        action: { label: 'Undo', onClick: () => forget(g) },
+      })
+    }
+  } catch (e: any) { toast.error(e?.data?.statusMessage || 'Could not save that') } finally { busy.value = false }
+}
+async function forget(g: ImageGroup) {
+  const id = learned.value[g.id]
+  if (!id) return
+  busy.value = true
+  try { await props.removeRule(id); const { [g.id]: _x, ...rest } = learned.value; learned.value = rest; await props.review({ clusters: [{ id: g.id, verdict: null }] }); await loadRules(); toast('Forgotten — back to the scanner’s own judgement') } finally { busy.value = false }
 }
 const groupFinal = (g: ImageGroup) => { const f = g.override || (g.verdict === 'review' ? null : g.verdict); return f === 'missing' ? 'placeholder' : f }
-async function remember(g: ImageGroup) {
-  const verdict = groupFinal(g)
-  if (!verdict || !g.hash) return
-  busy.value = true
-  try {
-    await props.addRule({ hash: g.hash, verdict, thumb: g.url, label: `${VERDICT_META[verdict].label} (seen on ${g.vehicles} vehicles)` })
-    await props.review({ reapplyRules: true })
-    await loadRules()
-    toast.success('Remembered — this image will be recognised on every dealership from now on')
-  } catch (e: any) { toast.error(e?.data?.statusMessage || 'Could not save the rule') } finally { busy.value = false }
-}
+/** Is this image already covered by a saved rule? */
+const ruleFor = (g: ImageGroup) => rules.value.find(r => r.hash && r.hash === g.hash)
 async function rememberVehicle(v: ScannedVehicle, verdict: FinalVerdict) {
   const i = img(v)
   if (!i?.hash) return toast.error('This image could not be fingerprinted')
   busy.value = true
   try {
-    await props.addRule({ hash: i.hash, verdict, thumb: i.url, label: `${VERDICT_META[verdict].label} — ${v.title}` })
+    await props.addRule({ hash: i.hash, hash2: (i as any).hash2 || undefined, verdict, thumb: i.url, label: `${VERDICT_META[verdict].label} — ${v.title}` })
     await props.review({ reapplyRules: true })
     await loadRules()
     toast.success('Rule saved — applied to this scan and every future scan')
@@ -160,7 +174,10 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
           <p class="text-[11px] uppercase tracking-wider text-muted-foreground">Without a real photo</p>
           <p class="text-4xl font-bold tabular-nums leading-tight" :class="(s.withoutRealPct ?? 0) >= 25 ? 'text-rose-600' : (s.withoutRealPct ?? 0) >= 10 ? 'text-amber-600' : 'text-emerald-600'">{{ s.withoutRealPct ?? 0 }}%</p>
           <p class="text-xs text-muted-foreground"><span class="font-semibold text-foreground tabular-nums">{{ s.withoutReal }}</span> of {{ s.total }} vehicles</p>
-          <p v-if="r.advertised" class="text-[11px] text-muted-foreground mt-1">Site advertises {{ r.advertised }} · scanned {{ s.total }} on {{ r.pages.length }} page{{ r.pages.length === 1 ? '' : 's' }}</p>
+          <p v-if="r.advertised && r.advertised > s.total" class="mt-1.5 rounded-md bg-amber-500/10 px-2 py-1 text-[11px] leading-snug text-amber-700 dark:text-amber-300">
+            Checked <b>{{ s.total }}</b> of the <b>{{ r.advertised }}</b> vehicles the site lists — {{ r.advertised - s.total }} not reached{{ coverage?.blocked?.length ? ` (the site blocked result page ${coverage.blocked.map((b: any) => b.page).join(', ')})` : '' }}. The % is of the {{ s.total }} checked{{ coverage?.blocked?.length ? '; a retry continues from the blocked page' : '' }}.
+          </p>
+          <p v-else-if="r.advertised" class="text-[11px] text-muted-foreground mt-1">Site lists {{ r.advertised }} · checked {{ s.total }} on {{ r.pages.length }} page{{ r.pages.length === 1 ? '' : 's' }}</p>
         </div>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -277,7 +294,8 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
               <div class="inline-flex rounded-md border bg-muted/40 p-0.5 w-full">
                 <button v-for="k in (['real', 'placeholder', 'stock'] as FinalVerdict[])" :key="k" type="button" class="flex-1 rounded px-1.5 py-1 text-[11px] font-medium transition-colors" :class="groupFinal(g) === k ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'" :disabled="busy" @click="setGroup(g, k)">{{ VERDICT_META[k].short }}</button>
               </div>
-              <Button v-if="g.hash && groupFinal(g)" size="sm" variant="ghost" class="h-7 w-full text-[11px] gap-1.5" :disabled="busy" @click="remember(g)"><Brain class="size-3.5" /> Remember for every dealership</Button>
+              <p v-if="learned[g.id] || ruleFor(g)" class="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400"><Brain class="size-3.5" /> Learned — every future crawl knows this image<button v-if="learned[g.id]" type="button" class="ml-auto underline underline-offset-2 text-muted-foreground hover:text-foreground" :disabled="busy" @click="forget(g)">Undo</button></p>
+              <p v-else class="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Brain class="size-3.5" /> Pick one — the scanner learns it for every dealership</p>
             </li>
           </ul>
         </div>

@@ -38,7 +38,7 @@ export interface BatchItem {
   status: ItemStatus
   scanId: string | null
   auditId: string | null
-  summary: { total: number, withoutReal: number, withoutRealPct: number | null, by?: Record<string, number> } | null
+  summary: { total: number, withoutReal: number, withoutRealPct: number | null, by?: Record<string, number>, advertised?: number | null } | null
   error: string | null
   claimedAt: string | null
   finishedAt: string | null
@@ -286,7 +286,10 @@ export async function sendBatchEmails(db: Db, id: string, assignments: SendAssig
 const MAX_ATTEMPTS = 4
 const CRASH_RE = /connection is closed|target closed|session closed|crashed|disconnected|cut off|did not respond|timed out/i
 /** An item the server lost (crash / cut off) that autopilot should pick up again. */
-const isCrashed = (i: BatchItem) => ((i.status === 'stopped' && /cut off/i.test(i.error || '')) || (i.status === 'failed' && CRASH_RE.test(i.error || '') && !/gave up/i.test(i.error || '')))
+/** Partly blocked by the dealer's bot protection — retried later from the blocked page (cool-down grows each attempt). */
+export const isBlocked = (i: BatchItem) => i.status === 'stopped' && /blocked by the dealer/i.test(i.error || '')
+const blockCooldownMs = (i: BatchItem) => [3, 8, 20, 45][Math.min(3, Math.max(0, (i.attempts || 1) - 1))]! * 60_000
+const isCrashed = (i: BatchItem) => (isBlocked(i) || (i.status === 'stopped' && /cut off/i.test(i.error || '')) || (i.status === 'failed' && CRASH_RE.test(i.error || '') && !/gave up/i.test(i.error || '')))
 /** Anything left for autopilot to do in this batch? */
 export const needsWork = (items: BatchItem[]) => items.some(i => i.status === 'queued' || i.status === 'running' || (isCrashed(i) && (i.attempts || 0) < MAX_ATTEMPTS))
 const secret = () => process.env.CRON_SECRET || process.env.SCANNER_INTERNAL_SECRET || process.env.NUXT_SESSION_PASSWORD || process.env.MONGODB_URI || 'zrz-scanner'
@@ -354,6 +357,8 @@ export async function advanceBatch(db: Db, id: string, origin?: string | null) {
     if (!b.paused) {
       for (const i of b.items as BatchItem[]) {
         if (!isCrashed(i)) continue
+        if (isBlocked(i) && (i.attempts || 0) < MAX_ATTEMPTS && i.finishedAt && now - new Date(i.finishedAt).getTime() < blockCooldownMs(i)) continue
+        if ((i.attempts || 0) >= MAX_ATTEMPTS && isBlocked(i)) { await updateBatchItem(db, id, i.dealershipId, { error: `Partial — the dealer's site kept refusing some result pages after ${i.attempts} tries (what was reachable is saved). Retry later or run it once more.` }); continue }
         if ((i.attempts || 0) >= MAX_ATTEMPTS) { if (i.status === 'stopped') await updateBatchItem(db, id, i.dealershipId, { status: 'failed', error: `Gave up after ${i.attempts} attempts — ${i.error}` }); continue }
         await updateBatchItem(db, id, i.dealershipId, { status: 'queued', claimedAt: null, resumeFrom: i.scanId || i.resumeFrom || null, scanId: null, error: null })
       }
