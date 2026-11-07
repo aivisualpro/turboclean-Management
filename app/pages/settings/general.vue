@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { toast } from 'vue-sonner'
-import { Sparkles, CalendarClock, Clock, Globe, BellRing, Save, Loader2, Play, Receipt, Binoculars } from 'lucide-vue-next'
+import { Sparkles, CalendarClock, Clock, Globe, BellRing, Save, Loader2, Play, Receipt, Binoculars, RefreshCw } from 'lucide-vue-next'
 
 const { setHeader } = usePageHeader()
 const applyHeader = () => setHeader({ title: 'General Settings', icon: 'i-lucide-settings-2' })
@@ -13,6 +13,7 @@ const router = useRouter()
 const TABS = [
   { key: 'automations', label: 'Invoice Automations', icon: Receipt },
   { key: 'prospecting', label: 'Prospecting', icon: Binoculars },
+  { key: 'appsheet', label: 'AppSheet Sync', icon: RefreshCw },
 ] as const
 type TabKey = typeof TABS[number]['key']
 const tab = ref<TabKey>(TABS.some(t => t.key === route.query.tab) ? route.query.tab as TabKey : 'automations')
@@ -262,6 +263,9 @@ async function saveSettings() {
     <!-- Prospecting search area (used by "Search Web" on /crm/dealership) -->
     <!-- Fills the remaining height; its two columns scroll independently inside the box -->
     <SettingsProspectingCard v-if="visited.has('prospecting')" v-show="tab === 'prospecting'" class="flex-1 min-h-0 animate-in fade-in duration-300" />
+
+    <!-- AppSheet → app: add records that exist in AppSheet but never reached the app -->
+    <SettingsAppSheetMissingCard v-if="visited.has('appsheet')" v-show="tab === 'appsheet'" class="flex-1 min-h-0 animate-in fade-in duration-300" />
    </div>
   </div>
 </template>
