@@ -34,8 +34,8 @@ export interface CrmDealership {
   dealerGroup: string
   brands: string[]
   website: string
-  /** Inventory pages the scanner covers for this dealership (Scrape + batch scans). */
-  scanPages?: { url: string, label: string }[]
+  /** Scan pages: the only pages the crawler reads for this dealership (each with the health of its last test / crawl). */
+  scanPages?: { url: string, label: string, health?: { status: 'ok' | 'empty' | 'redirected' | 'blocked' | 'error', vehicles: number, advertised: number | null, at: string, note: string, landedUrl?: string | null } | null }[]
   address: string
   city: string
   state: string

@@ -12,6 +12,7 @@ import {
   FileDown, FileText, FileBarChart, ChevronDown,
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
+import { SCOPE_META, checkScanPage, pagePath } from '~/lib/scanScope'
 import { formatDistanceToNow } from 'date-fns'
 
 /**
@@ -37,7 +38,9 @@ const STEPS: { key: Step, n: number, label: string }[] = [{ key: 'setup', n: 1, 
 const stepIndex = computed(() => STEPS.findIndex(s => s.key === step.value))
 
 // ─── Setup ───
-interface SetupRow { id: string, name: string, website: string, pages: string[], detecting: boolean, detectNote: string }
+interface SetupRow { id: string, name: string, website: string, pages: string[], detecting: boolean, detectNote: string
+  /** A saved address that can never be crawled (the home page, one vehicle's page) — why. */
+  bad: string }
 const setupRows = ref<SetupRow[]>([])
 const editing = ref<CrmDealership | null>(null)
 const showPages = ref(false)
@@ -46,13 +49,16 @@ function buildSetup() {
   setupRows.value = ids.map((id) => {
     const d = dealerships.value.find(x => x.id === id)
     // Only picked / verified pages count — a bare website is never scanned blind any more.
-    return { id, name: d?.name || id, website: d?.website || '', pages: (d?.scanPages || []).map(p => p.url), detecting: false, detectNote: '' }
+    const saved = d?.scanPages || []
+    const unusable = saved.map(p => checkScanPage(p.url)).find(c => !c.ok)
+    // Only real inventory lists count — the home page is never crawled, even when an older version saved it as a scan page.
+    return { id, name: d?.name || id, website: d?.website || '', pages: saved.filter(p => checkScanPage(p.url).ok).map(p => p.url), detecting: false, detectNote: '', bad: unusable ? unusable.short : '' }
   })
 }
 function editPages(row: { id: string }) { editing.value = dealerships.value.find(x => x.id === row.id) || null; showPages.value = !!editing.value }
 function pagesSaved(pages: { url: string, label: string }[]) {
   const row = setupRows.value.find(r => r.id === editing.value?.id)
-  if (row) row.pages = pages.map(p => p.url)
+  if (row) { row.pages = pages.filter(p => checkScanPage(p.url).ok).map(p => p.url); row.bad = '' }
 }
 /** Find + verify a dealership's inventory pages on the server and save them (the "magic" button). */
 async function detectFor(row: SetupRow) {
@@ -62,6 +68,7 @@ async function detectFor(row: SetupRow) {
   try {
     const r = await $fetch<any>('/api/scanner/discover', { method: 'POST', body: { dealershipId: row.id, save: true } })
     row.pages = (r.pages || []).map((p: any) => p.url)
+    if (row.pages.length) row.bad = ''
     row.detectNote = r.pages?.length ? `${r.pages.length} page${r.pages.length === 1 ? '' : 's'} verified · ${r.pages.reduce((n: number, p: any) => n + (p.total || p.cards || 0), 0)} vehicles${r.aiUsed ? ' · AI helped' : ''}` : 'No inventory pages found — pick them by hand'
     const d = dealerships.value.find(x => x.id === row.id)
     if (d) d.scanPages = r.saved || []
@@ -85,12 +92,19 @@ async function detectAll() {
   finally { detectingAll.value = false }
 }
 const ready = computed(() => setupRows.value.filter(r => r.pages.length))
+/** Scan pages of a finished crawl that need a look (forward to the home page, show no vehicles, would not open). */
+function scopeIssue(i: BatchItem) {
+  const off = (i.scope || []).filter(e => ['redirected', 'empty', 'error'].includes(e.status))
+  if (!off.length) return ''
+  return `${off.length} scan page${off.length === 1 ? ' needs' : 's need'} attention: ${off.map(e => `${e.label || pagePath(e.url)} — ${(SCOPE_META[e.status as keyof typeof SCOPE_META]?.label || e.status).toLowerCase()}`).join(' · ')}`
+}
 const starting = ref(false)
 async function start() {
   if (!ready.value.length) return toast.error('No pages to crawl yet', { description: 'Detect or pick the inventory pages first — the scanner never starts from a bare home page.' })
   starting.value = true
   try {
-    await bs.create(setupRows.value.map(r => r.id), { pages: Object.fromEntries(setupRows.value.map(r => [r.id, r.pages])), concurrency: concurrency.value })
+    // No page lists are sent: the server crawls each dealership's saved scan pages, and nothing else.
+    await bs.create(setupRows.value.map(r => r.id), { concurrency: concurrency.value })
     step.value = 'scan'
     t0.value = Date.now()
     bs.drive()
@@ -343,6 +357,7 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
                       <div class="flex flex-wrap gap-1.5">
                         <span v-for="p in r.pages" :key="p" class="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 ring-1 ring-emerald-500/25 text-emerald-200 px-2 py-0.5 text-[11px] font-mono max-w-[320px] truncate" :title="p"><Globe class="size-3 shrink-0" />{{ short(p).replace(/^[^/]+/, '') || '/' }}</span>
                         <span v-if="r.detecting" class="inline-flex items-center gap-1.5 text-[11px] text-emerald-300"><Loader2 class="size-3 animate-spin" /> {{ r.detectNote || 'Looking for inventory pages…' }}</span>
+                        <span v-else-if="!r.pages.length && r.bad" class="inline-flex items-center gap-1.5 text-[11px] text-rose-300"><AlertTriangle class="size-3" /> The saved scan page is not an inventory list ({{ r.bad.toLowerCase() }}) — never crawled. Detect or pick the inventory pages.</span>
                         <span v-else-if="!r.pages.length && r.website" class="inline-flex items-center gap-1.5 text-[11px] text-amber-300"><AlertTriangle class="size-3" /> No pages yet — will be skipped{{ r.detectNote ? ` · ${r.detectNote}` : '' }}</span>
                         <span v-else-if="!r.pages.length" class="text-[11px] text-zinc-500">—</span>
                         <span v-else-if="r.detectNote" class="text-[11px] text-zinc-500">{{ r.detectNote }}</span>
@@ -407,7 +422,8 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
                     <div v-if="i.status === 'running'" class="mt-1.5 h-1 rounded-full bg-white/10 overflow-hidden"><div class="h-full bg-gradient-to-r from-emerald-500 to-emerald-300 transition-all duration-500" :style="{ width: `${itemPct(i)}%` }" /></div>
                     <p v-else-if="i.summary" class="mt-0.5 text-[11px] text-zinc-500 font-mono">{{ i.summary.total }} vehicles · {{ i.summary.withoutReal }} without photo{{ i.email ? ` · ${i.email.status}` : '' }}</p>
                     <p v-if="i.summary && i.error && i.status === 'stopped'" class="mt-0.5 text-[11px] leading-snug text-amber-300/90 line-clamp-2" :title="i.error">{{ i.error }}</p>
-                    <p v-else-if="i.error" class="mt-0.5 text-[11px] text-rose-400/80 truncate">{{ i.error }}</p>
+                    <p v-else-if="i.error" class="mt-0.5 text-[11px] leading-snug text-rose-400/80 line-clamp-2" :title="i.error">{{ i.error }}</p>
+                    <p v-else-if="scopeIssue(i)" class="mt-0.5 text-[11px] leading-snug text-amber-300/90 line-clamp-2" :title="scopeIssue(i)">{{ scopeIssue(i) }}</p>
                     <p v-else class="mt-0.5 text-[11px] text-zinc-600 font-mono">{{ i.urls.length }} page{{ i.urls.length === 1 ? '' : 's' }}</p>
                   </button>
                 </li>

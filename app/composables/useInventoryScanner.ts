@@ -6,15 +6,21 @@
  *               stream drops we fall back to polling the stored scan.
  *  - review / save work on the stored scan by id.
  */
+import type { ScopeRow } from '~/lib/scanScope'
+
 export type PhotoVerdict = 'real' | 'placeholder' | 'stock' | 'missing' | 'review'
 export type FinalVerdict = Exclude<PhotoVerdict, 'review'>
-export interface ScannerProgress { phase: 'collecting' | 'analyzing' | 'done' | 'stopped' | 'error', page: number, vehicles: number, advertised: number | null, analyzed: number, toAnalyze: number, message: string, startedAt: string | null, finishedAt: string | null, pagesVisited: string[] }
+export interface ScannerProgress { phase: 'collecting' | 'analyzing' | 'done' | 'stopped' | 'error', page: number, vehicles: number, advertised: number | null, analyzed: number, toAnalyze: number, message: string, startedAt: string | null, finishedAt: string | null, pagesVisited: string[]
+  /** The crawl plan: every saved scan page of this crawl and how it is going (nothing else is read). */
+  scope?: ScopeRow[] }
 export type ScanStatus = 'running' | 'done' | 'stopped' | 'failed' | 'saved' | 'interrupted'
 export interface ScanMeta { id: string, dealershipId: string, status: ScanStatus, startUrl: string, allPages: boolean, progress: ScannerProgress, log: { at: string, text: string }[], error: string | null, auditId: string | null, createdAt: string, createdBy: { id: string, name: string }, savedAt: string | null, vehicles: number }
 export interface NavLink { label: string, href: string, kind: string }
 export interface Hotspot { x: number, y: number, w: number, h: number, href: string, label: string, children?: { label: string, href: string }[] }
 export interface SitePage { label: string, href: string, kind: string, nav: boolean }
-export interface PagePreview { url: string, title: string, screenshot: string, width: number, height: number, pageHeight: number, httpStatus: number | null, navLinks: NavLink[], hotspots: Hotspot[], pages: SitePage[], detected: { cards: number, advertised: number | null, strategy: string | null } }
+export interface PagePreview { url: string, title: string, screenshot: string, width: number, height: number, pageHeight: number, httpStatus: number | null, navLinks: NavLink[], hotspots: Hotspot[], pages: SitePage[], detected: { cards: number, advertised: number | null, strategy: string | null }
+  /** Is the page on screen a saved scan page (only those are crawled)? Can it be saved as one? */
+  scope?: { isScanPage: boolean, scanPageUrl: string | null, canSave: boolean, problem: string, forwarded: 'same' | 'moved' | 'home' | 'offsite' } }
 export interface ScannedVehicle {
   key: string
   title: string
@@ -54,6 +60,8 @@ export interface ScanResults {
   vehicles: ScannedVehicle[]
   clusters: ImageGroup[]
   images: Record<string, ScannedImage>
+  /** Scope report: the scan pages this crawl covered, with status and numbers for each. */
+  scope?: ScopeRow[]
   savedAuditId: string | null
   labels: Record<PhotoVerdict, string>
   finishedAt: string | null
@@ -192,7 +200,8 @@ export function useInventoryScanner() {
   function stopPolling() { if (poll) clearInterval(poll); poll = null }
 
   /** Run a scan in one streaming request. Resolves when it is finished (or failed). */
-  async function run(dealershipId: string, opts: { url?: string, allPages?: boolean, appendTo?: string | null } = {}) {
+  /** `urls` = the saved scan pages to read (none = all of them). An address that is not a saved scan page is refused by the server. */
+  async function run(dealershipId: string, opts: { url?: string, urls?: string[], allPages?: boolean, appendTo?: string | null } = {}) {
     disposed = false
     error.value = null
     frame.value = null
@@ -210,7 +219,7 @@ export function useInventoryScanner() {
       const res = await fetch('/api/scanner/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-        body: JSON.stringify({ dealershipId, url: opts.url, allPages: opts.allPages !== false, appendTo: opts.appendTo || undefined }),
+        body: JSON.stringify({ dealershipId, url: opts.url, urls: opts.urls?.length ? opts.urls : undefined, allPages: opts.allPages !== false, appendTo: opts.appendTo || undefined }),
         signal: abort.signal,
         credentials: 'same-origin',
       })

@@ -1,19 +1,26 @@
 <script setup lang="ts">
 import type { CrmDealership } from '~/composables/useCrmDealerships'
-import { Globe, Plus, Trash2, Loader2, Wand2, Car, Sparkles, Link2, ExternalLink, Check, ListChecks } from 'lucide-vue-next'
+import { Globe, Plus, Trash2, Loader2, Wand2, Car, Sparkles, Link2, ExternalLink, Check, ListChecks, Activity, Ban, ShieldCheck } from 'lucide-vue-next'
+import type { ScanPage } from '~/lib/scanScope'
+import { HEALTH_META, TONE, checkScanPage, guessPageLabel, normalizeAddress, pagePath, scopeKey } from '~/lib/scanScope'
+import { formatDistanceToNow } from 'date-fns'
 import { toast } from 'vue-sonner'
 
 /**
- * Scan pages for one dealership — the inventory URLs the scanner covers (each one is paginated on
- * its own). "Detect pages" opens the website in the cloud browser and suggests its inventory pages.
- * Saves to the dealership (`scanPages`), so Scrape and batch scans use the same list.
+ * Scan pages for one dealership — the only pages the crawler reads (each inventory list is followed
+ * through all of its result pages; nothing else on the site is opened).
+ *  - An address must be an inventory list: the home page or one vehicle's page is refused here, with the reason.
+ *  - Every page shows its health: what the last test or crawl really found on it.
+ *  - "Detect" opens the website in the cloud browser and adds the pages that really list vehicles.
+ * Saves to the dealership (`scanPages`), so the crawler and Mission Control use the same list.
  */
 const props = defineProps<{ dealership: CrmDealership | null }>()
 const open = defineModel<boolean>('open', { default: false })
-const emit = defineEmits<{ saved: [pages: { url: string, label: string }[]] }>()
+const emit = defineEmits<{ saved: [pages: ScanPage[]] }>()
 const { updateDealership } = useCrmDealerships()
 
-const pages = ref<{ url: string, label: string }[]>([])
+const pages = ref<ScanPage[]>([])
+const testing = ref(new Set<string>())
 const draft = ref('')
 const saving = ref(false)
 const detecting = ref(false)
@@ -32,11 +39,14 @@ watch([open, () => props.dealership?.id], () => {
   detectNote.value = ''
 }, { immediate: true })
 
-const norm = (u: string) => { const t = u.trim(); return t ? (/^https?:\/\//i.test(t) ? t : `https://${t}`) : '' }
-const has = (u: string) => pages.value.some(p => p.url.replace(/\/$/, '') === u.replace(/\/$/, ''))
+const has = (u: string) => { const k = scopeKey(u); return !!k && pages.value.some(p => scopeKey(p.url) === k) }
+/** Why a page on the list can never be crawled ('' when it can). */
+const problemOf = (u: string) => { const c = checkScanPage(u); return c.ok ? null : c }
+const usable = computed(() => pages.value.filter(p => !problemOf(p.url)))
 function add(raw: string, label = '') {
-  const url = norm(raw)
-  if (!url || !/^https?:\/\/[^\s/]+\.[^\s/]+/i.test(url)) return toast.error('That is not a web address')
+  const url = normalizeAddress(raw)
+  const fit = checkScanPage(url || raw)
+  if (!url || !fit.ok) return toast.error('Not an inventory page', { description: fit.message })
   if (has(url)) return
   pages.value = [...pages.value, { url, label }]
 }
@@ -46,6 +56,27 @@ function addDraft() {
   draft.value = ''
 }
 const remove = (i: number) => { pages.value = pages.value.filter((_, j) => j !== i) }
+const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(new Date(iso), { addSuffix: true }) : '' } catch { return '' } }
+/** The line under a page: why it cannot be crawled, or what its last test / crawl found. */
+function healthLine(p: ScanPage): { text: string, tone: keyof typeof TONE } {
+  const bad = problemOf(p.url)
+  if (bad) return { text: `${bad.short}, not an inventory list — never crawled. Remove it and add the page that lists the vehicles.`, tone: 'bad' }
+  const h = p.health
+  if (!h) return { text: 'Not tested yet', tone: 'idle' }
+  const m = HEALTH_META[h.status] || HEALTH_META.ok
+  return h.status === 'ok' ? { text: `${m.label} · ${h.advertised || h.vehicles} vehicles · ${ago(h.at)}`, tone: 'ok' } : { text: `${m.label} · ${ago(h.at)}${h.note ? ` — ${h.note}` : ''}`, tone: m.tone }
+}
+/** Open one page in the cloud browser and record what is really on it. */
+async function test(p: ScanPage) {
+  if (!props.dealership || testing.value.has(p.url)) return
+  testing.value = new Set(testing.value).add(p.url)
+  try {
+    const r = await $fetch<{ health: NonNullable<ScanPage['health']> }>('/api/scanner/check-page', { method: 'POST', body: { dealershipId: props.dealership.id, url: p.url } })
+    pages.value = pages.value.map(x => x.url === p.url ? { ...x, health: r.health } : x)
+  }
+  catch (e: any) { toast.error('Could not test the page', { description: e?.data?.message || e?.data?.statusMessage || 'Try again' }) }
+  finally { const t = new Set(testing.value); t.delete(p.url); testing.value = t }
+}
 const KIND_LABEL: Record<string, string> = { used: 'Pre-owned', certified: 'Certified', new: 'New', all: 'Inventory' }
 const kindIcon = (k: string) => k === 'new' ? Sparkles : k === 'used' || k === 'certified' ? Car : Globe
 
@@ -61,7 +92,12 @@ async function detect() {
     detectLog.value = r.log || []
     // Verified pages go straight onto the list (still only saved when you press Save).
     let added = 0
-    for (const f of found.value) if (!has(f.url)) { pages.value = [...pages.value, { url: f.url, label: f.label }]; added++ }
+    const at = new Date().toISOString()
+    for (const f of found.value) {
+      const health = { status: 'ok' as const, vehicles: f.cards, advertised: f.total, at, note: 'Verified by page detection' }
+      if (has(f.url)) pages.value = pages.value.map(p => scopeKey(p.url) === scopeKey(f.url) ? { ...p, health } : p)
+      else { pages.value = [...pages.value, { url: f.url, label: f.label, health }]; added++ }
+    }
     detectNote.value = found.value.length
       ? `${found.value.length} page${found.value.length === 1 ? '' : 's'} verified — ${found.value.reduce((n: number, f: Found) => n + (f.total || f.cards), 0)} vehicles${r.aiUsed ? ' · AI helped read the menus' : ''}${added ? ` · ${added} added below` : ''}`
       : 'No page with vehicle listings was found — try a suggestion or paste the address of the inventory page.'
@@ -74,15 +110,17 @@ async function save() {
   if (!props.dealership) return
   saving.value = true
   try {
-    const d = await updateDealership(props.dealership.id, { scanPages: pages.value } as any)
+    // Addresses that can never be crawled (a home page saved by an older version) are not saved again.
+    const d = await updateDealership(props.dealership.id, { scanPages: usable.value.map(p => ({ url: p.url, label: p.label })) } as any)
     emit('saved', d.scanPages || [])
-    toast.success(pages.value.length ? `${pages.value.length} scan page${pages.value.length === 1 ? '' : 's'} saved` : 'Scan pages cleared — this dealership will be skipped by scans until pages are picked')
+    toast.success(usable.value.length ? `${usable.value.length} scan page${usable.value.length === 1 ? '' : 's'} saved` : 'Scan pages cleared — this dealership is skipped by crawls until pages are picked')
     open.value = false
   }
-  catch (e: any) { toast.error(e?.data?.statusMessage || 'Could not save') }
+  catch (e: any) { toast.error('Could not save', { description: e?.data?.message || e?.data?.statusMessage || 'Try again' }) }
   finally { saving.value = false }
 }
 const short = (u: string) => u.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')
+const draftProblem = computed(() => { for (const part of draft.value.split(/[\n,]+/)) { const v = part.trim(); if (v) { const c = checkScanPage(v); if (!c.ok) return `${short(v)} — ${c.message}` } } return '' })
 </script>
 
 <template>
@@ -90,33 +128,38 @@ const short = (u: string) => u.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/
     <DialogContent class="sm:max-w-2xl">
       <DialogHeader>
         <DialogTitle class="flex items-center gap-2"><ListChecks class="size-4 text-red-600" /> Scan pages — {{ dealership?.name }}</DialogTitle>
-        <DialogDescription class="text-xs">The inventory pages the scanner reads for this dealership (used, new, certified…). Each page is followed through all of its result pages. A dealership without pages is never scanned.</DialogDescription>
+        <DialogDescription class="text-xs">The only pages the crawler reads for this dealership (used, new, certified…). Each list is followed through all of its result pages; nothing else on the site is opened — never the home page.</DialogDescription>
       </DialogHeader>
 
       <div class="space-y-4">
         <!-- Current pages -->
         <ul v-if="pages.length" class="rounded-xl border divide-y">
-          <li v-for="(p, i) in pages" :key="p.url" class="flex items-center gap-2 px-3 py-2 text-sm">
-            <span class="size-6 shrink-0 rounded-md bg-red-600/10 text-red-600 text-[11px] font-semibold flex items-center justify-center tabular-nums">{{ i + 1 }}</span>
+          <li v-for="(p, i) in pages" :key="p.url" class="flex items-start gap-2 px-3 py-2 text-sm" :class="problemOf(p.url) && 'bg-rose-500/5'">
+            <span v-if="problemOf(p.url)" class="mt-0.5 size-6 shrink-0 rounded-md bg-rose-500/10 text-rose-600 flex items-center justify-center"><Ban class="size-3.5" /></span>
+            <span v-else class="mt-0.5 size-6 shrink-0 rounded-md bg-red-600/10 text-red-600 text-[11px] font-semibold flex items-center justify-center tabular-nums">{{ usable.indexOf(p) + 1 }}</span>
             <div class="min-w-0 flex-1">
-              <p class="truncate font-medium">{{ p.label || short(p.url) }}</p>
-              <p v-if="p.label" class="truncate text-[11px] text-muted-foreground">{{ short(p.url) }}</p>
+              <p class="truncate font-medium">{{ p.label || (problemOf(p.url) ? problemOf(p.url)!.short : guessPageLabel(p.url)) }}</p>
+              <p class="truncate text-[11px] text-muted-foreground">{{ problemOf(p.url) ? short(p.url) || p.url : pagePath(p.url) }}</p>
+              <p class="mt-0.5 text-[11px] leading-snug" :class="TONE[healthLine(p).tone].text">{{ healthLine(p).text }}</p>
             </div>
-            <a :href="p.url" target="_blank" rel="noopener" class="text-muted-foreground hover:text-foreground" title="Open in my browser"><ExternalLink class="size-3.5" /></a>
+            <Button v-if="!problemOf(p.url)" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-foreground" :disabled="testing.has(p.url)" :aria-label="`Test ${p.label || pagePath(p.url)}`" title="Test this page — opens it and counts the vehicles" @click="test(p)"><Loader2 v-if="testing.has(p.url)" class="size-3.5 animate-spin" /><Activity v-else class="size-3.5" /></Button>
+            <a :href="p.url" target="_blank" rel="noopener" class="mt-1.5 text-muted-foreground hover:text-foreground" title="Open in my browser"><ExternalLink class="size-3.5" /></a>
             <Button variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-rose-600" aria-label="Remove" @click="remove(i)"><Trash2 class="size-3.5" /></Button>
           </li>
         </ul>
         <div v-else class="rounded-xl border-2 border-dashed border-amber-500/40 bg-amber-500/5 px-4 py-6 text-center text-sm text-muted-foreground">
-          No scan pages yet — this dealership is <b class="text-foreground">skipped</b> by scans until you detect or add its inventory pages.
+          No scan pages yet — this dealership is <b class="text-foreground">skipped</b> by crawls until you detect or add its inventory pages.
         </div>
 
         <!-- Add -->
         <div class="space-y-2">
           <Label class="text-xs">Add page addresses <span class="text-muted-foreground font-normal">(one per line, or paste several)</span></Label>
           <div class="flex gap-2">
-            <Textarea v-model="draft" rows="2" class="text-sm min-h-0 font-mono" placeholder="https://www.dealer.com/used-inventory/index.htm" @keydown.enter.exact.prevent="addDraft" />
-            <Button variant="outline" class="shrink-0 h-auto gap-1.5" :disabled="!draft.trim()" @click="addDraft"><Plus class="size-4" /> Add</Button>
+            <Textarea v-model="draft" rows="2" class="text-sm min-h-0 font-mono" placeholder="https://www.dealer.com/used-inventory/index.htm" :aria-invalid="!!draftProblem" @keydown.enter.exact.prevent="!draftProblem && addDraft()" />
+            <Button variant="outline" class="shrink-0 h-auto gap-1.5" :disabled="!draft.trim() || !!draftProblem" @click="addDraft"><Plus class="size-4" /> Add</Button>
           </div>
+          <p v-if="draftProblem" class="text-[11px] leading-snug text-rose-600 dark:text-rose-400" role="alert">{{ draftProblem }}</p>
+          <p v-else class="flex items-center gap-1.5 text-[11px] text-muted-foreground"><ShieldCheck class="size-3.5 text-emerald-600" /> Only inventory lists can be saved — the home page is refused, so a crawl can never wander the whole site.</p>
         </div>
 
         <!-- Detect -->

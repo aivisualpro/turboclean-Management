@@ -8,12 +8,18 @@
  * 3. If AI is connected, let it re-rank the shortlist (it reads odd menu wording better than rules).
  * 4. VERIFY: open the best candidates and count vehicle cards with the scanner's own extractor.
  *    Only pages that really show vehicles come back as "verified", with their counts.
+ *
+ * Never "verified": the home page (also when a guessed address merely forwards to it), another
+ * website, a single vehicle's page, or a page whose only "cards" are offer tiles (lease specials).
  */
 import type { Db } from 'mongodb'
 import { str } from './crm'
 import { aiConfigured, askClaudeJson } from './automation-ai'
 import { EXTRACT_JS } from './scanner-page'
 import { closeTab, evaluate, goto, openTab, safeUrl } from './scanner-session'
+import { checkScanPage, isHomePage, landing, scopeKey } from './scanner-scope'
+import type { ScanPageHealth } from './scanner-scope'
+import { OFFER_TITLE } from './scanner-images'
 
 export type PageKind = 'used' | 'certified' | 'new' | 'all'
 export interface DiscoveredPage { url: string, label: string, kind: PageKind, cards: number, total: number | null, verified: boolean, score: number, source: 'menu' | 'guess' | 'ai' }
@@ -78,7 +84,7 @@ function scoreLink(l: { text: string, href: string, nav: boolean }): Candidate |
   const depth = path.split('/').filter(Boolean).length
   if (depth > 3) score -= 3
   if (path === '/' || path === '') score -= 10
-  if (score <= 0) return null
+  if (score <= 0 || !checkScanPage(l.href).ok) return null
   return { href: l.href, text: l.text, kind: kind || 'all', score, source: 'menu', nav: l.nav }
 }
 
@@ -163,25 +169,76 @@ export async function discoverInventoryPages(db: Db, dealershipId: string, urlIn
         for (let y = 0; y < 2400; y += 800) { await evaluate(t, `window.scrollTo(0, ${y})`).catch(() => {}); await new Promise(r => setTimeout(r, 250)) }
         await new Promise(r => setTimeout(r, 600))
         const r = await evaluate<any>(t, EXTRACT_JS, 30_000).catch(() => null)
-        const cards = r?.cards?.length || 0
+        const all: any[] = Array.isArray(r?.cards) ? r.cards : []
+        // Real listings only: a card needs a VIN, a stock #, or a model year with a price or its own page — and must not be an offer tile.
+        const real = all.filter(x => !OFFER_TITLE.test(String(x?.title || '')) && (x?.vin || x?.stock || (x?.year && (x?.price || x?.url))))
+        const cards = real.length
         const total = r?.total ? Number(r.total) : null
-        const finalUrl = String(r?.url || t.url || c.href)
-        const page: DiscoveredPage = { url: finalUrl.split('#')[0]!, label: niceLabel(c), kind: c.kind, cards, total, verified: cards >= 3 || (total || 0) >= 3, score: c.score, source: c.source }
+        const finalUrl = String(r?.url || t.url || c.href).split('#')[0]!
+        const where = landing(c.href, finalUrl)
+        const page: DiscoveredPage = { url: finalUrl, label: niceLabel(c), kind: c.kind, cards, total, verified: cards >= 3 || ((total || 0) >= 3 && cards >= 1), score: c.score, source: c.source }
+        // The address must still be an inventory list after any forwarding — a guess that lands on the home page proves nothing.
+        if (where === 'home' || where === 'offsite' || isHomePage(finalUrl) || !checkScanPage(finalUrl).ok) {
+          page.verified = false
+          rejected.push({ ...page, url: c.href })
+          say(`✗ ${c.href.replace(origin, '') || '/'} — ${where === 'offsite' ? 'forwards to another website' : isHomePage(finalUrl) ? 'forwards to the home page' : 'not an inventory list'}`)
+          continue
+        }
         if (page.verified) {
           // Kind from what the page actually shows, when the cards say so.
-          const conds = (r.cards as any[]).map(x => x.condition).filter(Boolean)
+          const conds = real.map(x => x.condition).filter(Boolean)
           if (conds.length >= 3) { const n: Record<string, number> = {}; for (const x of conds) n[x] = (n[x] || 0) + 1; const top = Object.entries(n).sort((a, b) => b[1] - a[1])[0]!; if (top[1] / conds.length >= 0.8 && ['used', 'new', 'certified'].includes(top[0])) page.kind = top[0] as PageKind; else if (Object.keys(n).length > 1) page.kind = 'all' }
-          if (!verified.some(v => v.url.replace(/\/+$/, '') === page.url.replace(/\/+$/, ''))) { verified.push(page); coveredKinds.add(page.kind) }
+          if (!verified.some(v => scopeKey(v.url) === scopeKey(page.url))) { verified.push(page); coveredKinds.add(page.kind) }
           say(`✓ ${page.url.replace(origin, '') || '/'} — ${cards} vehicles on screen${total ? ` (${total} advertised)` : ''}`)
         }
-        else { rejected.push(page); say(`✗ ${page.url.replace(origin, '') || '/'} — no vehicle listings`) }
+        else { rejected.push(page); say(`✗ ${page.url.replace(origin, '') || '/'} — ${all.length ? `no vehicle listings (${all.length} tile${all.length === 1 ? '' : 's'} without a VIN, stock # or price)` : 'no vehicle listings'}`) }
       }
       catch (e: any) { say(`✗ ${c.href.replace(origin, '')} — ${String(e?.message || e).slice(0, 80)}`) }
     }
-    const candidates = ranked.filter(c => !verified.some(v => v.url.replace(/\/+$/, '') === c.href.replace(/\/+$/, '')) && !rejected.some(v => v.url.replace(/\/+$/, '') === c.href.replace(/\/+$/, '')) && c.source !== 'guess').slice(0, 12)
+    const candidates = ranked.filter(c => !verified.some(v => v.url.replace(/\/+$/, '') === c.href.replace(/\/+$/, '')) && !rejected.some(v => v.url.replace(/\/+$/, '') === c.href.replace(/\/+$/, '')) && c.source !== 'guess' && checkScanPage(c.href).ok).slice(0, 12)
       .map(c => ({ url: c.href, label: niceLabel(c), kind: c.kind, cards: 0, total: null, verified: false, score: c.score, source: c.source }))
     verified.sort((a, b) => ({ used: 0, certified: 1, all: 2, new: 3 }[a.kind] - { used: 0, certified: 1, all: 2, new: 3 }[b.kind]) || (b.total || b.cards) - (a.total || a.cards))
     return { website, pages: verified, candidates, tried, aiUsed, log, ms: Date.now() - t0 }
   }
   finally { await closeTab(t).catch(() => {}) }
+}
+
+/**
+ * Test one scan page: open it and report what is really there — vehicles, a forward to the home
+ * page, nothing, or a refusal. The result is stored on the saved scan page as its health.
+ */
+export async function verifyScanPage(db: Db, dealershipId: string, urlInput: string) {
+  const { loadDealership } = await import('./scanner-session')
+  const { CRM_COLLECTIONS } = await import('./crm')
+  const d = await loadDealership(db, dealershipId)
+  const raw = str(urlInput, 2000)
+  const at = new Date().toISOString()
+  const fit = checkScanPage(raw)
+  let health: ScanPageHealth = { status: 'error', vehicles: 0, advertised: null, at, note: fit.message, landedUrl: null }
+  if (fit.ok) {
+    const url = safeUrl(raw)
+    const t = await openTab()
+    try {
+      await goto(t, url, 25_000)
+      if (t.status && t.status >= 400) health = { ...health, status: t.status === 403 ? 'blocked' : 'error', note: t.status === 404 ? 'This page does not exist (404)' : `The site answered with an error (${t.status})` }
+      else {
+        for (let y = 0; y < 2400; y += 800) { await evaluate(t, `window.scrollTo(0, ${y})`).catch(() => {}); await new Promise(r => setTimeout(r, 250)) }
+        await new Promise(r => setTimeout(r, 600))
+        const r = await evaluate<any>(t, EXTRACT_JS, 30_000).catch(() => null)
+        const landed = String(r?.url || t.url || url).split('#')[0]!
+        const where = landing(url, landed)
+        const all: any[] = Array.isArray(r?.cards) ? r.cards : []
+        const real = all.filter(x => !OFFER_TITLE.test(String(x?.title || '')) && (x?.vin || x?.stock || (x?.year && (x?.price || x?.url))))
+        const total = r?.total ? Number(r.total) : null
+        if (where === 'home' || where === 'offsite') health = { status: 'redirected', vehicles: 0, advertised: null, at, note: where === 'home' ? 'The site forwards this address to its home page — it is not an inventory page' : 'The site forwards this address to another website', landedUrl: landed }
+        else if (!real.length) health = { status: 'empty', vehicles: 0, advertised: total, at, note: all.length ? `No vehicle listings — only ${all.length} offer tile${all.length === 1 ? '' : 's'}` : 'No vehicle listings on this page', landedUrl: where === 'moved' ? landed : null }
+        else health = { status: 'ok', vehicles: real.length, advertised: total, at, note: where === 'moved' ? `Forwards to ${new URL(landed).pathname}` : '', landedUrl: where === 'moved' ? landed : null }
+      }
+    }
+    catch (e: any) { health = { ...health, status: e?.statusCode === 403 ? 'blocked' : 'error', note: e?.statusCode === 403 ? 'The site refused this visit (bot protection) — it may still work in a crawl' : String(e?.message || e).slice(0, 160) } }
+    finally { await closeTab(t).catch(() => {}) }
+  }
+  // Stored only when the address is one of the saved scan pages.
+  await db.collection(CRM_COLLECTIONS.dealerships).updateOne({ _id: d._id, 'scanPages.url': raw }, { $set: { 'scanPages.$.health': health } }).catch(() => {})
+  return { url: raw, health }
 }

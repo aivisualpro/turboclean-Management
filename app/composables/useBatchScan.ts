@@ -16,6 +16,8 @@ export interface BatchItem {
   dealershipId: string, name: string, website: string, urls: string[], status: ItemStatus, scanId: string | null, auditId: string | null
   summary: { total: number, withoutReal: number, withoutRealPct: number | null, by?: Record<string, number> } | null
   error: string | null, claimedAt: string | null, finishedAt: string | null
+  /** The scan pages this crawl covered and how each one went — nothing else on the site was read. */
+  scope?: { url: string, label: string, status: string, vehicles: number, resultPages: number, advertised: number | null, note: string }[]
   email: { mode: 'now' | 'queue', status: 'sent' | 'queued' | 'failed' | 'skipped', emailId?: string | null, draftId?: string | null, to?: string, subject?: string, templateName?: string, error?: string | null, at: string } | null
 }
 export interface Batch {

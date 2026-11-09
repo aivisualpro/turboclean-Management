@@ -81,6 +81,10 @@ export function buildAuditDoc(body: any, dealershipId: string, actor: any) {
   // Coverage: how many of the vehicles the site lists were actually checked (the rest sat behind blocked pages).
   const cv = body.coverage && typeof body.coverage === 'object' ? body.coverage : null
   const coverage = cv ? { checked: int(cv.checked) ?? 0, advertised: int(cv.advertised) ?? null, blockedPages: int(cv.blockedPages) ?? 0 } : null
+  // Scope: the saved scan pages the crawl read (nothing else on the site) and how each one went.
+  const scope = Array.isArray(body.scope)
+    ? body.scope.map((p: any) => ({ url: str(p?.url, 1000), label: str(p?.label, 80), status: str(p?.status, 20), vehicles: int(p?.vehicles) ?? 0, resultPages: int(p?.resultPages) ?? 0, advertised: int(p?.advertised) ?? null, note: str(p?.note, 200) })).filter((p: any) => p.url).slice(0, 40)
+    : []
   const source: AuditSource = AUDIT_SOURCES.includes(body.source) ? body.source : 'manual'
   const counts = { newTotal, usedTotal, newMissingPhotos, usedMissingPhotos }
   return {
@@ -101,6 +105,7 @@ export function buildAuditDoc(body: any, dealershipId: string, actor: any) {
     photoBreakdown,
     pages,
     coverage,
+    scope,
     // Evidence screenshot of the dealership's inventory page (turboCleanCrmFiles) — used by email templates as {{auditScreenshot}}.
     screenshotFileId: /^[a-f0-9]{24}$/i.test(String(body.screenshotFileId || '')) ? String(body.screenshotFileId) : null,
     // Provenance — ready for automated collectors to fill in.

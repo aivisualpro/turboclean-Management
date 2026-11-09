@@ -86,8 +86,11 @@ export const isAd = (v: ScanVehicle) => v.listing ? v.listing === 'ad' : !!v.adR
 /** The vehicles that count (ads left out). */
 export const countable = (vs: ScanVehicle[]) => vs.filter(v => !isAd(v))
 const AD_TEXT = /pre-?approv|value your trade|trade[- ]in value|get approved|apply (now|online)|financ|special offers?|lease (special|offer|deal)|sell (us )?your (car|vehicle)|we buy cars|schedule (a )?(test drive|service)|service (special|coupon)|coupon|rebate|shop online|can.t find|not finding|sign up|subscribe|gift card|award|why buy|learn more|explore (the|our)|build (&|and) price|view (all )?specials/i
-/** Built-in ad check: no VIN, no stock #, no year and no price — or promo wording without a VIN / stock #. */
+/** Built-in ad check: an offer headline — or no VIN, no stock #, no year and no price — or promo wording without a VIN / stock #. */
+/** Offer tiles written like a headline ("Lease a 2027 Corolla LE …", "… (Natl)"): a manufacturer special, even when it links to one car. */
+export const OFFER_TITLE = /^\s*(lease|finance|buy|get|save|drive)\s+(a|an|the|your|up|on|now)\b|\(\s*natl\.?\s*\)|\b\d(\.\d+)?\s*%\s*apr\b|\$\s*\d[\d,]*\s*(\/|per)\s*mo(nth)?\b|\bdue at signing\b/i
 export function adSignal(v: ScanVehicle): string | null {
+  if (OFFER_TITLE.test(v.title || '')) return `Offer tile (“${short(v.title, 50)}”) — a lease / finance special, not a listing`
   if (v.vin || v.stock) return null
   // Promo wording in the card's TITLE (button text like "Get financing" sits on real cards too, so the body is not used).
   const m = (v.title || '').match(AD_TEXT) || (v.title || '').match(/\b(lease|special|event|offer|sale|deal)s?\b/i)

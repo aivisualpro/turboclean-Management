@@ -1,6 +1,7 @@
 /**
  * Data quality: health scan, user/action history, CSV export/import, backups.
  */
+import { checkScanPage } from './scanner-scope'
 import { gzipSync } from 'node:zlib'
 import { BSON, ObjectId } from 'mongodb'
 import type { Db } from 'mongodb'
@@ -146,7 +147,8 @@ export function parseCrawlPages(v: unknown) {
   const seen = new Set<string>()
   for (const c of cells) {
     const url = cleanImportUrl(c)
-    if (!url) { notes.push(c); continue }
+    // A crawl page must be an inventory list — the home page or one vehicle's page is not imported as one.
+    if (!url || !checkScanPage(url).ok) { notes.push(c); continue }
     const k = pageKey(url)
     if (seen.has(k)) continue
     seen.add(k)

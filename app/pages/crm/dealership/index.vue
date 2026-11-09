@@ -13,6 +13,7 @@ import {
 } from 'lucide-vue-next'
 import type { Batch as ScanBatch } from '~/composables/useBatchScan'
 import { toast } from 'vue-sonner'
+import { checkScanPage } from '~/lib/scanScope'
 import { format, formatDistanceToNow } from 'date-fns'
 import { OPEN_STAGES, QUEUE_STAGES, CLOSED_STAGES, DEALERSHIP_STAGES, LEAD_SOURCES, LEAD_SOURCE_STYLE, STAGE_STYLE, STALLED_STAGE_DAYS, WON_STAGE } from '~/constants/crm'
 
@@ -364,7 +365,15 @@ function exportCsv(onlySelected = false) {
 
 // ─── Scan pages & batch scanning (Mission Control) ───
 /** Pages the batch scanner will visit for a dealership — only picked / detected pages, never a bare website. */
-function scanPageCount(d: CrmDealership) { return d.scanPages?.length || 0 }
+function scanPageCount(d: CrmDealership) { return (d.scanPages || []).filter(p => checkScanPage(p.url).ok).length }
+/** Scan pages that need a look: an address that can never be crawled (home page), or one whose last test / crawl found no inventory. */
+function scanPageIssue(d: CrmDealership) {
+  const list = d.scanPages || []
+  const bad = list.find(p => !checkScanPage(p.url).ok)
+  if (bad) return `${checkScanPage(bad.url).short} saved as a scan page — it is never crawled. Click to pick the inventory pages.`
+  const off = list.find(p => p.health && ['redirected', 'empty', 'error'].includes(p.health.status))
+  return off ? `${off.label || off.url}: ${off.health!.note || 'no vehicles found on the last crawl'}. Click to fix.` : ''
+}
 const showPages = ref(false)
 const pagesFor = ref<CrmDealership | null>(null)
 function editPages(d: CrmDealership) { pagesFor.value = d; showPages.value = true }
@@ -797,13 +806,14 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
               <td v-else-if="c.key === 'scanPages'" class="px-3 border-b border-border/60 whitespace-nowrap text-right tabular-nums" :class="rowPad" @click.stop>
                 <button
                   type="button" class="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium transition-colors"
-                  :class="d.scanPages?.length ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300' : d.website ? 'border-amber-500/40 bg-amber-500/5 text-amber-700 hover:bg-amber-500/10 dark:text-amber-300' : 'border-dashed border-border/70 text-muted-foreground/60 hover:text-foreground'"
-                  :title="d.scanPages?.length ? (d.scanPages.map(p => p.label || p.url).join('\n')) : d.website ? 'No scan pages yet — this dealership is skipped by scans. Click to detect or pick its inventory pages.' : 'No website — add one on the dealership first'"
+                  :class="scanPageIssue(d) ? 'border-rose-500/40 bg-rose-500/5 text-rose-700 hover:bg-rose-500/10 dark:text-rose-300' : d.scanPages?.length ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300' : d.website ? 'border-amber-500/40 bg-amber-500/5 text-amber-700 hover:bg-amber-500/10 dark:text-amber-300' : 'border-dashed border-border/70 text-muted-foreground/60 hover:text-foreground'"
+                  :title="scanPageIssue(d) || (d.scanPages?.length ? (d.scanPages.map(p => p.label || p.url).join('\n')) : d.website ? 'No scan pages yet — this dealership is skipped by scans. Click to detect or pick its inventory pages.' : 'No website — add one on the dealership first')"
                   :disabled="!canEdit && !d.scanPages?.length"
                   @click="editPages(d)"
                 >
                   <Layers class="size-3" />
-                  <template v-if="d.scanPages?.length">{{ d.scanPages.length }} page{{ d.scanPages.length === 1 ? '' : 's' }}</template>
+                  <template v-if="scanPageIssue(d)">{{ scanPageCount(d) ? `${scanPageCount(d)} page${scanPageCount(d) === 1 ? '' : 's'} · check` : 'Fix pages' }}</template>
+                  <template v-else-if="d.scanPages?.length">{{ d.scanPages.length }} page{{ d.scanPages.length === 1 ? '' : 's' }}</template>
                   <template v-else-if="d.website">Pick pages</template>
                   <template v-else>—</template>
                 </button>

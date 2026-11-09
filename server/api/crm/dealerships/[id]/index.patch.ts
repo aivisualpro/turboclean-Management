@@ -7,11 +7,12 @@ import { NURTURE_STAGE, applyParkingFields } from '../../../../utils/crm-followu
 import { convertDealershipToDealer } from '../../../../utils/crm-convert'
 import { getUserSession } from '../../../../utils/auth'
 import { syncOpenLoss } from '../../../../utils/crm-lost'
-import { normalizeBrands, normalizeCity, normalizePhone, normalizeRoute, normalizeState } from '../../../../utils/crm-normalize'
+import { normalizeBrands, normalizeCity, normalizePhone, normalizeState } from '../../../../utils/crm-normalize'
 import { duplicateDealershipError, findDealershipDuplicates } from '../../../../utils/crm-duplicates'
+import { sanitizeScanPages } from '../../../../utils/scanner-scope'
 
 const EDITABLE = ['name', 'dealerGroup', 'brands', 'website', 'address', 'city', 'state', 'zip', 'phone',
-  'territory', 'route', 'assignedUserId', 'assignedUserName', 'leadSource', 'leadSourceDetail', 'stage', 'notes', 'tags'] as const
+  'territory', 'assignedUserId', 'assignedUserName', 'leadSource', 'leadSourceDetail', 'stage', 'notes', 'tags'] as const
 
 export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')!
@@ -32,7 +33,6 @@ export default defineEventHandler(async (event) => {
       case 'tags': $set[k] = Array.isArray(v) ? v.map((x: any) => str(x, 60)).filter(Boolean) : []; break
       case 'state': $set.state = normalizeState(v).slice(0, 60); break
       case 'city': $set.city = normalizeCity(v); break
-      case 'route': $set.route = normalizeRoute(v); break
       case 'phone': $set.phone = normalizePhone(v); break
       case 'website': $set.website = normalizeUrl(v); break
       case 'leadSource': if (!LEAD_SOURCES.includes(v)) throw createError({ statusCode: 400, statusMessage: 'Unknown lead source' }); $set.leadSource = v; break
@@ -47,13 +47,15 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  // Inventory pages the scanner should cover for this dealership (used by Scrape and batch scans).
+  // Scan pages: the only pages the crawler reads for this dealership. Each must be an inventory list —
+  // the home page or a single vehicle's page is refused (with the reason) instead of being saved.
   if ('scanPages' in body) {
-    const list = Array.isArray(body.scanPages) ? body.scanPages : []
-    const seen = new Set<string>()
-    $set.scanPages = list.map((p: any) => ({ url: normalizeUrl(typeof p === 'string' ? p : p?.url), label: str(typeof p === 'string' ? '' : p?.label, 80) }))
-      .filter((p: any) => { if (!p.url || seen.has(p.url) || !/^https?:\/\/[^\s/]+\.[^\s/]+/i.test(p.url)) return false; seen.add(p.url); return true })
-      .slice(0, 40)
+    const { pages, rejected } = sanitizeScanPages(body.scanPages, before.scanPages)
+    // A bad address that was already saved earlier is simply dropped; a new one is refused out loud.
+    const had = new Set((Array.isArray(before.scanPages) ? before.scanPages : []).map((p: any) => String(p?.url || p || '').trim()))
+    const fresh = rejected.filter(r => !had.has(r.url))
+    if (fresh.length) throw createError({ statusCode: 400, statusMessage: 'Not an inventory page', message: `${fresh[0]!.url} — ${fresh[0]!.message}`, data: { code: 'scan-page', rejected: fresh } })
+    $set.scanPages = pages
   }
 
   if ('estMonthlyValue' in body) {

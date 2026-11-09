@@ -43,6 +43,7 @@ const q = ref('')
 const cond = ref<'all' | 'new' | 'used'>('all')
 /** Crawl page (URL) filter — shown when the crawl covered 2+ pages. */
 const page = ref('')
+const scope = computed(() => props.results.scope || [])
 const crawlPages = computed<{ url: string, label: string, total: number, withoutReal: number, withoutRealPct: number | null }[]>(() => ((r.value as any).crawlPages || []).filter((p: any) => p.total > 0))
 const shortPath = (u: string) => { try { return new URL(u).pathname.replace(/\/$/, '') || '/' } catch { return u } }
 const shown = ref(120)
@@ -207,6 +208,9 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
         <label class="flex items-center justify-between gap-2 pt-1 border-t text-xs"><span>Count stock images as no photo</span><Switch :model-value="r.countStockAsMissing" :disabled="busy" @update:model-value="toggleStock" /></label>
       </div>
     </section>
+
+    <!-- Scope: the saved scan pages this crawl read — and nothing else -->
+    <CrmScannerScopeReport v-if="scope.length" :rows="scope" class="shrink-0 border-b bg-card" />
 
     <div class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px]">
       <!-- Vehicles -->

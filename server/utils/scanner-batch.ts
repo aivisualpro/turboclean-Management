@@ -26,6 +26,7 @@ import { CRM_COLLECTIONS, str } from './crm'
 import { createHmac } from 'node:crypto'
 import { safeUrl } from './scanner-session'
 import { isServerless } from './scanner-cdp'
+import { sanitizeScanPages, scopeOf } from './scanner-scope'
 
 export const BATCHES_COLLECTION = 'turboCleanScannerBatches'
 export type ItemStatus = 'queued' | 'running' | 'done' | 'stopped' | 'failed' | 'skipped' | 'cancelled'
@@ -49,6 +50,8 @@ export interface BatchItem {
   attempts?: number
   /** Live mirror of the running scan (progress line), refreshed by the live endpoint. */
   progressText?: string
+  /** The scan pages this crawl covered and how each went (done / blocked / redirected / empty …). */
+  scope?: { url: string, label: string, status: string, vehicles: number, resultPages: number, advertised: number | null, note: string }[]
 }
 
 const who = (a: SessionActor | null | undefined) => a ? { id: a.id, name: a.name } : null
@@ -73,10 +76,27 @@ export function serializeBatch(b: any) {
   }
 }
 
-/** The pages a dealership's scan should cover: its saved scan pages, else its website. */
-/** Only pages someone picked (or discovery verified) — a bare website is not scanned any more. */
+/**
+ * The pages a dealership's crawl covers: its saved scan pages that are real inventory lists.
+ * The bare website (home page) is never crawled — a dealership without scan pages is skipped.
+ */
 export function pagesFor(d: any): string[] {
-  return (Array.isArray(d?.scanPages) ? d.scanPages : []).map((p: any) => typeof p === 'string' ? p : p?.url).filter(Boolean)
+  const out: string[] = []
+  for (const p of scopeOf(d).pages) { try { out.push(safeUrl(p.url)) } catch {} }
+  return out
+}
+const noPagesReason = (d: any) => {
+  const { rejected } = scopeOf(d)
+  if (rejected.length) return `Its saved scan page cannot be crawled: ${rejected[0]!.message}`
+  return d?.website ? 'No scan pages picked — detect or pick its inventory pages first' : 'No website on this dealership'
+}
+/** Save page lists typed in Mission Control as the dealership's scan pages — labels and health of pages that stay are kept, bad addresses are refused. */
+async function rememberPages(db: Db, d: any, urls: any[], now: string) {
+  const { pages, rejected } = sanitizeScanPages(urls, d.scanPages)
+  const same = JSON.stringify((d.scanPages || []).map((p: any) => p?.url || p)) === JSON.stringify(pages.map(p => p.url))
+  if (pages.length && !same) await db.collection(CRM_COLLECTIONS.dealerships).updateOne({ _id: d._id }, { $set: { scanPages: pages, updatedAt: now } })
+  if (pages.length) d.scanPages = pages
+  return { pages, rejected }
 }
 
 export async function createBatch(db: Db, body: any, actor: SessionActor) {
@@ -86,23 +106,23 @@ export async function createBatch(db: Db, body: any, actor: SessionActor) {
   const docs = await db.collection(CRM_COLLECTIONS.dealerships).find({ _id: { $in: ids.map((i: string) => new ObjectId(i)) } }).toArray()
   const byId = new Map(docs.map(d => [d._id.toString(), d]))
   const now = new Date().toISOString()
+  // Page lists typed in the console become the dealership's scan pages first — the crawl then reads exactly those.
+  const refused = new Map<string, string>()
+  for (const [id, urls] of Object.entries(overrides)) {
+    const d = byId.get(id)
+    if (!d || !Array.isArray(urls)) continue
+    const r = await rememberPages(db, d, urls, now)
+    if (!r.pages.length && r.rejected.length) refused.set(id, r.rejected[0]!.message)
+  }
   const items: BatchItem[] = ids.filter((id: string) => byId.has(id)).map((id: string) => {
     const d = byId.get(id)!
-    const raw = (Array.isArray(overrides[id]) ? overrides[id]! : pagesFor(d)).map(u => str(u, 2000)).filter(Boolean).slice(0, 30)
-    const urls: string[] = []
-    for (const u of raw) { try { urls.push(safeUrl(u)) } catch {} }
+    const urls = refused.has(id) ? [] : pagesFor(d).slice(0, 40)
     return {
       dealershipId: id, name: d.name || '', website: d.website || '', urls,
       status: urls.length ? 'queued' : 'skipped', scanId: null, auditId: null, summary: null,
-      error: urls.length ? null : (d?.website ? 'No scan pages picked — detect or pick its inventory pages first' : 'No website on this dealership'), claimedAt: null, finishedAt: null, email: null,
+      error: urls.length ? null : refused.has(id) ? `Not crawled: ${refused.get(id)}` : noPagesReason(d), claimedAt: null, finishedAt: null, email: null,
     } as BatchItem
   })
-  // Remember page lists typed in the console as the dealership's scan pages for next time.
-  for (const [id, urls] of Object.entries(overrides)) {
-    if (!byId.has(id) || !Array.isArray(urls)) continue
-    const clean = urls.map(u => { try { return safeUrl(str(u, 2000)) } catch { return '' } }).filter(Boolean).slice(0, 30)
-    if (clean.length) await db.collection(CRM_COLLECTIONS.dealerships).updateOne({ _id: new ObjectId(id) }, { $set: { scanPages: clean.map(url => ({ url, label: '' })), updatedAt: now } })
-  }
   const doc = {
     name: str(body?.name, 120) || `${items.length} dealership${items.length === 1 ? '' : 's'} · ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
     status: 'running', items, concurrency: Math.min(3, Math.max(1, Number(body?.concurrency) || 2)), autoSave: body?.autoSave !== false,
@@ -157,7 +177,16 @@ export async function updateBatchItem(db: Db, batchId: string, dealershipId: str
 
 /** Re-queue one dealership (retry a failed / skipped item, optionally with new pages). */
 export async function requeueItem(db: Db, batchId: string, dealershipId: string, urls?: string[], opts: { resume?: boolean } = {}) {
-  const clean = (urls || []).map(u => { try { return safeUrl(str(u, 2000)) } catch { return '' } }).filter(Boolean).slice(0, 30)
+  // New pages given with a retry become the dealership's scan pages (the crawl only reads saved scan pages).
+  let clean: string[] = []
+  if (urls?.length && ObjectId.isValid(dealershipId)) {
+    const d = await db.collection(CRM_COLLECTIONS.dealerships).findOne({ _id: new ObjectId(dealershipId) })
+    if (d) {
+      const r = await rememberPages(db, d, urls.map(u => str(u, 2000)), new Date().toISOString())
+      if (!r.pages.length) throw createError({ statusCode: 400, statusMessage: 'Not an inventory page', message: r.rejected[0]?.message || 'Add at least one inventory page' })
+      clean = pagesFor(d)
+    }
+  }
   const current = await db.collection(BATCHES_COLLECTION).findOne({ _id: oid(batchId) }, { projection: { items: 1 } })
   const item = ((current?.items || []) as BatchItem[]).find(i => i.dealershipId === dealershipId)
   // A paused / interrupted scan picks up where it left off (also a crash, when asked); a failed one starts clean.
@@ -391,8 +420,9 @@ export async function runBatchItem(db: Db, batchId: string, dealershipId: string
   const { createScan } = await import('./scanner-session')
   const actor = { id: b.createdBy?.id || 'system', name: b.createdBy?.name || 'Batch', email: '' } as SessionActor
   try {
-    const { doc, run } = await createScan(db, { dealershipId, urls: item.urls, allPages: true, batchId, autoSave: b.autoSave !== false, appendTo: item.resumeFrom || undefined }, actor)
-    await updateBatchItem(db, batchId, dealershipId, { scanId: String(doc._id), error: null })
+    // No addresses are passed: the crawl reads the dealership's scan pages as they are saved right now.
+    const { doc, run } = await createScan(db, { dealershipId, allPages: true, batchId, autoSave: b.autoSave !== false, appendTo: item.resumeFrom || undefined }, actor)
+    await updateBatchItem(db, batchId, dealershipId, { scanId: String(doc._id), error: null, urls: doc.urls })
     await run(() => {}, { isClosed: () => true })
   }
   catch (e: any) {

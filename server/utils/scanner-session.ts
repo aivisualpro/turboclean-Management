@@ -24,8 +24,10 @@ import { CRM_COLLECTIONS, str } from './crm'
 import { isServerless, openBrowser, SCANNER_VIEWPORT, scannerProxy } from './scanner-cdp'
 import type { BrowserHandle, CdpConnection } from './scanner-cdp'
 import { ANALYZE_FN_JS, EXTRACT_JS, FIND_NEXT_JS, HOTSPOTS_JS, NAV_LINKS_JS, SCANNER_BOOTSTRAP_JS, SCROLL_STEP_JS } from './scanner-page'
-import { classify, countable, downloadImage, finalVerdict, listRules, RULES_COLLECTION, summarize, VERDICT_LABEL } from './scanner-images'
+import { classify, countable, downloadImage, finalVerdict, isAd, listRules, RULES_COLLECTION, summarize, VERDICT_LABEL } from './scanner-images'
 import type { ImageCluster, ImageInfo, PhotoVerdict, ScanVehicle } from './scanner-images'
+import { checkScanPage, healthFromScope, inList, landing, matchScanPage, scopeKey, scopeOf, shortPath } from './scanner-scope'
+import type { ScopeEntry } from './scanner-scope'
 
 export const SCANS_COLLECTION = 'turboCleanScannerScans'
 export const ENGINE_VERSION = '2.0'
@@ -49,7 +51,9 @@ export interface ScanProgress { phase: ScanPhase, page: number, vehicles: number
   /** Result pages the dealer's site refused (bot protection) — retried later from this exact page. */
   blocked?: { url: string, href: string, page: number, at: string }[]
   /** Lists whose "next page" never moved although the site lists more vehicles. */
-  stuck?: { url: string, page: number }[] }
+  stuck?: { url: string, page: number }[]
+  /** The crawl plan: every saved scan page this crawl covers and what happened to it. Nothing outside it is read. */
+  scope?: ScopeEntry[] }
 export type ScanStatus = 'running' | 'done' | 'stopped' | 'failed' | 'saved' | 'interrupted'
 
 const g = globalThis as any
@@ -293,7 +297,7 @@ async function settleAfterInPageNav(t: Tab, urlBefore: string) {
  * Open the next result page the way a visitor would, and get past bot protection when it blocks us.
  * 1. a real click on the link (same-site referrer, trusted event) — or the page's own navigation
  * 2. blocked → pause, re-open the last good page (lets the site's bot check run), slow scroll, try again
- * 3. still blocked → fresh session (cookies cleared), via the home page, then the result page
+ * 3. still blocked → fresh session (cookies cleared) on the list itself, then the result page
  * Returns false when the site keeps refusing — the caller keeps a checkpoint so a later retry continues here.
  */
 /** Forget everything the site stored (cookies, cache, local/session storage) and open `url` as a first visit from Google. */
@@ -343,18 +347,25 @@ async function followNextLink(t: Tab, href: string, lastGood: string, log: (s: s
   try { await goto(t, lastGood, 25_000, log, new URL(lastGood).origin + '/') } catch {}
   await evaluate(t, SCROLL_STEP_JS).catch(() => {}); await sleep(1_500); await evaluate(t, SCROLL_STEP_JS).catch(() => {}); await sleep(3_000)
   if (!(await isBlockedPage(t)) && (await attempt('assign')) === true) { log('Got through on the second try'); return true }
-  log('Still blocked — starting a fresh session through the home page')
-  await t.conn.send('Network.clearBrowserCookies', {}, t.sid).catch(() => {})
+  // Last try: forget the site's cookies and arrive on the list itself as a new visitor — never through the home page.
+  log('Still blocked — opening the list again as a brand-new visitor')
   await sleep(5_000)
   try {
-    const origin = new URL(lastGood).origin
-    await goto(t, `${origin}/`, 25_000, log, 'https://www.google.com/')
-    await evaluate(t, SCROLL_STEP_JS).catch(() => {}); await sleep(4_000)
-    await evaluate(t, `location.assign(${JSON.stringify(lastGood)})`, 5_000).catch(() => {})
-    await settleAfterInPageNav(t, `${origin}/`)
-    await sleep(3_000)
-    if (!(await isBlockedPage(t)) && (await attempt('assign')) === true) { log('Got through with a fresh session'); return true }
-  } catch {}
+    if ((await freshVisit(t, lastGood, log)) && (await attempt('assign')) === true) { log('Got through with a fresh session'); return true }
+  } catch (e: any) { if (isBrowserGone(e)) throw e }
+  return false
+}
+
+/**
+ * A scan page the site refused on the very first request: come back as a brand-new visitor (twice,
+ * with a pause). Only this address is opened — the crawler does not wander to the home page.
+ */
+async function reopenRefused(t: Tab, url: string, log: (s: string) => void) {
+  log('The dealer\'s site refused this page (bot protection) — opening it as a fresh first visit')
+  if (await freshVisit(t, url, log)) { log('Got through as a fresh visitor'); return true }
+  log('Still refused — pausing, then one more fresh visit')
+  await sleep(9_000 + Math.round(Math.random() * 4_000))
+  if (await freshVisit(t, url, log)) { log('Got through on the second try'); return true }
   return false
 }
 
@@ -390,6 +401,10 @@ export async function previewSite(db: Db, dealershipId: string, urlInput: string
       shot = await t.conn.send('Page.captureScreenshot', { format: 'jpeg', quality: 45, captureBeyondViewport: true, clip: { x: 0, y: 0, width: SCANNER_VIEWPORT.width, height, scale: 1 } }, t.sid, 30_000)
     }
     const finalUrl = (await evaluate<string>(t, 'location.href').catch(() => '')) || t.url || url
+    // Is the page on screen one of the saved scan pages? (Only those are crawled.)
+    const { pages: savedPages } = scopeOf(d)
+    const onScan = matchScanPage(finalUrl, savedPages) || matchScanPage(url, savedPages)
+    const fit = checkScanPage(finalUrl)
     // Link positions → the snapshot becomes clickable; menu links → a Pages list.
     const hot = await evaluate<{ spots: any[], pages: any[] }>(t, HOTSPOTS_JS(height), 15_000).catch(() => ({ spots: [], pages: [] }))
     return {
@@ -404,6 +419,7 @@ export async function previewSite(db: Db, dealershipId: string, urlInput: string
       hotspots: Array.isArray(hot?.spots) ? hot.spots : [],
       pages: Array.isArray(hot?.pages) ? hot.pages : [],
       detected: { cards: cards?.cards?.length || 0, advertised: cards?.total || null, strategy: cards?.strategy || null },
+      scope: { isScanPage: !!onScan, scanPageUrl: onScan?.url || null, canSave: fit.ok, problem: fit.ok ? '' : fit.message, forwarded: landing(url, finalUrl) },
     }
   }
   finally { await closeTab(t) }
@@ -469,6 +485,8 @@ export function resultsOf(doc: ScanDoc) {
     vehicles: doc.vehicles.map(v => ({ ...v, listUrl: listKey(v, doc), final: finalVerdict(v, cmap) })), clusters: doc.clusters, images,
     // Results per crawl page (URL) — the review screen can filter by page.
     crawlPages: pageBreakdown(doc, null, cmap).map(p => ({ url: p.url, label: p.label, total: p.total, withoutReal: p.withoutReal, withoutRealPct: p.withoutRealPct })),
+    // Scope: the saved scan pages this crawl covered — status, result pages and numbers for each. Nothing else was read.
+    scope: scopeReport(doc, cmap),
     savedAuditId: doc.auditId, revisesAuditId: doc.revisesAuditId || null, labels: VERDICT_LABEL, finishedAt: doc.progress.finishedAt,
   }
 }
@@ -549,15 +567,40 @@ function vehicleKey(c: any) {
 }
 
 /**
+ * The crawl plan for a dealership: its saved scan pages (all of them, or the ones asked for).
+ * An address that is not a saved scan page is refused — there is no "crawl the website" fallback.
+ */
+export function crawlPlan(d: any, requested: string[] = []) {
+  const { pages: saved, rejected } = scopeOf(d)
+  const fail = (statusMessage: string, message: string) => createError({ statusCode: 422, statusMessage, message, data: { code: 'scope', rejected } })
+  if (!saved.length) {
+    if (rejected.length) throw fail('Scan page is not an inventory page', `${rejected.length === 1 ? 'The saved scan page' : 'The saved scan pages'} for ${d.name || 'this dealership'} cannot be crawled: ${rejected[0]!.message}. Open Scan pages and pick the page that lists the vehicles.`)
+    throw fail('No scan pages yet', `${d.name || 'This dealership'} has no scan pages. Crawls only read saved scan pages — add its inventory pages first (Scan pages → Detect, or paste the address).`)
+  }
+  const notes: string[] = rejected.map(r => `Left out: ${shortPath(r.url)} — ${r.message.split(' — ')[0]}`)
+  let picked = saved
+  if (requested.length) {
+    picked = []
+    const outside: string[] = []
+    for (const r of requested) { const m = matchScanPage(r, saved); if (m) { if (!picked.includes(m)) picked.push(m) } else outside.push(r) }
+    if (!picked.length) throw fail('Not a scan page', `“${shortPath(outside[0]!)}” is not one of ${d.name || 'this dealership'}'s scan pages. Crawls only read saved scan pages — save it as a scan page first.`)
+    for (const o of outside) notes.push(`Left out: ${shortPath(o)} — not a saved scan page`)
+  }
+  const pages: { url: string, label: string, crawlUrl: string }[] = []
+  for (const p of picked) { try { pages.push({ url: p.url, label: p.label, crawlUrl: safeUrl(p.url) }) } catch { notes.push(`Left out: ${shortPath(p.url)} — not a public web address`) } }
+  if (!pages.length) throw fail('No scan pages yet', 'None of the saved scan pages is a public web address.')
+  return { pages, notes }
+}
+
+/**
  * Start a scan: validates, creates the stored scan and returns it plus a `run(emit)` function that
  * does the work and streams events. `appendTo` continues an earlier scan (e.g. New after Used).
  */
 export async function createScan(db: Db, body: any, actor: SessionActor) {
   const d = await loadDealership(db, str(body?.dealershipId, 40))
-  const urlList = (Array.isArray(body?.urls) ? body.urls : []).map((u: any) => str(u, 2000)).filter(Boolean).slice(0, 30)
-  const raw = urlList[0] || str(body?.url, 2000) || d.website
-  if (!raw) throw createError({ statusCode: 400, statusMessage: 'This dealership has no website — add one first' })
-  const urls = (urlList.length ? urlList : [raw]).map(safeUrl)
+  // ── Scope: a crawl reads the dealership's saved scan pages and nothing else (never the bare website). ──
+  const plan = crawlPlan(d, [...(Array.isArray(body?.urls) ? body.urls : []), body?.url].map((u: any) => str(u, 2000)).filter(Boolean).slice(0, 40))
+  const urls = plan.pages.map(p => p.crawlUrl)
   const url = urls[0]!
   const dealershipId = String(d._id)
   const col = db.collection<ScanDoc>(SCANS_COLLECTION)
@@ -567,18 +610,34 @@ export async function createScan(db: Db, body: any, actor: SessionActor) {
   const base = body?.appendTo ? await getScan(db, str(body.appendTo, 40)) : null
   if (base && base.dealershipId !== dealershipId) throw createError({ statusCode: 400, statusMessage: 'That scan belongs to another dealership' })
   const now = new Date().toISOString()
-  const progress: ScanProgress = { phase: 'collecting', page: 0, vehicles: base?.vehicles.length || 0, advertised: base?.progress.advertised ?? null, analyzed: 0, toAnalyze: 0, message: 'Opening the website…', startedAt: now, finishedAt: null, pagesVisited: base ? [...base.progress.pagesVisited] : [], doneUrls: base ? [...(base.progress.doneUrls || [])] : [], resumeAt: base?.progress.resumeAt || null, advertisedByUrl: { ...(base?.progress.advertisedByUrl || {}) }, blocked: [...(base?.progress.blocked || [])] }
+  // Checkpoints and results of a continued scan only count for pages that are still in scope.
+  const inPlan = (u: string) => urls.includes(u)
+  const prior = new Map((base?.progress.scope || []).map(e => [e.url, e]))
+  const scope: ScopeEntry[] = plan.pages.map((p) => {
+    const was = prior.get(p.crawlUrl)
+    const done = !!base?.progress.doneUrls?.includes(p.crawlUrl)
+    return { url: p.crawlUrl, savedUrl: p.url, label: p.label || '', status: done ? (was?.status === 'empty' ? 'empty' : 'done') : 'pending', vehicles: was?.vehicles || 0, resultPages: was?.resultPages || 0, advertised: was?.advertised ?? null, landedUrl: was?.landedUrl || null, note: done ? (was?.note || '') : '' } as ScopeEntry
+  })
+  const progress: ScanProgress = {
+    phase: 'collecting', page: 0, vehicles: base?.vehicles.length || 0, advertised: base?.progress.advertised ?? null, analyzed: 0, toAnalyze: 0,
+    message: urls.length === 1 ? 'Opening the scan page…' : `Opening ${urls.length} scan pages…`, startedAt: now, finishedAt: null,
+    pagesVisited: base ? [...base.progress.pagesVisited] : [], doneUrls: base ? (base.progress.doneUrls || []).filter(inPlan) : [],
+    resumeAt: base?.progress.resumeAt && inPlan(base.progress.resumeAt.url) ? base.progress.resumeAt : null,
+    advertisedByUrl: Object.fromEntries(Object.entries(base?.progress.advertisedByUrl || {}).filter(([u]) => inPlan(u))), blocked: (base?.progress.blocked || []).filter(b => inPlan(b.url)), scope,
+  }
   const doc: ScanDoc = {
     scannerVersion: ENGINE_VERSION, dealershipId, dealershipName: d.name || '', status: 'running', stopRequested: false, startUrl: url, urls, allPages: body?.allPages !== false,
     batchId: str(body?.batchId, 40) || null, autoSave: !!body?.autoSave,
     progress, log: [], vehicles: base ? base.vehicles.map(v => ({ ...v })) : [], images: base ? base.images.map(i => ({ ...i })) : [], clusters: base ? base.clusters.map(c => ({ ...c })) : [],
     countStockAsMissing: base ? base.countStockAsMissing : true, auditId: null, error: null, heartbeatAt: now, createdAt: now, createdBy: { id: actor.id, name: actor.name },
   }
+  const at = new Date().toISOString()
+  for (const note of plan.notes) doc.log.push({ at, text: note })
   if (base) {
     // Continue the same scan record so one audit covers both lists.
     await col.updateOne({ _id: base._id }, { $set: { status: 'running', stopRequested: false, startUrl: url, urls, progress, heartbeatAt: now, auditId: null, revisesAuditId: base.auditId || base.revisesAuditId || null, error: null, batchId: doc.batchId, autoSave: doc.autoSave } })
     doc._id = base._id
-    doc.log = base.log || []
+    doc.log = [...(base.log || []), ...doc.log]
     doc.revisesAuditId = base.auditId || base.revisesAuditId || null
   }
   else {
@@ -682,15 +741,34 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     const startCount = doc.vehicles.length
     const urls = doc.urls?.length ? doc.urls : [doc.startUrl]
     let pageNo = 0
+    // ── Scope: one entry per saved scan page; the crawl reads these lists and nothing else. ──
+    doc.progress.scope ||= []
+    const scopeEntry = (url: string): ScopeEntry => {
+      let e = doc.progress.scope!.find(x => x.url === url)
+      if (!e) { e = { url, label: '', status: 'pending', vehicles: 0, resultPages: 0, advertised: null }; doc.progress.scope!.push(e) }
+      return e
+    }
+    const mark = (e: ScopeEntry, patch: Partial<ScopeEntry>) => { Object.assign(e, patch); emit('progress', doc.progress) }
+    const restartedList = new Set<string>()
+    if (urls.length > 1) log(`Crawl plan: ${urls.length} scan pages — only these lists are read`)
     for (let u = 0; u < urls.length && !stop; u++) {
     try {
     const startUrl = urls[u]!
     const countBefore = doc.vehicles.length
     doc.progress.doneUrls ||= []
+    const entry = scopeEntry(startUrl)
+    const listCount = () => doc.vehicles.reduce((n, v) => n + (v.listUrl === startUrl ? 1 : 0), 0)
+    /** Result pages of this list live under this address (the scan page, or where the site forwarded it). */
+    let listBase = startUrl
+    let emptyHere = false
+    let timeUp = false
     if (doc.progress.doneUrls.includes(startUrl)) { log(`Already collected: ${startUrl.replace(/^https?:\/\/[^/]+/, '') || '/'} — skipping (saved earlier)`); continue }
     const resumeAt = doc.progress.resumeAt?.url === startUrl ? doc.progress.resumeAt : null
-    log(urls.length > 1 ? `Inventory page ${u + 1} of ${urls.length}: ${startUrl.replace(/^https?:\/\/[^/]+/, '') || '/'}` : `Opening ${startUrl.replace(/^https?:\/\//, '')}`)
-    setProgress({ message: 'Loading the inventory page…' })
+    log(urls.length > 1 ? `Scan page ${u + 1} of ${urls.length}: ${startUrl.replace(/^https?:\/\/[^/]+/, '') || '/'}` : `Opening scan page ${startUrl.replace(/^https?:\/\//, '')}`)
+    mark(entry, { status: 'running', note: '' })
+    setProgress({ message: urls.length > 1 ? `Scan page ${u + 1} of ${urls.length}: loading…` : 'Loading the scan page…' })
+    // Result pages are numbered per list: page 1 is the scan page itself.
+    pageNo = 0
     if (resumeAt) { log(`Continuing from result page ${resumeAt.page} where the last run stopped`); pageNo = resumeAt.page - 1 }
     let openBlocked = false
     try {
@@ -706,15 +784,49 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
         try { await goto(tab, target, 25_000, log, `${new URL(target).origin}/`) }
         catch (e: any) {
           if (e?.statusCode !== 403) throw e
-          // Refused straight away: fresh session through the home page, then this page.
-          if ((await followNextLink(tab, target, `${new URL(target).origin}/`, log)) !== true) openBlocked = true
+          // Refused straight away: come back to this same address as a new visitor (no detour through the home page).
+          if (!(await reopenRefused(tab, target, log))) openBlocked = true
         }
       }
       if (openBlocked) {
         doc.progress.blocked = [...(doc.progress.blocked || []).filter(b => b.url !== startUrl), { url: startUrl, href: target, page: resumeAt?.page || 1, at: new Date().toISOString() }]
         log(`The site refused ${target.replace(/^https?:\/\/[^/]+/, '') || '/'} — kept as a checkpoint for a retry`)
+        mark(entry, { status: 'blocked', vehicles: listCount(), note: resumeAt?.page ? `The site refused result page ${resumeAt.page}` : 'The site refused this page (bot protection)' })
         await persist(true)
         continue
+      }
+      // ── Scope guard: did the address land on the list we were asked to read? ──
+      const landed = (await evaluate<string>(tab, 'location.href', 5_000).catch(() => '')) || tab.url || target
+      const where = /^https?:/i.test(landed) ? landing(startUrl, landed) : 'same'
+      if (where === 'home' || where === 'offsite') {
+        if (resumeAt && !restartedList.has(startUrl)) {
+          // The saved result page no longer exists — read the list from its first page instead.
+          restartedList.add(startUrl)
+          doc.progress.resumeAt = null
+          log('The saved result page no longer opens — starting this list from its first page')
+          u--
+          continue
+        }
+        const note = where === 'home' ? 'The site forwards this address to its home page — it is not an inventory page' : `The site forwards this address to another website (${(() => { try { return new URL(landed).hostname } catch { return 'unknown' } })()})`
+        mark(entry, { status: 'redirected', landedUrl: landed, vehicles: listCount(), note })
+        log(`✗ ${shortPath(startUrl)} — ${note}. Nothing was read from it.`)
+        await persist(true)
+        continue
+      }
+      if (where === 'moved') {
+        // Two saved addresses that end on the same list are read once.
+        const twin = doc.progress.scope!.find(x => x !== entry && ['done', 'stuck', 'blocked'].includes(x.status) && (scopeKey(x.url) === scopeKey(landed) || (!!x.landedUrl && scopeKey(x.landedUrl) === scopeKey(landed))))
+        if (twin && !resumeAt) {
+          const name = twin.label || shortPath(twin.url)
+          log(`The site forwards this address to ${shortPath(landed)} — the same list as “${name}”, already read`)
+          doc.progress.doneUrls.push(startUrl)
+          mark(entry, { status: 'done', landedUrl: landed, vehicles: 0, note: `Same list as “${name}” — read once` })
+          await persist(true)
+          continue
+        }
+        listBase = landed
+        entry.landedUrl = landed
+        log(`The site forwards this address to ${shortPath(landed)} — reading that list`)
       }
       // Click-paginated lists (no page address): fast-forward to the saved result page without re-reading the ones before it.
       if (resumeAt?.clicks) {
@@ -727,7 +839,12 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
         }
       }
     }
-    catch (e: any) { if (isBrowserGone(e)) throw e; if (urls.length > 1) { log(`Skipped: ${e?.message || e}`); continue } throw e }
+    catch (e: any) {
+      if (isBrowserGone(e)) throw e
+      mark(entry, { status: e?.statusCode === 403 ? 'blocked' : 'error', note: String(e?.message || e).slice(0, 160) })
+      if (urls.length > 1) { log(`Skipped: ${e?.message || e}`); continue }
+      throw e
+    }
     let ckBase = resumeAt?.href || startUrl
     let ckClicks = resumeAt?.clicks || 0
     let blockedHere: { url: string, href: string, page: number, at: string } | null = null
@@ -786,10 +903,11 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       const revisit = doc.progress.pagesVisited.includes(res?.url || tab.url)
       if (!revisit) doc.progress.pagesVisited.push(res?.url || tab.url)
       await persist(true)
-      log(`Page ${page}: ${pageCards} cards on screen, ${added} new — ${res?.strategy === 'known' ? 'recognised layout' : 'detected by structure'}`)
-      if (pageCards === 0 && p === 1) { log('No vehicle cards on this page — moving on'); break }
+      log(`${urls.length > 1 ? 'Result page' : 'Page'} ${page}: ${pageCards} cards on screen, ${added} new — ${res?.strategy === 'known' ? 'recognised layout' : 'detected by structure'}`)
+      mark(entry, { vehicles: listCount(), resultPages: Math.max(entry.resultPages, page), advertised: doc.progress.advertisedByUrl?.[startUrl] ?? entry.advertised })
+      if (pageCards === 0 && p === 1) { log('No vehicle cards on this page — moving on'); emptyHere = !resumeAt; break }
       if (!doc.allPages || doc.vehicles.length >= MAX_VEHICLES) break
-      if (Date.now() >= collectUntil) { log('Time limit for collecting reached — checking the photos found so far'); stop = stop || u < urls.length - 1; break }
+      if (Date.now() >= collectUntil) { log('Time limit for collecting reached — checking the photos found so far'); timeUp = true; stop = stop || u < urls.length - 1; break }
       // Nothing new twice in a row = going in circles (also right after a restart, where one repeat is normal).
       zeroStreak = added === 0 && p > 1 ? zeroStreak + 1 : 0
       if (added === 0 && p > 1 && (!revisit || zeroStreak >= 2)) break
@@ -798,7 +916,15 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       const next = await evaluate<any>(tab, FIND_NEXT_JS).catch(() => null)
       if (tab.conn.closed) throw new Error('Browser connection is closed')
       if (!next) break
+      /** More vehicles are advertised than we have: leaving now means this list is only partly read. */
+      const shortOfAdvertised = () => { const adv = doc.progress.advertisedByUrl?.[startUrl]; return !!adv && listCount() < adv }
       if (next.kind === 'href') {
+        // Scope guard: a "next" link is only followed while it stays inside this list.
+        if (!inList(listBase, String(next.href))) {
+          log(`The “${next.label}” link leads outside this list (${shortPath(String(next.href))}) — not followed`)
+          if (shortOfAdvertised()) stuckPage = page + 1
+          break
+        }
         log(`${next.label} → ${String(next.href).replace(/^https?:\/\/[^/]+/, '')}`)
         // Checkpoint: a restart re-opens this exact result page instead of page 1.
         const lastGood = tab.url || ckBase
@@ -815,6 +941,12 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
           break
         }
         if (!through) { blockedHere = { url: startUrl, href: ckBase, page: page + 1, at: new Date().toISOString() }; break }
+        if (/^https?:/i.test(tab.url) && !inList(listBase, tab.url)) {
+          log(`The next page left this list (${shortPath(tab.url)}) — stopping this list here; nothing is read from that page`)
+          doc.progress.resumeAt = null
+          if (shortOfAdvertised()) stuckPage = page + 1
+          break
+        }
       }
       else {
         log(`Clicking “${next.label}”`)
@@ -826,6 +958,11 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
         await waitForSettle(tab, 15_000)
         // Checkpoint: if the click changed the address use it; otherwise remember how many clicks from the last address.
         const urlAfter = tab.url
+        if (urlAfter && urlAfter !== urlBefore && /^https?:/.test(urlAfter) && !inList(listBase, urlAfter)) {
+          log(`“${next.label}” left this list (${shortPath(urlAfter)}) — stopping this list here; nothing is read from that page`)
+          if (shortOfAdvertised()) stuckPage = page + 1
+          break
+        }
         if (urlAfter && urlAfter !== urlBefore && /^https?:/.test(urlAfter)) { ckBase = urlAfter; ckClicks = 0 }
         else ckClicks++
         doc.progress.resumeAt = { url: startUrl, href: ckBase, page: page + 1, clicks: ckClicks }
@@ -839,15 +976,30 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       // Keep the checkpoint: a retry (autopilot does it automatically) continues from this exact result page.
       doc.progress.blocked = [...(doc.progress.blocked || []).filter(b => b.url !== startUrl), blockedHere]
       log(`The site kept refusing result page ${blockedHere.page} — kept what was collected; a retry continues from page ${blockedHere.page}`)
+      mark(entry, { status: 'blocked', vehicles: listCount(), note: `The site refused result page ${blockedHere.page} (bot protection)` })
       await persist(true)
     }
-    else if (!stop) { doc.progress.doneUrls.push(startUrl); doc.progress.resumeAt = null; doc.progress.blocked = (doc.progress.blocked || []).filter(b => b.url !== startUrl); await persist(true) }
+    else if (!stop) {
+      doc.progress.doneUrls.push(startUrl); doc.progress.resumeAt = null; doc.progress.blocked = (doc.progress.blocked || []).filter(b => b.url !== startUrl)
+      mark(entry, {
+        vehicles: listCount(),
+        status: emptyHere ? 'empty' : stuckPage || timeUp ? 'stuck' : 'done',
+        note: emptyHere ? 'No vehicle cards on this page' : stuckPage ? `Could not get past result page ${stuckPage - 1}` : timeUp ? 'Time limit reached before the end of this list' : '',
+      })
+      await persist(true)
+    }
+    else mark(entry, { status: 'stuck', vehicles: listCount(), note: pausing ? 'Paused — continues from here' : 'Stopped before the end of this list' })
     }
     catch (e: any) {
       // Same inventory page again on a fresh browser (already-collected vehicles are de-duplicated).
       if (await restartBrowser(e)) { u--; continue }
       throw e
     }
+    }
+    // Scan pages the crawl never reached (stopped / paused early) say so instead of staying "pending".
+    for (const e of doc.progress.scope || []) {
+      if (e.status === 'pending') Object.assign(e, { status: 'skipped', note: pausing ? 'Not reached yet — continues when resumed' : 'Not reached — the crawl was stopped early' })
+      else if (e.status === 'running') Object.assign(e, { status: 'stuck', note: e.note || 'Stopped before the end of this list' })
     }
     if (doc.vehicles.length === startCount && startCount > 0) log('Nothing new on these pages — keeping the vehicles found earlier')
     if (pausing) {
@@ -859,7 +1011,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       if (doc.batchId) await batchNote(db, doc, 'stopped', { error: null }).catch(() => {})
       return
     }
-    if (doc.vehicles.length === 0) throw createError({ statusCode: 422, statusMessage: 'No vehicle cards found', message: urls.length > 1 ? 'No vehicle cards were found on any of the pages — check the scan pages for this dealership.' : 'No vehicle cards found on this page. Pick the inventory / search results page (e.g. Used Inventory), then press Continue.' })
+    if (doc.vehicles.length === 0) throw createError({ statusCode: 422, statusMessage: 'No vehicle cards found', message: emptyScopeMessage(doc) })
     // Keep what was collected even if the photo step is cut short.
     await col.updateOne({ _id: doc._id }, { $set: { vehicles: doc.vehicles, progress: doc.progress, heartbeatAt: new Date().toISOString() } }).catch(() => {})
 
@@ -867,6 +1019,10 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     try { await analyzePhotos(tab, doc, { setProgress, log, deadline: analyzeUntil, db }) }
     catch (e: any) { if (!(await restartBrowser(e))) throw e; await analyzePhotos(tab, doc, { setProgress, log, deadline: analyzeUntil, db }) }
     await reclassify(db, doc, log)
+    refreshScopeCounts(doc)
+    await recordPageHealth(db, doc)
+    const off = (doc.progress.scope || []).filter(e => e.status === 'redirected' || e.status === 'empty' || e.status === 'error')
+    if (off.length) log(`${off.length} scan page${off.length === 1 ? '' : 's'} need${off.length === 1 ? 's' : ''} attention: ${off.map(e => `${e.label || shortPath(e.url)} (${SCOPE_WORD[e.status] || e.status})`).join(' · ')}`)
 
     const sum = summarize(doc.vehicles, doc.clusters, { countStockAsMissing: doc.countStockAsMissing })
     const blockedPages = doc.progress.blocked || []
@@ -891,17 +1047,19 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       catch (e: any) { log(`Could not save the audit: ${e?.message || e}`) }
     }
     emit('done', { id: String(doc._id), status: doc.status, summary: sum, auditId })
-    if (doc.batchId) batchNote(db, doc, doc.status === 'stopped' ? 'stopped' : 'done', { summary: { total: sum.total, withoutReal: sum.withoutReal, withoutRealPct: sum.withoutRealPct, by: sum.by, advertised: advertisedTotal(doc) }, auditId, error: doc.error || null }).catch(() => {})
+    if (doc.batchId) batchNote(db, doc, doc.status === 'stopped' ? 'stopped' : 'done', { summary: { total: sum.total, withoutReal: sum.withoutReal, withoutRealPct: sum.withoutRealPct, by: sum.by, advertised: advertisedTotal(doc) }, auditId, error: doc.error || null, scope: scopeBrief(doc) }).catch(() => {})
   }
   catch (e: any) {
     const message = e?.message || e?.statusMessage || 'Scan failed'
     doc.status = 'failed'
+    for (const e of doc.progress.scope || []) if (e.status === 'pending' || e.status === 'running') Object.assign(e, { status: e.status === 'running' ? 'error' : 'skipped', note: e.status === 'running' ? message.slice(0, 160) : 'Not reached' })
     Object.assign(doc.progress, { phase: 'error', message, finishedAt: new Date().toISOString() })
+    await recordPageHealth(db, doc).catch(() => {})
     log(`Scan failed: ${message}`)
     await col.updateOne({ _id: doc._id }, { $set: { status: 'failed', error: message, progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, heartbeatAt: new Date().toISOString() } }).catch(() => {})
     emit('progress', doc.progress)
     emit('failure', { message })
-    if (doc.batchId) batchNote(db, doc, 'failed', { error: message }).catch(() => {})
+    if (doc.batchId) batchNote(db, doc, 'failed', { error: message, scope: scopeBrief(doc) }).catch(() => {})
   }
   finally {
     if (frameTimer) clearInterval(frameTimer)
@@ -916,6 +1074,65 @@ const isBrowserGone = (e: any) => /connection is closed|Target closed|Session cl
 async function batchNote(db: Db, doc: ScanDoc, status: 'running' | 'done' | 'stopped' | 'failed', extra: Record<string, any> = {}) {
   const { updateBatchItem } = await import('./scanner-batch')
   await updateBatchItem(db, doc.batchId!, doc.dealershipId, { status, scanId: String(doc._id), ...extra })
+}
+
+// ───────────────────────── Scope report ─────────────────────────
+const SCOPE_WORD: Record<string, string> = { pending: 'waiting', running: 'reading', done: 'read in full', empty: 'no vehicles found', redirected: 'forwards to the home page', blocked: 'blocked by the site', stuck: 'partly read', skipped: 'not reached', error: 'could not be opened' }
+
+/** Why a crawl found nothing, in terms of its scan pages. */
+function emptyScopeMessage(doc: ScanDoc) {
+  const sc = doc.progress.scope || []
+  const names = (list: ScopeEntry[]) => list.length === 1 ? `“${shortPath(list[0]!.url)}”` : `${list.length} scan pages`
+  const red = sc.filter(e => e.status === 'redirected')
+  const blk = sc.filter(e => e.status === 'blocked')
+  const fix = 'Open Scan pages and pick the page that lists the vehicles.'
+  if (red.length && red.length === sc.length) return `${names(red)} ${red.length === 1 ? 'forwards' : 'forward'} to the website's home page, so ${red.length === 1 ? 'it is' : 'they are'} not an inventory page. Nothing was read. ${fix}`
+  if (blk.length && blk.length === sc.length) return `Blocked by the dealer's site: it refused ${names(blk)} (bot protection). Nothing could be read — try again later.`
+  const bits = sc.map(e => `${shortPath(e.url)} — ${SCOPE_WORD[e.status] || e.status}`)
+  return `No vehicle cards were found on ${names(sc)}${sc.length > 1 ? ` (${bits.join(' · ')})` : red.length ? ' — it forwards to the home page' : ''}. ${fix}`
+}
+
+/** After the photo check: per scan page, vehicles really counted (advertisement tiles left out). */
+function refreshScopeCounts(doc: ScanDoc) {
+  const n = new Map<string, { v: number, ads: number }>()
+  for (const v of doc.vehicles) { const k = listKey(v, doc); const c = n.get(k) || { v: 0, ads: 0 }; if (isAd(v)) c.ads++; else c.v++; n.set(k, c) }
+  for (const e of doc.progress.scope || []) { const c = n.get(e.url); e.vehicles = c?.v || 0; e.ads = c?.ads || 0 }
+}
+
+/** Compact scope for batch items (Mission Control shows it without loading the scan). */
+function scopeBrief(doc: ScanDoc) {
+  return (doc.progress.scope || []).map(e => ({ url: e.url, label: e.label, status: e.status, vehicles: e.vehicles, resultPages: e.resultPages, advertised: e.advertised ?? null, note: e.note || '' }))
+}
+
+/** Remember on every saved scan page how its last crawl went (the health badge next to the page). */
+async function recordPageHealth(db: Db, doc: ScanDoc) {
+  const { ObjectId } = await import('mongodb')
+  if (!ObjectId.isValid(doc.dealershipId)) return
+  const at = new Date().toISOString()
+  for (const e of doc.progress.scope || []) {
+    const h = healthFromScope(e, at)
+    if (!h) continue
+    await db.collection(CRM_COLLECTIONS.dealerships).updateOne({ _id: new ObjectId(doc.dealershipId), 'scanPages.url': e.savedUrl || e.url }, { $set: { 'scanPages.$.health': h } }).catch(() => {})
+  }
+}
+
+/** The scope report: every scan page of the crawl with its status and numbers (older scans: rebuilt from their checkpoints). */
+export function scopeReport(doc: ScanDoc, cmap: Map<string, any>) {
+  const by = new Map(pageBreakdown(doc, null, cmap).map(p => [p.url, p]))
+  const ads = new Map<string, number>()
+  for (const v of doc.vehicles) if (isAd(v)) { const k = listKey(v, doc); ads.set(k, (ads.get(k) || 0) + 1) }
+  const urls = doc.urls?.length ? doc.urls : [doc.startUrl]
+  const entries: ScopeEntry[] = doc.progress.scope?.length ? doc.progress.scope : urls.map((url) => {
+    const blocked = (doc.progress.blocked || []).find(b => b.url === url)
+    const stuck = (doc.progress.stuck || []).find(b => b.url === url)
+    const b = by.get(url)
+    return { url, label: b?.label || KIND_LABEL[pageKind(url, [])] || 'Inventory', status: blocked ? 'blocked' : stuck ? 'stuck' : b ? 'done' : doc.progress.doneUrls?.includes(url) ? 'empty' : 'skipped', vehicles: b?.total || 0, resultPages: 0, advertised: doc.progress.advertisedByUrl?.[url] ?? null, note: blocked ? `The site refused result page ${blocked.page}` : '' } as ScopeEntry
+  })
+  const analysed = doc.progress.phase !== 'collecting'
+  return entries.map((e) => {
+    const b = by.get(e.url)
+    return { url: e.url, label: b?.label || e.label || KIND_LABEL[pageKind(e.url, [])] || 'Inventory', status: e.status, statusText: SCOPE_WORD[e.status] || e.status, vehicles: analysed ? (b?.total || 0) : e.vehicles, ads: ads.get(e.url) || 0, resultPages: e.resultPages || 0, advertised: e.advertised ?? null, landedUrl: e.landedUrl || null, note: e.note || '', withoutReal: b?.withoutReal ?? 0, withoutRealPct: b?.withoutRealPct ?? null }
+  })
 }
 
 /** What the dealer's lists say they have in total (sum over the inventory pages that showed a count). */
@@ -1090,6 +1307,8 @@ export function pageBreakdown(doc: ScanDoc, d: any, cmap: Map<string, any>) {
   for (const v of countable(doc.vehicles)) { const k = listKey(v, doc); groups.set(k, [...(groups.get(k) || []), v]) }
   const saved = new Map<string, string>((Array.isArray(d?.scanPages) ? d.scanPages : []).map((p: any) => [String(p?.url || '').replace(/\/$/, ''), String(p?.label || '')]))
   const order = doc.urls?.length ? doc.urls : [doc.startUrl]
+  // The label given when the crawl started (the saved scan page's own name) beats a guess from the address.
+  for (const e of doc.progress.scope || []) { const k = e.url.replace(/\/$/, ''); if (e.label && !saved.get(k)) saved.set(k, e.label) }
   return [...groups.entries()]
     .sort((a, b) => (order.indexOf(a[0]) + 1 || 99) - (order.indexOf(b[0]) + 1 || 99))
     .map(([url, vs]) => {
@@ -1119,6 +1338,8 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
   if (adv && adv > sum.total) parts.push(`Coverage: checked ${sum.total} of the ${adv} vehicles the site lists${blockedN ? ` — the site's bot protection refused ${blockedN} result page${blockedN === 1 ? '' : 's'}` : ''}. Percentages are of the vehicles checked.`)
   const byPage = pageBreakdown(doc, d, cmap)
   if (byPage.length > 1) parts.push(`By crawl page: ${byPage.map(p => `${p.label} — ${p.total} vehicles, ${p.withoutReal} without a real photo`).join(' · ')}.`)
+  const scope = scopeReport(doc, cmap)
+  parts.push(`Scope: ${scope.length} saved scan page${scope.length === 1 ? '' : 's'}, nothing else on the site — ${scope.map(e => `${e.label} (${e.statusText}${e.vehicles ? `, ${e.vehicles} vehicles` : ''}${e.resultPages > 1 ? `, ${e.resultPages} result pages` : ''})`).join(' · ')}.`)
   // Used cars first, then "No photo" before stock images — the strongest evidence leads; spread across the crawl pages.
   const ranked = without.filter(v => v.url)
     .sort((a, b) => (Number(a.condition === 'new') - Number(b.condition === 'new')) || (Number(finalVerdict(a, cmap) === 'stock') - Number(finalVerdict(b, cmap) === 'stock')))
@@ -1134,6 +1355,7 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
     inventoryUrl: doc.urls?.[0] || pages[0] || doc.startUrl,
     pages: byPage,
     coverage: { checked: sum.total, advertised: adv, blockedPages: blockedN },
+    scope: scope.map(e => ({ url: e.url, label: e.label, status: e.status, vehicles: e.vehicles, resultPages: e.resultPages, advertised: e.advertised, note: e.note })),
     examples: picked.map((v) => { const f = finalVerdict(v, cmap); return { url: v.url, label: `${v.title}${v.stock ? ` #${v.stock}` : ''} — ${VERDICT_LABEL[f]}`, title: v.title, stock: v.stock, price: v.price, condition: v.condition, verdict: f, listUrl: listKey(v, doc) } }),
     photoBreakdown: { real: sum.by.real, placeholder: sum.by.placeholder, missing: sum.by.missing, stock: sum.by.stock, countStockAsMissing: doc.countStockAsMissing },
     merchandisingIssues: [
