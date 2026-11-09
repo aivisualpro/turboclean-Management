@@ -75,7 +75,8 @@ function getAppSheetImageUrl(fileName: string | undefined | null) {
   if (!fileName) return null
   if (fileName.startsWith('http://') || fileName.startsWith('https://')) return fileName
   const encodedName = encodeURIComponent(fileName)
-  return `https://www.appsheet.com/template/gettablefileurl?appName=ZRZOperationsAPP-109704988&tableName=WorkOrders&fileName=${encodedName}`
+  // `&v=2`: unsigned links failed while AppSheet URL signing was on (until 2026-11-09) and browsers cached those failures
+  return `https://www.appsheet.com/template/gettablefileurl?appName=ZRZOperationsAPP-109704988&tableName=WorkOrders&fileName=${encodedName}&v=2`
 }
 
 // ─── Tree Data Fetching ──────────────────────────────────────────────────
