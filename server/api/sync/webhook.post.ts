@@ -144,16 +144,48 @@ export default defineEventHandler(async (event) => {
           console.log(`[Webhook] EDIT mapped to mongoDoc:`, JSON.stringify(mongoDoc).slice(0, 300))
 
           
-          let filter: any
-          try {
-            filter = { _id: new ObjectId(rowId) }
-          }
-          catch {
-            filter = { _id: rowId }
+          // Same id rule as "add": 24-hex → ObjectId, anything else (AppSheet keys like "dded698c") → string.
+          // Look under both forms so a row stored either way is found.
+          const isHex24 = /^[0-9a-fA-F]{24}$/.test(String(rowId))
+          const lookupIds: any[] = isHex24 ? [new ObjectId(rowId), String(rowId)] : [String(rowId)]
+          let existing = await collection.findOne({ _id: { $in: lookupIds } })
+          const filter: any = { _id: existing ? existing._id : lookupIds[0] }
+
+          // Self-heal: AppSheet edited a row the app never received (its "add" webhook failed or never
+          // fired, e.g. during the 2026-11-06 key outage). Before, updateOne matched nothing and the
+          // change was silently dropped — now the row is created from the full AppSheet row instead.
+          if (!existing) {
+            // ...unless the web app deleted it moments ago (its Delete may still be on its way to AppSheet)
+            const recentDelete = await db.collection('turboCleanSyncOutbox').findOne({
+              table,
+              action: 'Delete',
+              rowKey: String(rowId),
+              createdAt: { $gte: new Date(Date.now() - 10 * 60_000) },
+            }, { projection: { _id: 1 } }).catch(() => null)
+            if (recentDelete) {
+              console.log(`[Webhook] EDIT for ${table}/${rowId}: deleted in the web app recently — not re-creating it`)
+              results.push({ success: true, action: 'edited', id: String(rowId), matched: 0, isEcho: true })
+              break
+            }
+            try {
+              await collection.insertOne({
+                ...mongoDoc,
+                _id: filter._id,
+                createdAt: mongoDoc.createdAt || new Date(),
+                updatedAt: new Date(),
+                healedFromEditAt: new Date(),
+              } as any)
+              console.log(`[Webhook] EDIT for ${table}/${rowId}: row was missing in the app — created it (self-heal)`)
+              results.push({ success: true, action: 'added', id: String(rowId), healed: true })
+              break
+            }
+            catch (e: any) {
+              if (e?.code !== 11000) throw e
+              // Created by a concurrent "add" webhook a moment ago → fall through to a normal edit
+              existing = await collection.findOne(filter)
+            }
           }
 
-          const existing = await collection.findOne(filter)
-          
           // Echo prevention: If the web-ui updated this document recently,
           // this webhook is just an echo of our own appSheetEdit() call.
           // SKIP the MongoDB write entirely to prevent any overwriting.
