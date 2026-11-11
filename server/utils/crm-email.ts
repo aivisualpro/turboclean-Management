@@ -22,7 +22,7 @@
  */
 import { createHash, createHmac as createHmacNode } from 'node:crypto'
 import { ObjectId } from 'mongodb'
-import { auditBreakdown, auditEvidence, auditPages, inventoryByPage, newInventoryNote, RAW_HTML_FIELDS, usedPhotoBar } from './crm-email-blocks'
+import { auditBreakdown, auditEvidence, auditGallery, auditPages, CRM_FILE_TOKEN, inventoryByPage, newInventoryNote, RAW_HTML_FIELDS, usedPhotoBar } from './crm-email-blocks'
 import { getReportSettings, reportUrl as auditReportUrl, stripHistory, trendVars } from './crm-reports'
 import type { ReportSettings } from './crm-reports'
 import type { Db } from 'mongodb'
@@ -99,11 +99,14 @@ export const MERGE_FIELDS = [
   'totalVehicles', 'totalMissingPhotos', 'missingPhotoPct', 'inventoryUrl', 'auditScreenshot', 'replyMailto',
   // Inventory Scanner detail + ready-made HTML blocks (see crm-email-blocks.ts)
   'usedWithPhotos', 'placeholderImages', 'noImageCount', 'stockImages',
-  'auditEvidence', 'auditBreakdown', 'usedPhotoBar', 'newInventoryNote', 'inventoryByPage', 'inventoryPageCount', 'inventoryPageList',
+  'auditEvidence', 'auditGallery', 'usedMissingHeadline', 'usedMissingTitle', 'auditBreakdown', 'usedPhotoBar', 'newInventoryNote', 'inventoryByPage', 'inventoryPageCount', 'inventoryPageList',
   // Then vs now (vs the audit closest to ~3 months earlier) + public report link
   'prevAuditDate', 'prevUsedTotal', 'prevUsedMissingPhotos', 'prevUsedMissingPhotoPct', 'prevTotalMissingPhotos', 'usedMissingChange', 'usedMissingPctChange', 'auditPeriod', 'trendWord', 'auditTrend', 'auditHistoryChart', 'reportUrl',
 ] as const
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+/** `__CRMFILE__/<id>` (a stored picture inside a block) → an address the app can load. Sending embeds the file instead. */
+export const crmFilesToUrls = (html: string, base = '') => String(html || '').split(CRM_FILE_TOKEN).join(`${base}/api/crm/files/`)
 export interface SenderProfile { displayName: string, title: string, company: string, phone: string, email: string, tagline: string, region: string }
 
 export function mergeVars(dealership: any, contact: any, sender: Partial<SenderProfile> & { name?: string } | null, audit: any = null, extra: { replyTo?: string, subject?: string, history?: any[], reportUrl?: string, onePerDay?: boolean } = {}) {
@@ -142,6 +145,11 @@ export function mergeVars(dealership: any, contact: any, sender: Partial<SenderP
     noImageCount: n(audit?.photoBreakdown?.missing),
     stockImages: n(audit?.photoBreakdown?.stock),
     auditEvidence: audit ? auditEvidence({ ...audit, auditDateUpper: d ? `${MONTHS[d.getUTCMonth()]!.toUpperCase()} ${String(d.getUTCDate()).padStart(2, '0')}, ${d.getUTCFullYear()}` : '' }, { screenshot: audit?.screenshotFileId ? '__AUDIT_SCREENSHOT__' : '' }) : '',
+    // Evidence gallery: the flagged listings pictured as the dealer's site shows them (pictures are embedded when the email is sent).
+    auditGallery: audit ? auditGallery(audit, { screenshot: audit?.screenshotFileId ? '__AUDIT_SCREENSHOT__' : '', assetBase: PUBLIC_URL(), reportUrl: extra.reportUrl || '', auditDate: d ? `${MONTHS_LONG[d.getUTCMonth()]} ${String(d.getUTCDate()).padStart(2, '0')}` : '' }) : '',
+    // "23 pre-owned vehicles" / "1 pre-owned vehicle" (headline) and the same in Title Case (subject line).
+    usedMissingHeadline: Number(audit?.usedMissingPhotos) > 0 ? `${audit.usedMissingPhotos} pre-owned vehicle${Number(audit.usedMissingPhotos) === 1 ? '' : 's'}` : '',
+    usedMissingTitle: Number(audit?.usedMissingPhotos) > 0 ? `${audit.usedMissingPhotos} Pre-Owned Vehicle${Number(audit.usedMissingPhotos) === 1 ? '' : 's'}` : '',
     auditBreakdown: audit ? auditBreakdown(audit) : '',
     usedPhotoBar: audit ? usedPhotoBar(audit) : '',
     newInventoryNote: audit ? newInventoryNote(audit) : '',
@@ -162,7 +170,8 @@ export function renderMerge(text: string, vars: Record<string, string>, opts: { 
     const v = vars[key]
     if (v) return RAW_HTML_FIELDS.has(key) ? (opts.html ? v : htmlToText(v).trim()) : opts.html ? esc(v) : v
     if (fallback !== undefined) return opts.html ? esc(fallback.trim()) : fallback.trim()
-    missing.add(key)
+    // A block that has nothing to show simply leaves no trace — that is not a missing field.
+    if (!RAW_HTML_FIELDS.has(key)) missing.add(key)
     return ''
   })
   return { text: out, missing: [...missing] }
@@ -526,6 +535,19 @@ export async function sendCrmEmail(db: Db, dealership: any, input: SendInput, ac
     const merged = renderMerge(version.html, vars, { html: true }).text
     bodyHtml = merged.replace(/__AUDIT_SCREENSHOT__/g, shot ? `<img src="cid:audit-shot" alt="Inventory page screenshot" width="100%" style="display:block;width:100%;max-width:600px;height:auto;border:0" />` : '')
     if (shot && bodyHtml.includes('cid:audit-shot')) attachments.push({ content: shot.data.toString('base64'), filename: shot.filename, contentType: shot.contentType, contentId: 'audit-shot' })
+    // Listing pictures ({{auditGallery}}) travel inside the message, so they show without "display images" and
+    // keep showing after the dealer's site changes. A picture that is gone falls back to its address on the app.
+    const pictureIds = [...new Set([...bodyHtml.matchAll(/__CRMFILE__\/([a-f0-9]{24})/gi)].map(m => m[1]!))].slice(0, 12)
+    for (const fid of pictureIds) {
+      const file = await getFile(db, fid).catch(() => null)
+      const cid = `listing-${fid}`
+      if (file) {
+        attachments.push({ content: file.data.toString('base64'), filename: `${cid}.jpg`, contentType: file.contentType, contentId: cid })
+        inlineFiles.push({ cid, fileId: fid })
+      }
+      bodyHtml = bodyHtml.split(`${CRM_FILE_TOKEN}${fid}`).join(file ? `cid:${cid}` : `${PUBLIC_URL()}/api/crm/files/${fid}`)
+    }
+    bodyHtml = crmFilesToUrls(bodyHtml, PUBLIC_URL())
     bodyText = renderMerge(version.body || htmlToText(version.html), vars).text.replace(/__AUDIT_SCREENSHOT__/g, '').trim()
   } else {
     bodyText = renderMerge(typedBody || version?.body || '', vars).text.replace(/__AUDIT_SCREENSHOT__/g, '').trim()
@@ -651,7 +673,7 @@ export async function previewCrmEmail(db: Db, dealership: any, input: SendInput,
   const useHtml = version?.format === 'html' && (!typedBody || typedBody === version.body)
   if (useHtml) {
     const merged = renderMerge(version.html, vars, { html: true })
-    const html = merged.text.replace(/__AUDIT_SCREENSHOT__/g, audit?.screenshotFileId ? `<img src="/api/crm/files/${audit.screenshotFileId}" alt="Inventory page screenshot" style="display:block;width:100%;max-width:600px;height:auto;border:0" />` : '')
+    const html = crmFilesToUrls(merged.text.replace(/__AUDIT_SCREENSHOT__/g, audit?.screenshotFileId ? `<img src="/api/crm/files/${audit.screenshotFileId}" alt="Inventory page screenshot" style="display:block;width:100%;max-width:600px;height:auto;border:0" />` : ''))
     return { subject: subj.text, html, format: 'html', missing: [...new Set([...subj.missing, ...merged.missing])], auditDate: audit?.auditedAt || null }
   }
   const b = renderMerge(typedBody || version?.body || '', vars)
@@ -680,10 +702,10 @@ export async function emailPreviewDocument(db: Db, dealership: any, input: { tem
   const p = await previewCrmEmail(db, dealership, { templateId: input.templateId, templateVersion: version?.version, contactId, subject, body: '' } as any, actor)
   let body = p.html
   // Screenshot: same-origin URL → embedded image (the PDF printer is not signed in).
-  const m = body.match(/\/api\/crm\/files\/([a-f0-9]{24})/i)
-  if (m) {
-    const file = await getFile(db, m[1]!).catch(() => null)
-    body = body.split(`/api/crm/files/${m[1]}`).join(file ? `data:${file.contentType};base64,${file.data.toString('base64')}` : '')
+  // (the screenshot and every listing picture of the gallery)
+  for (const fid of [...new Set([...body.matchAll(/\/api\/crm\/files\/([a-f0-9]{24})/gi)].map(m => m[1]!))].slice(0, 16)) {
+    const file = await getFile(db, fid).catch(() => null)
+    body = body.split(`/api/crm/files/${fid}`).join(file ? `data:${file.contentType};base64,${file.data.toString('base64')}` : '')
   }
   const sender = await getSenderProfile(db, actor)
   const head = body.match(/<head[^>]*>([\s\S]*?)<\/head>/i)?.[1] || ''
@@ -742,6 +764,8 @@ export async function templatePreviewContext(db: Db, input: any, actor: SessionA
     const rs = await getReportSettings(db)
     vars = applyEmailChartSetting(mergeVars(SAMPLE_DEALERSHIP, SAMPLE_CONTACT, sender, SAMPLE_AUDIT, { replyTo, subject, history: SAMPLE_HISTORY, reportUrl: '#sample-report', onePerDay: rs.onePointPerDay }), rs)
   }
+  // Pictures inside blocks load from the app in previews (a real send embeds them in the message).
+  for (const k of RAW_HTML_FIELDS) if (vars[k]) vars[k] = crmFilesToUrls(vars[k]!)
   return {
     source, dealershipName, vars, rawFields: [...RAW_HTML_FIELDS],
     screenshotHtml: audit?.screenshotFileId ? `<img src="/api/crm/files/${audit.screenshotFileId}" alt="Inventory page screenshot" style="display:block;width:100%;max-width:600px;height:auto;border:0" />` : '',
@@ -1390,6 +1414,46 @@ export async function seedDefaultTemplates(db: Db) {
   await seedMissingPhotosV2(db)
   await seedThenVsNow(db)
   await seedMissingPhotosV3(db)
+  await seedMissingPhotosV4(db)
+}
+/**
+ * V4 of "Missing Photos": the inventory audit email in the look of the hand-sent "Westbrook Honda |
+ * Inventory Audit" message — charcoal header, three-line headline, three numbers, the flagged
+ * listings pictured as evidence, why it matters, 01 / 02 / 03, one button, point-of-contact footer.
+ * Added once as the new active version with its own subject line; earlier versions and subject
+ * lines stay in the history and can be re-activated from the Templates tab.
+ */
+async function seedMissingPhotosV4(db: Db) {
+  const counters = db.collection(CRM_COLLECTIONS.counters)
+  const flag = await counters.findOne({ _id: 'crmEmailSeedV4' as any })
+  if (flag?.done) return
+  const claim = await counters.updateOne({ _id: 'crmEmailSeedV4' as any, startedAt: { $exists: false } }, { $set: { startedAt: new Date().toISOString() } }, { upsert: true }).catch(() => null)
+  if (!claim || (!claim.upsertedCount && !claim.modifiedCount)) return
+  try {
+    const { templates } = await emailDb(db)
+    const { MISSING_PHOTOS_HTML_V4 } = await import('./crm-email-seed')
+    const note = 'Inventory audit email — charcoal header, headline, three numbers, listing photos as evidence, 01/02/03, one button, contact footer'
+    const subject = '{{dealership}} | Inventory Audit: {{usedMissingTitle|Pre-Owned Vehicles}} Missing Photos'
+    const existing = await templates.findOne({ name: 'Missing Photos' })
+    if (!existing) {
+      await createTemplate(db, {
+        name: 'Missing Photos', category: 'First touch',
+        description: 'Inventory audit email from the latest crawl: pre-owned vehicles missing photos, the flagged listings pictured as evidence, what ZRZ OPS does differently, 10-minute review CTA.',
+        subject, format: 'html', html: MISSING_PHOTOS_HTML_V4, label: 'V4', note,
+      }, null)
+    }
+    else if (!normalizeTemplate(existing).versions.some((v: any) => v.note === note)) {
+      await updateTemplate(db, existing._id.toString(), {
+        newVersion: { format: 'html', html: MISSING_PHOTOS_HTML_V4, label: `V${Math.max(0, ...normalizeTemplate(existing).versions.map((v: any) => Number(v.version) || 0)) + 1}`, note, retireOthers: true },
+        addSubject: { text: subject, retireOthers: true },
+      }, null)
+    }
+    await counters.updateOne({ _id: 'crmEmailSeedV4' as any }, { $set: { done: true, finishedAt: new Date().toISOString() } })
+  }
+  catch (e: any) {
+    await counters.deleteOne({ _id: 'crmEmailSeedV4' as any }).catch(() => {})
+    throw e
+  }
 }
 /**
  * V3 of "Missing Photos": the branded inventory review (deep-green ZRZ OPS look from the

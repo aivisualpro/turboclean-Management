@@ -21,6 +21,8 @@ const FIELD_HELP: Record<string, string> = {
   placeholderImages: 'listings showing a "photos coming soon" placeholder', noImageCount: 'listings with no image at all', stockImages: 'listings using stock images',
   inventoryUrl: 'URL of the inventory page that was reviewed', replyMailto: 'mailto: link that replies to this email (use for CTA buttons)',
   auditScreenshot: 'HTML BLOCK: inventory page screenshot (only if an audit has one) — prefer {{auditEvidence}}',
+  auditGallery: 'HTML BLOCK: "EVIDENCE / DEALERSHIP WEBSITE REVIEW" box — up to six flagged listings pictured the way the dealer\'s website shows them (photo, title, price, issue tag, each linked) inside a browser-style frame, with an "Audit finding" caption (renders nothing without data). The strongest proof — use it once, alone in its row.',
+  usedMissingHeadline: 'headline phrase, e.g. "23 pre-owned vehicles" (singular handled)', usedMissingTitle: 'the same in Title Case for subject lines, e.g. "23 Pre-Owned Vehicles"',
   auditEvidence: 'HTML BLOCK: "Spot-check it yourself" card listing real vehicles without photos with "View listing" links (renders nothing without data)',
   auditBreakdown: 'HTML BLOCK: "What we found" card (placeholder / no image / stock counts)',
   usedPhotoBar: 'HTML BLOCK: green/red bar "with real photos vs without" for used inventory',

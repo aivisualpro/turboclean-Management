@@ -62,6 +62,10 @@ export function buildAuditDoc(body: any, dealershipId: string, actor: any) {
         // Optional detail from the Inventory Scanner (used by the email evidence block).
         ...(e?.title ? { title: str(e.title, 160), stock: str(e?.stock, 40), price: str(e?.price, 40), condition: str(e?.condition, 20), verdict: str(e?.verdict, 20) } : {}),
         ...(e?.listUrl ? { listUrl: str(e.listUrl, 1000) } : {}),
+        // The photo the listing showed when it was audited: our stored copy (emails embed it), the dealer's own address as a fallback, and its size.
+        ...(/^[a-f0-9]{24}$/i.test(String(e?.imageFileId || '')) ? { imageFileId: String(e.imageFileId) } : {}),
+        ...(/^https:\/\//i.test(String(e?.imageUrl || '')) ? { imageUrl: str(e.imageUrl, 1000) } : {}),
+        ...(int(e?.imageW) && int(e?.imageH) ? { imageW: int(e.imageW), imageH: int(e.imageH) } : {}),
       })).filter((e: any) => e.url).slice(0, 50)
     : []
   // Photo verdict breakdown from the Inventory Scanner (real / placeholder / no image / stock).

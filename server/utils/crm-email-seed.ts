@@ -649,3 +649,155 @@ export const MISSING_PHOTOS_HTML_V3 = `<!doctype html>
 </table>
 </body>
 </html>`
+
+/**
+ * "Missing Photos" V4 — the inventory audit email as it is sent by hand today (reference: "Westbrook
+ * Honda | Inventory Audit: 23 Pre-Owned Vehicles Missing Photos"):
+ *   charcoal header with the green rule · greeting and the three-line headline · "at a glance"
+ *   numbers · EVIDENCE: the flagged listings pictured as the dealer's website shows them
+ *   ({{auditGallery}}) · why it matters · what ZRZ OPS does differently (01 / 02 / 03) ·
+ *   one question and one button · point-of-contact footer.
+ * Square corners, one green, Helvetica — measured from the reference (colours sampled from it).
+ * No web fonts and no remote images of ours: the only pictures are the listing photos, which are
+ * embedded in the message when it is sent.
+ */
+const V4_FONT = `font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;`
+const v4Label = (text: string, color: string) => `<p style="${V4_FONT}margin:0;font-size:11px;line-height:14px;font-weight:700;letter-spacing:2.2px;color:${color};text-transform:uppercase;">${text}</p>`
+const v4Tile = (value: string, label: string, bg: string, color: string) => `<td class="tile" width="33%" align="center" valign="middle" style="background:${bg};padding:22px 8px 24px;">
+        <div class="tile-num" style="${V4_FONT}font-size:42px;line-height:46px;font-weight:700;letter-spacing:-1px;color:${color};">${value}</div>
+        <div class="tile-label" style="${V4_FONT}margin-top:10px;font-size:11px;line-height:16px;font-weight:700;letter-spacing:.3px;color:#59675e;">${label}</div>
+      </td>`
+const v4Step = (n: string, title: string, text: string, last = false) => `<tr>
+        <td width="42" valign="top" style="padding:0 0 ${last ? 0 : 18}px;"><div style="${V4_FONT}width:42px;height:38px;line-height:38px;background:#137a4b;color:#ffffff;font-size:13px;font-weight:700;text-align:center;">${n}</div></td>
+        <td valign="top" style="padding:0 0 ${last ? 0 : 18}px 12px;">
+          <div style="${V4_FONT}font-size:15px;line-height:20px;font-weight:700;color:#000000;">${title}</div>
+          <div style="${V4_FONT}margin-top:3px;font-size:13px;line-height:20px;color:#56645c;">${text}</div>
+        </td>
+      </tr>`
+
+export const MISSING_PHOTOS_HTML_V4 = `<!doctype html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+<meta name="color-scheme" content="light only">
+<meta name="supported-color-schemes" content="light only">
+<title>{{dealership}} | Inventory audit</title>
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+  body, table, td, a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+  table, td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
+  img { -ms-interpolation-mode:bicubic; }
+  a[x-apple-data-detectors] { color:inherit !important; text-decoration:none !important; }
+  u + #body a { color:inherit; }
+  @media only screen and (max-width:620px) {
+    .container { width:100% !important; }
+    .outer { padding:0 !important; }
+    .px { padding-left:22px !important; padding-right:22px !important; }
+    .hero-h1 { font-size:31px !important; line-height:37px !important; }
+    .h2 { font-size:22px !important; line-height:28px !important; }
+    .tile { padding:16px 4px 18px !important; }
+    .tile-gap { width:3px !important; }
+    .tile-num { font-size:30px !important; line-height:34px !important; }
+    .tile-label { font-size:10px !important; line-height:14px !important; }
+    .gcard { width:50% !important; min-width:0 !important; }
+    .hide-sm { display:none !important; }
+    .btn, .btn a { display:block !important; text-align:center !important; }
+  }
+</style>
+</head>
+<body id="body" style="margin:0;padding:0;background:#edf0ee;word-spacing:normal;">
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">{{usedMissingPhotos}} of {{usedTotal}} pre-owned listings at {{dealership}} are missing photos &mdash; what we found, with the listings, and how to close the gap.&#8199;&#65279;&#847;&#8199;&#65279;&#847;&#8199;&#65279;&#847;&#8199;&#65279;&#847;&#8199;&#65279;&#847;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#edf0ee;">
+<tr><td class="outer" align="center" style="padding:28px 10px 28px;">
+<!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+<table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background:#ffffff;${V4_FONT}">
+
+  <!-- Header -->
+  <tr><td class="px" style="background:#1b2422;padding:27px 38px 26px;border-bottom:3px solid #20b66a;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td valign="middle" style="${V4_FONT}font-size:22px;line-height:26px;font-weight:700;letter-spacing:2.6px;color:#ffffff;white-space:nowrap;">ZRZ <span style="color:#91f2b9;">OPS</span></td>
+      <td align="right" valign="middle" style="${V4_FONT}font-size:10px;line-height:13px;font-weight:700;letter-spacing:2.4px;color:#c5dfd0;">RECONDITIONING<br>&amp; INVENTORY OPERATIONS</td>
+    </tr></table>
+  </td></tr>
+
+  <!-- Opening -->
+  <tr><td class="px" style="background:#18231f;padding:40px 38px 44px;">
+    ${v4Label('Inventory review &nbsp;/&nbsp; {{auditDateUpper}}', '#76edab')}
+    <p style="${V4_FONT}margin:24px 0 0;font-size:16px;line-height:22px;font-weight:700;color:#ffffff;">Hi {{firstName|there}},</p>
+    <p style="${V4_FONT}margin:18px 0 0;font-size:15px;line-height:23px;color:#d9f3e4;">I took a look at your dealership&rsquo;s online inventory and noticed something worth bringing to your attention.</p>
+    <h1 class="hero-h1" style="${V4_FONT}margin:28px 0 0;font-size:39px;line-height:45px;font-weight:700;letter-spacing:-.8px;color:#ffffff;">{{usedMissingHeadline|Pre-owned vehicles}}<br><span style="color:#91f2b9;">Missing photos.</span><br>One fixable gap.</h1>
+    <p style="${V4_FONT}margin:22px 0 0;font-size:16px;line-height:25px;color:#d9f3e4;">We reviewed your publicly listed pre-owned inventory and identified vehicles with missing photos. Here&rsquo;s what stood out&mdash;and how ZRZ OPS helps dealership teams close these gaps.</p>
+  </td></tr>
+
+  <!-- At a glance -->
+  <tr><td class="px" style="padding:40px 38px 0;">
+    ${v4Label('Your inventory, at a glance', '#126c43')}
+    <h2 class="h2" style="${V4_FONT}margin:10px 0 0;font-size:25px;line-height:31px;font-weight:700;letter-spacing:-.3px;color:#000000;">A visible gap in your online inventory.</h2>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:22px;"><tr>
+      ${v4Tile('{{usedTotal}}', 'VISIBLE USED<br>VEHICLES', '#edf6ef', '#000000')}
+      <td class="tile-gap" width="5" style="width:5px;font-size:0;line-height:0;">&nbsp;</td>
+      ${v4Tile('{{usedMissingPhotos}}', 'LISTINGS FLAGGED<br>FOR PHOTOS', '#dff4e7', '#14784b')}
+      <td class="tile-gap" width="5" style="width:5px;font-size:0;line-height:0;">&nbsp;</td>
+      ${v4Tile('{{usedMissingPhotoPct}}', 'OF VISIBLE USED<br>INVENTORY', '#c7ecd5', '#14784b')}
+    </tr></table>
+  </td></tr>
+
+  <!-- Evidence: the flagged listings, pictured as the website shows them (nothing when the audit has none) -->
+  <tr><td class="px" style="padding:24px 38px 0;">{{auditGallery}}</td></tr>
+
+  <!-- Why this matters -->
+  <tr><td class="px" style="padding:24px 38px 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td width="4" style="width:4px;background:#20b66a;font-size:0;line-height:0;">&nbsp;</td>
+      <td style="background:#edf9f1;padding:16px 20px 18px 18px;${V4_FONT}font-size:14px;line-height:22px;color:#26332e;"><strong>Why this matters:</strong> A vehicle without a complete photo presentation may be harder for shoppers to evaluate. Some gaps are unavoidable, but others come down to process, ownership, and follow-through.</td>
+    </tr></table>
+    <p style="${V4_FONT}margin:14px 0 0;font-size:11px;line-height:17px;color:#65746a;">Snapshot of publicly visible inventory on {{auditDate}}. Counts can change as listings are updated.</p>
+  </td></tr>
+
+  <!-- What ZRZ OPS does differently -->
+  <tr><td style="padding:34px 0 0;"><div style="height:1px;line-height:1px;font-size:0;background:#dfe7e2;">&nbsp;</div></td></tr>
+  <tr><td class="px" style="background:#f3f8f4;padding:34px 38px 36px;">
+    ${v4Label('What ZRZ OPS does differently', '#126c43')}
+    <h2 class="h2" style="${V4_FONT}margin:12px 0 22px;font-size:25px;line-height:31px;font-weight:700;letter-spacing:-.3px;color:#000000;">We don&rsquo;t just detail cars.<br>We help keep inventory moving.</h2>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+      ${v4Step('01', 'RECON &mdash; Get vehicles ready', 'Coordinate detailing and vehicle preparation to reduce avoidable handoff delays.')}
+      ${v4Step('02', 'MERCHANDISE &mdash; Get vehicles online', 'Capture photos and support merchandising so inventory can be presented promptly.')}
+      ${v4Step('03', 'MONITOR &mdash; Catch what&rsquo;s missing', 'Review online listings, flag gaps, and communicate issues before they sit unresolved.', true)}
+    </table>
+  </td></tr>
+
+  <!-- One question, one button -->
+  <tr><td class="px" style="padding:44px 38px 44px;">
+    <h2 class="h2" style="${V4_FONT}margin:0;font-size:26px;line-height:32px;font-weight:700;letter-spacing:-.3px;color:#000000;">Would a 10-minute conversation be worth it?</h2>
+    <p style="${V4_FONT}margin:14px 0 0;font-size:15px;line-height:24px;color:#4b5b53;">I can walk you through what we found, which gaps may be controllable, and how our team approaches recon, photos, and inventory follow-up across dealership operations.</p>
+    <table role="presentation" class="btn" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px;"><tr><td align="center" style="background:#137a4b;">
+      <!--[if mso]><v:rect xmlns:v="urn:schemas-microsoft-com:vml" href="{{replyMailto}}" style="height:46px;v-text-anchor:middle;width:366px;" stroke="f" fillcolor="#137a4b"><w:anchorlock/><center style="color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:bold;">REPLY TO SCHEDULE A 10-MINUTE REVIEW &rarr;</center></v:rect><![endif]-->
+      <!--[if !mso]><!--><a href="{{replyMailto}}" style="display:inline-block;padding:15px 24px;${V4_FONT}font-size:14px;line-height:18px;font-weight:700;letter-spacing:.2px;color:#ffffff;text-decoration:none;">REPLY TO SCHEDULE A 10-MINUTE REVIEW &rarr;</a><!--<![endif]-->
+    </td></tr></table>
+    <p style="${V4_FONT}margin:16px 0 0;font-size:13px;line-height:20px;color:#65746a;">Or simply reply to this email with a good time to connect.</p>
+  </td></tr>
+
+  <!-- Point of contact -->
+  <tr><td class="px" style="background:#1b2422;padding:30px 38px 32px;">
+    ${v4Label('Your point of contact', '#91e2b7')}
+    <p style="${V4_FONT}margin:14px 0 0;font-size:23px;line-height:28px;font-weight:700;color:#ffffff;">{{senderName}}</p>
+    <p style="${V4_FONT}margin:6px 0 0;font-size:13px;line-height:18px;color:#c5dfd0;">{{senderTitle|Owner}} | {{senderCompany}}</p>
+    <div style="height:1px;line-height:1px;font-size:0;background:#42534a;margin:18px 0 14px;">&nbsp;</div>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+      <tr><td style="${V4_FONT}padding:0 14px 6px 0;font-size:11px;line-height:18px;letter-spacing:.4px;color:#a9bcb1;">DIRECT</td><td style="${V4_FONT}padding:0 0 6px;font-size:14px;line-height:18px;"><a href="tel:{{senderPhone}}" style="color:#ffffff;text-decoration:none;">{{senderPhone}}</a></td></tr>
+      <tr><td style="${V4_FONT}padding:0 14px 0 0;font-size:11px;line-height:18px;letter-spacing:.4px;color:#a9bcb1;">EMAIL</td><td style="${V4_FONT}font-size:14px;line-height:18px;"><a href="mailto:{{senderEmail}}" style="color:#ffffff;text-decoration:underline;">{{senderEmail}}</a></td></tr>
+    </table>
+    <p style="${V4_FONT}margin:18px 0 0;font-size:11px;line-height:17px;letter-spacing:.3px;color:#a9bcb1;">{{senderTagline|DEALERSHIP RECONDITIONING  ·  INVENTORY MERCHANDISING  ·  MONITORING}}<br>{{senderRegion|Connecticut & Massachusetts}}</p>
+  </td></tr>
+
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+<table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;"><tr><td class="px" style="padding:14px 38px 0;${V4_FONT}font-size:11px;line-height:17px;color:#7c8a82;">Sent to {{dealership}} by {{senderCompany}}. Not the right person, or not interested? Reply &ldquo;no thanks&rdquo; and we won&rsquo;t follow up.</td></tr></table>
+</td></tr>
+</table>
+</body>
+</html>`

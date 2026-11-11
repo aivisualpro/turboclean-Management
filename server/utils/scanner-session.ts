@@ -457,6 +457,8 @@ export interface ScanDoc {
   createdBy: { id: string, name: string }
   savedAt?: string | null
   savedBy?: { id: string, name: string } | null
+  /** Small copies of the photos the top flagged listings showed (image id → base64 JPEG) — evidence for emails. */
+  evidenceThumbs?: Record<string, string>
 }
 
 const statusOf = (doc: ScanDoc): ScanStatus => doc.status === 'running' && Date.now() - new Date(doc.heartbeatAt).getTime() > STALE_MS ? 'interrupted' : doc.status
@@ -631,6 +633,7 @@ export async function createScan(db: Db, body: any, actor: SessionActor) {
     progress, log: [], vehicles: base ? base.vehicles.map(v => ({ ...v })) : [], images: base ? base.images.map(i => ({ ...i })) : [], clusters: base ? base.clusters.map(c => ({ ...c })) : [],
     countStockAsMissing: base ? base.countStockAsMissing : true, auditId: null, error: null, heartbeatAt: now, createdAt: now, createdBy: { id: actor.id, name: actor.name },
   }
+  if (base?.evidenceThumbs) doc.evidenceThumbs = { ...base.evidenceThumbs }
   const at = new Date().toISOString()
   for (const note of plan.notes) doc.log.push({ at, text: note })
   if (base) {
@@ -644,6 +647,8 @@ export async function createScan(db: Db, body: any, actor: SessionActor) {
     const r = await col.insertOne(doc as any)
     doc._id = r.insertedId
   }
+  // Only the newest scan of a dealership keeps evidence pictures (keeps the scans collection small).
+  col.updateMany({ dealershipId, _id: { $ne: doc._id }, evidenceThumbs: { $exists: true } } as any, { $unset: { evidenceThumbs: '' } }).catch(() => {})
   return { doc, run: (emit: Emit, opts: { isClosed: () => boolean }) => runScan(db, doc, emit, opts) }
 }
 
@@ -1019,6 +1024,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     try { await analyzePhotos(tab, doc, { setProgress, log, deadline: analyzeUntil, db }) }
     catch (e: any) { if (!(await restartBrowser(e))) throw e; await analyzePhotos(tab, doc, { setProgress, log, deadline: analyzeUntil, db }) }
     await reclassify(db, doc, log)
+    keepEvidencePictures(doc)
     refreshScopeCounts(doc)
     await recordPageHealth(db, doc)
     const off = (doc.progress.scope || []).filter(e => e.status === 'redirected' || e.status === 'empty' || e.status === 'error')
@@ -1033,7 +1039,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     if (!blockedPages.length && stuck.length) doc.status = 'stopped'
     Object.assign(doc.progress, { phase: doc.status, message: `${stop ? 'Stopped early — ' : blockedPages.length ? 'Partly blocked — ' : ''}${sum.total} vehicles · ${sum.withoutReal} without a real photo (${sum.withoutRealPct ?? 0}%)`, finishedAt: new Date().toISOString() })
     log(`Done in ${Math.round((Date.now() - t0) / 1000)}s`)
-    await col.updateOne({ _id: doc._id }, { $set: { status: doc.status, error: doc.error, progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, images: doc.images.map(stripImage), clusters: doc.clusters, heartbeatAt: new Date().toISOString() } })
+    await col.updateOne({ _id: doc._id }, { $set: { status: doc.status, error: doc.error, progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, images: doc.images.map(stripImage), clusters: doc.clusters, evidenceThumbs: doc.evidenceThumbs || {}, heartbeatAt: new Date().toISOString() } })
     emit('progress', doc.progress)
     let auditId: string | null = null
     if (doc.autoSave) {
@@ -1209,8 +1215,75 @@ async function analyzePhotos(t: Tab, doc: ScanDoc, o: { setProgress: (p: Partial
     await visionCheck(o.db || null, [...images.values()], doc.vehicles, { log: o.log, deadline: Math.min(o.deadline, Date.now() + 90_000), onProgress: (d, n) => o.setProgress({ message: `AI photo check… ${d} of ${n}` }) })
   }
   catch (e: any) { o.log(`AI photo check skipped (${String(e?.message || e).slice(0, 100)})`) }
-  for (const i of images.values()) delete (i as any).thumb
+  // The small copies made for the AI check are kept in memory a little longer: once the verdicts are in,
+  // the ones of flagged listings become the evidence pictures (keepEvidencePictures); the rest is dropped.
+  const thumbs: Map<string, string> = ((doc as any).__thumbs ||= new Map())
+  for (const i of images.values()) { const t = (i as any).thumb; if (t) thumbs.set(i.id, t); delete (i as any).thumb }
   doc.images = [...images.values()].map(stripImage)
+}
+
+/** Listings whose picture is stored with the audit (the email gallery shows the first six). */
+const GALLERY_PICTURES = 8
+/** Vehicle key → stored picture id, for the leading evidence listings. Listings that share one image (a placeholder) share one stored file. */
+async function evidencePictures(db: Db, doc: ScanDoc, picked: ScanVehicle[], prevAuditId: string | null) {
+  const out = new Map<string, string>()
+  const thumbs = doc.evidenceThumbs || {}
+  const { ObjectId } = await import('mongodb')
+  const { saveListingPicture, FILES_COLLECTION } = await import('./crm-files')
+  // A corrected audit keeps the pictures it already has (same listing → same file), as long as the file still exists.
+  const before = new Map<string, string>()
+  if (prevAuditId && ObjectId.isValid(prevAuditId)) {
+    const a = await db.collection('turboCleanCrmAudits').findOne({ _id: new ObjectId(prevAuditId) }, { projection: { examples: 1 } })
+    const ids = (a?.examples || []).map((e: any) => e?.imageFileId).filter((x: any) => ObjectId.isValid(String(x)))
+    const alive = ids.length ? new Set((await db.collection(FILES_COLLECTION).find({ _id: { $in: ids.map((x: string) => new ObjectId(x)) } }, { projection: { _id: 1 } }).toArray()).map(f => f._id.toString())) : new Set<string>()
+    for (const e of a?.examples || []) if (e?.url && e?.imageFileId && alive.has(String(e.imageFileId))) before.set(e.url, String(e.imageFileId))
+  }
+  const byImage = new Map<string, string>()
+  const imgById = new Map(doc.images.map(i => [i.id, i]))
+  for (const v of picked) {
+    const had = before.get(v.url)
+    if (had) { out.set(v.key, had); if (v.imageId) byImage.set(v.imageId, had); continue }
+    if (!v.imageId) continue
+    let id = byImage.get(v.imageId) || null
+    if (!id && thumbs[v.imageId]) {
+      const img = imgById.get(v.imageId)
+      if (img?.w && img?.h && (img.w < 80 || img.h < 60)) continue
+      id = await saveListingPicture(db, { b64: thumbs[v.imageId]!, dealershipId: doc.dealershipId, sourceUrl: img?.url, w: img?.w, h: img?.h }).catch(() => null)
+      if (id) byImage.set(v.imageId, id)
+    }
+    if (id) out.set(v.key, id)
+  }
+  return out
+}
+
+/** How many listing pictures a scan keeps as evidence (the email shows up to six; a review may change which ones). */
+const EVIDENCE_PICTURES = 14
+/** Listings without a real photo, strongest evidence first: pre-owned before new, "no photo" before stock images. */
+function rankEvidence(doc: ScanDoc, cmap: Map<string, any>) {
+  const without = countable(doc.vehicles).filter((v) => { const f = finalVerdict(v, cmap); return f === 'missing' || f === 'placeholder' || (doc.countStockAsMissing && f === 'stock') })
+  const ranked = without.filter(v => v.url)
+    .sort((a, b) => (Number(a.condition === 'new') - Number(b.condition === 'new')) || (Number(finalVerdict(a, cmap) === 'stock') - Number(finalVerdict(b, cmap) === 'stock')))
+  return { without, ranked }
+}
+/**
+ * After the verdicts: keep a small copy (≤ 384 px JPEG) of the photo each top flagged listing showed,
+ * stored on the scan. Saving the audit turns them into the email's evidence pictures. Pictures of
+ * everything else are discarded — nothing else from the dealer's site is kept.
+ */
+function keepEvidencePictures(doc: ScanDoc) {
+  const thumbs: Map<string, string> | undefined = (doc as any).__thumbs
+  delete (doc as any).__thumbs
+  const cmap = new Map(doc.clusters.map(c => [c.id, c]))
+  const keep: Record<string, string> = {}
+  const had = doc.evidenceThumbs || {}
+  for (const v of rankEvidence(doc, cmap).ranked) {
+    if (Object.keys(keep).length >= EVIDENCE_PICTURES) break
+    const id = v.imageId
+    if (!id || keep[id]) continue
+    const b64 = thumbs?.get(id) || had[id]
+    if (b64 && b64.length < 200_000) keep[id] = b64
+  }
+  doc.evidenceThumbs = keep
 }
 
 async function reclassify(db: Db | null, doc: ScanDoc, log?: (s: string) => void) {
@@ -1327,7 +1400,7 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
   const d = await loadDealership(db, doc.dealershipId)
   const sum = summarize(doc.vehicles, doc.clusters, { countStockAsMissing: doc.countStockAsMissing })
   const cmap = new Map(doc.clusters.map(c => [c.id, c]))
-  const without = countable(doc.vehicles).filter((v) => { const f = finalVerdict(v, cmap); return f === 'missing' || f === 'placeholder' || (doc.countStockAsMissing && f === 'stock') })
+  const { ranked } = rankEvidence(doc, cmap)
   const pages = doc.progress.pagesVisited
   const parts = [
     `Inventory Scanner: ${sum.total} vehicles on ${pages.length} page${pages.length === 1 ? '' : 's'}${doc.progress.advertised ? ` (site advertises ${doc.progress.advertised})` : ''}.`,
@@ -1341,14 +1414,23 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
   const scope = scopeReport(doc, cmap)
   parts.push(`Scope: ${scope.length} saved scan page${scope.length === 1 ? '' : 's'}, nothing else on the site — ${scope.map(e => `${e.label} (${e.statusText}${e.vehicles ? `, ${e.vehicles} vehicles` : ''}${e.resultPages > 1 ? `, ${e.resultPages} result pages` : ''})`).join(' · ')}.`)
   // Used cars first, then "No photo" before stock images — the strongest evidence leads; spread across the crawl pages.
-  const ranked = without.filter(v => v.url)
-    .sort((a, b) => (Number(a.condition === 'new') - Number(b.condition === 'new')) || (Number(finalVerdict(a, cmap) === 'stock') - Number(finalVerdict(b, cmap) === 'stock')))
   const perPage = byPage.length > 1 ? Math.max(4, Math.floor(40 / byPage.length)) : 40
   const taken = new Map<string, number>()
   const picked = ranked.filter((v) => { const k = listKey(v, doc); const n = taken.get(k) || 0; if (n >= perPage) return false; taken.set(k, n + 1); return true }).slice(0, 40)
   const { recordAudit, reviseAudit } = await import('./crm-audit')
   // Already saved (e.g. a batch crawl) → the review corrects that audit instead of adding a second one.
   const prevAudit = doc.auditId || doc.revisesAuditId || null
+  // Evidence pictures for the email: our own small copy of the photo each leading listing showed.
+  const pictures = await evidencePictures(db, doc, picked.slice(0, GALLERY_PICTURES), prevAudit ? String(prevAudit) : null).catch(() => new Map<string, string>())
+  const imgById = new Map(doc.images.map(i => [i.id, i]))
+  const pictureOf = (v: ScanVehicle) => {
+    const img = v.imageId ? imgById.get(v.imageId) : null
+    // A tracking pixel or a tiny spacer is not a picture — the listing simply shows no photo.
+    if (img?.w && img?.h && (img.w < 80 || img.h < 60)) return {}
+    const fileId = pictures.get(v.key)
+    const url = v.image?.url || ''
+    return { ...(fileId ? { imageFileId: fileId } : {}), ...(/^https:\/\//i.test(url) ? { imageUrl: url } : {}), ...(img?.w && img?.h ? { imageW: img.w, imageH: img.h } : {}) }
+  }
   const audit = await (prevAudit ? (body: any, a: any) => reviseAudit(db, d, String(prevAudit), body, a) : (body: any, a: any) => recordAudit(db, d, body, a))({
     ...sum.counts,
     source: 'automated',
@@ -1356,7 +1438,7 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
     pages: byPage,
     coverage: { checked: sum.total, advertised: adv, blockedPages: blockedN },
     scope: scope.map(e => ({ url: e.url, label: e.label, status: e.status, vehicles: e.vehicles, resultPages: e.resultPages, advertised: e.advertised, note: e.note })),
-    examples: picked.map((v) => { const f = finalVerdict(v, cmap); return { url: v.url, label: `${v.title}${v.stock ? ` #${v.stock}` : ''} — ${VERDICT_LABEL[f]}`, title: v.title, stock: v.stock, price: v.price, condition: v.condition, verdict: f, listUrl: listKey(v, doc) } }),
+    examples: picked.map((v) => { const f = finalVerdict(v, cmap); return { url: v.url, label: `${v.title}${v.stock ? ` #${v.stock}` : ''} — ${VERDICT_LABEL[f]}`, title: v.title, stock: v.stock, price: v.price, condition: v.condition, verdict: f, listUrl: listKey(v, doc), ...pictureOf(v) } }),
     photoBreakdown: { real: sum.by.real, placeholder: sum.by.placeholder, missing: sum.by.missing, stock: sum.by.stock, countStockAsMissing: doc.countStockAsMissing },
     merchandisingIssues: [
       ...(sum.by.missing + sum.by.placeholder ? ['Vehicles listed with no photos (placeholder / “photos unavailable”)'] : []),
@@ -1366,6 +1448,11 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
     screenshotFileId: null,
     collector: { name: 'ZRZ Inventory Scanner', version: ENGINE_VERSION, runId: String(doc._id) },
   }, actor)
+  // Pictures nothing shows any more (an older audit of this dealership, never emailed) are removed.
+  try {
+    const { pruneListingPictures } = await import('./crm-files')
+    await pruneListingPictures(db, doc.dealershipId, [...new Set(pictures.values())])
+  } catch {}
   // A batch crawl corrected after review: the batch (and its email step) shows the corrected numbers.
   if (doc.batchId && prevAudit) {
     const { updateBatchItem } = await import('./scanner-batch')

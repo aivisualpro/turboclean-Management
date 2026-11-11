@@ -8,7 +8,7 @@
  */
 
 /** Merge fields whose value is HTML and must not be escaped. */
-export const RAW_HTML_FIELDS = new Set(['auditScreenshot', 'auditEvidence', 'auditBreakdown', 'usedPhotoBar', 'newInventoryNote', 'auditTrend', 'inventoryByPage', 'auditHistoryChart'])
+export const RAW_HTML_FIELDS = new Set(['auditScreenshot', 'auditGallery', 'auditEvidence', 'auditBreakdown', 'usedPhotoBar', 'newInventoryNote', 'auditTrend', 'inventoryByPage', 'auditHistoryChart'])
 
 const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const FONT = `font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;`
@@ -146,7 +146,7 @@ function evidenceRow(e: any, first: boolean) {
   return `<tr><td style="padding:14px 18px;${first ? '' : 'border-top:1px solid #eaecf0;'}">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
         <td valign="middle" style="${FONT}">
-          <div style="font-size:15px;line-height:20px;font-weight:600;color:#101828;">${esc(p.title) || 'Vehicle listing'}</div>
+          <div style="font-size:15px;line-height:20px;font-weight:600;color:#101828;">${esc(listingTitle(p.title)) || 'Vehicle listing'}</div>
           <div style="margin-top:4px;font-size:12px;line-height:16px;color:#667085;"><span style="display:inline-block;padding:2px 7px;border-radius:999px;background:${badge.bg};color:${badge.fg};font-size:10px;font-weight:700;letter-spacing:.6px;">${badge.label}</span>${meta ? `&nbsp; ${meta}` : ''}</div>
         </td>
         <td width="110" align="right" valign="middle" style="${FONT}"><a href="${esc(e.url)}" style="font-size:13px;font-weight:600;color:#15803d;text-decoration:none;white-space:nowrap;">View listing &rarr;</a></td>
@@ -209,6 +209,96 @@ export function auditEvidence(audit: any, opts: { max?: number, screenshot?: str
 </table>`
 }
 
+/** Marks a stored CRM picture inside block HTML: `__CRMFILE__/<id>`. Sending embeds the file in the email; previews load it from the app. */
+export const CRM_FILE_TOKEN = '__CRMFILE__/'
+
+const GALLERY_FONT = `font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;`
+const GALLERY_TAG: Record<string, string> = { stock: 'STOCK IMAGE', placeholder: 'PLACEHOLDER', missing: 'NO PHOTO' }
+const cut = (s: string, n: number) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t }
+const hostPath = (u: string) => { try { const x = new URL(u); return `${x.hostname.replace(/^www\./, '')}${x.pathname.replace(/\/(index\.html?)?$/, '')}` } catch { return '' } }
+
+/** A listing title as a person would say it: without the site's own button words ("Compare …") or a trailing "Stock: H4763A". */
+export const listingTitle = (t: string) => String(t || '').replace(/\s+/g, ' ').replace(/^\s*(compare|view|save|new arrival|just arrived)[:\s-]+/i, '').replace(/^\s*(certified\s+)?(pre-?owned|used)\s+(?=\d{4}\b)/i, '').replace(/\s*[-|·]?\s*stock\s*(#|no\.?|number)?\s*[:#]?\s*[\w-]+\s*$/i, '').trim()
+
+/** One listing as the dealer's own site shows it: its photo (or the empty space where one should be), title, price and what is wrong. */
+function galleryCard(e: any, assetBase: string) {
+  const BOX_W = 138, BOX_H = 98
+  const p = e.title ? { title: e.title, verdict: e.verdict || 'missing' } : parseLabel(e.label)
+  const src = e.imageFileId ? `${CRM_FILE_TOKEN}${e.imageFileId}` : e.imageSample ? `${assetBase}/email/samples/${e.imageSample}` : /^https:\/\//i.test(String(e.imageUrl || '')) ? String(e.imageUrl) : ''
+  // Fit the picture inside the box without stretching it (its real size is known from the audit).
+  const w0 = num(e.imageW) || 4, h0 = num(e.imageH) || 3
+  const k = Math.min(BOX_W / w0, BOX_H / h0)
+  const w = Math.max(1, Math.round(w0 * k)), h = Math.max(1, Math.round(h0 * k))
+  const title = cut(listingTitle(p.title) || 'Vehicle listing', 44)
+  const picture = src && p.verdict !== 'missing'
+    ? `<img src="${esc(src)}" width="${w}" height="${h}" alt="${esc(`Photo shown on the listing: ${title}`)}" style="display:block;margin:0 auto;width:${w}px;max-width:100%;height:auto;border:0;outline:none;">`
+    : `<div style="${GALLERY_FONT}font-size:10px;line-height:14px;font-weight:700;letter-spacing:1px;color:#7b8780;">NO PHOTO<br>ON THE LISTING</div>`
+  return `<div class="gcard" style="display:inline-block;width:33.33%;min-width:132px;vertical-align:top;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:5px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;border:1px solid #dfe6e1;">
+            <tr><td height="110" align="center" valign="middle" style="height:110px;padding:6px;background:${src && p.verdict !== 'missing' ? '#ffffff' : '#f1f4f2'};text-align:center;"><a href="${esc(e.url)}" style="text-decoration:none;">${picture}</a></td></tr>
+            <tr><td style="padding:8px 9px 0;border-top:1px solid #edf0ee;"><div style="${GALLERY_FONT}height:32px;overflow:hidden;font-size:12px;line-height:16px;font-weight:700;color:#111111;"><a href="${esc(e.url)}" style="color:#111111;text-decoration:none;">${esc(title)}</a></div></td></tr>
+            <tr><td style="padding:5px 9px 9px;"><div style="${GALLERY_FONT}height:16px;overflow:hidden;font-size:11px;line-height:16px;color:#56645c;">${e.price ? `<span style="color:#111111;font-weight:700;">${esc(e.price)}</span>` : (e.stock ? `Stock #${esc(cut(e.stock, 12))}` : '&nbsp;')}</div>
+              <div style="${GALLERY_FONT}margin-top:5px;font-size:9px;line-height:12px;font-weight:700;letter-spacing:.9px;color:#8a4b00;"><span style="display:inline-block;padding:2px 6px;background:#fdf0d5;">${GALLERY_TAG[p.verdict] || GALLERY_TAG.missing}</span></div></td></tr>
+          </table>
+        </td></tr></table>
+      </div>`
+}
+
+/**
+ * Evidence: the dealer's own listings, pictured the way their website shows them — inside a
+ * browser-style frame, like a screenshot of the inventory page, except every card is one of the
+ * flagged listings and links to it. Up to six cards (three across; two across on a phone).
+ * Pictures are our stored copies from the audit (embedded in the email when sent), or the dealer's
+ * own image address for older audits. With no listings it falls back to the uploaded screenshot;
+ * with neither it renders nothing.
+ */
+export function auditGallery(audit: any, opts: { max?: number, screenshot?: string, assetBase?: string, reportUrl?: string, auditDate?: string } = {}) {
+  const all = (Array.isArray(audit?.examples) ? audit.examples : []).filter((e: any) => e?.url)
+  if (!all.length && !opts.screenshot) return ''
+  const max = opts.max ?? 6
+  // Listings with a picture lead (they are the proof); then the ones that show nothing at all.
+  const verdictOf = (e: any) => e.title ? (e.verdict || 'missing') : parseLabel(e.label).verdict
+  const pictured = (e: any) => (e.imageFileId || e.imageSample || e.imageUrl) && verdictOf(e) !== 'missing'
+  // Audits from before pictures were kept have none: show the plain "spot-check" list instead of empty cards.
+  if (all.length && !all.some(pictured)) return auditEvidence(audit, { screenshot: opts.screenshot })
+  // A card either shows the picture the listing had, or — for a listing with no image at all — the empty space.
+  const list = [...all.filter(pictured), ...all.filter((e: any) => !pictured(e) && verdictOf(e) === 'missing')].slice(0, max)
+  const usedTotal = num(audit?.usedTotal), usedMissing = num(audit?.usedMissingPhotos)
+  const total = num(audit?.totalMissingPhotos) || all.length
+  const where = hostPath(String(audit?.inventoryUrl || list[0]?.listUrl || list[0]?.url || ''))
+  const bar = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#e7ebe8;"><tr>
+        <td width="44" style="padding:0 0 0 10px;font-size:0;line-height:0;white-space:nowrap;">${[0, 1, 2].map(() => `<span style="display:inline-block;width:7px;height:7px;margin-right:4px;border-radius:4px;background:#b9c4bd;">&nbsp;</span>`).join('')}</td>
+        <td style="padding:6px 8px 6px 4px;"><div style="${GALLERY_FONT}padding:3px 10px;background:#ffffff;font-size:11px;line-height:15px;color:#56645c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(cut(where, 58)) || 'Dealership inventory'}</div></td>
+      </tr></table>`
+  let frame: string
+  if (list.length) {
+    // Three cards per row; Outlook gets real table cells, everyone else wrapping inline blocks.
+    const rows: string[] = []
+    for (let i = 0; i < list.length; i += 3) rows.push(list.slice(i, i + 3).map((e: any) => `<!--[if mso]><td width="33%" valign="top"><![endif]-->${galleryCard(e, opts.assetBase || '')}<!--[if mso]></td><![endif]-->`).join(''))
+    frame = `${bar}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:5px;background:#f4f6f4;font-size:0;line-height:0;text-align:left;">
+        <!--[if mso]><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><![endif]-->${rows.join('<!--[if mso]></tr><tr><![endif]-->')}<!--[if mso]></tr></table><![endif]-->
+      </td></tr></table>`
+  }
+  else frame = opts.screenshot || ''
+  const shownNote = list.length
+    ? `The ${list.length === 1 ? 'listing' : `${list.length} listings`} above ${list.length === 1 ? 'is' : 'are'} shown as ${list.length === 1 ? 'it' : 'they'} appeared on your website${total > list.length ? ` &mdash; ${fmt(total - list.length)} more ${total - list.length === 1 ? 'is' : 'are'} in the full report` : ''}.`
+    : 'Screenshot shows the dealership inventory website used in the review; it does not individually document every listing.'
+  const finding = usedTotal && usedMissing
+    ? `${fmt(usedMissing)} of ${fmt(usedTotal)} visible pre-owned listings were identified as missing photos during our ${esc(opts.auditDate || 'latest')} review.`
+    : `${fmt(total)} listing${total === 1 ? ' was' : 's were'} identified as missing photos during our ${esc(opts.auditDate || 'latest')} review.`
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f6fbf7;border:1px solid #d8e3dc;">
+  <tr><td style="padding:16px 14px 0;${GALLERY_FONT}font-size:11px;line-height:14px;font-weight:700;letter-spacing:1.9px;color:#126c43;">EVIDENCE / DEALERSHIP WEBSITE REVIEW</td></tr>
+  <tr><td style="padding:12px 14px 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:2px dashed #a2b4aa;border-radius:6px;"><tr><td style="padding:8px;">
+      ${frame}
+    </td></tr></table>
+  </td></tr>
+  <tr><td style="padding:12px 14px 16px;${GALLERY_FONT}font-size:13px;line-height:20px;color:#4b5b53;"><strong style="color:#26332e;">Audit finding:</strong> ${finding} ${shownNote}${opts.reportUrl && list.length ? ` <a href="${esc(opts.reportUrl)}" style="color:#126c43;font-weight:700;text-decoration:underline;">See every listing&nbsp;&rarr;</a>` : ''}</td></tr>
+</table>`
+}
+
 /** Sample audit used for template previews (when no real dealership is picked). */
 export const SAMPLE_AUDIT = {
   _id: 'sample-3',
@@ -224,12 +314,12 @@ export const SAMPLE_AUDIT = {
     { url: 'https://www.bleakleykia.com/new-inventory', label: 'New inventory', kind: 'new', total: 334, withoutReal: 12, withoutRealPct: 3.6 },
   ],
   examples: [
-    { url: 'https://www.bleakleykia.com/used/2019-kia-soul', listUrl: 'https://www.bleakleykia.com/used-inventory', title: 'Used 2019 Kia Soul LX', stock: 'K24518A', price: '$15,995', condition: 'used', verdict: 'placeholder' },
-    { url: 'https://www.bleakleykia.com/used/2021-honda-crv', listUrl: 'https://www.bleakleykia.com/used-inventory', title: 'Used 2021 Honda CR-V EX AWD', stock: 'K24602B', price: '$26,480', condition: 'used', verdict: 'placeholder' },
+    { url: 'https://www.bleakleykia.com/used/2019-kia-soul', listUrl: 'https://www.bleakleykia.com/used-inventory', title: 'Used 2019 Kia Soul LX', stock: 'K24518A', price: '$15,995', condition: 'used', verdict: 'placeholder', imageSample: 'coming-soon.png', imageW: 480, imageH: 360 },
+    { url: 'https://www.bleakleykia.com/used/2021-honda-crv', listUrl: 'https://www.bleakleykia.com/used-inventory', title: 'Used 2021 Honda CR-V EX AWD', stock: 'K24602B', price: '$26,480', condition: 'used', verdict: 'stock', imageSample: 'stock-suv.png', imageW: 480, imageH: 360 },
     { url: 'https://www.bleakleykia.com/used/2018-ford-f150', listUrl: 'https://www.bleakleykia.com/used-inventory', title: 'Used 2018 Ford F-150 XLT', stock: 'K24477C', price: '$27,900', condition: 'used', verdict: 'missing' },
-    { url: 'https://www.bleakleykia.com/used/2022-kia-telluride', listUrl: 'https://www.bleakleykia.com/certified-inventory', title: 'Certified 2022 Kia Telluride EX', stock: 'K24631', price: '$38,750', condition: 'certified', verdict: 'stock' },
-    { url: 'https://www.bleakleykia.com/used/2017-toyota-camry', listUrl: 'https://www.bleakleykia.com/certified-inventory', title: 'Used 2017 Toyota Camry SE', stock: 'K24390B', price: '$16,250', condition: 'used', verdict: 'placeholder' },
-    { url: 'https://www.bleakleykia.com/new/2026-kia-sportage', listUrl: 'https://www.bleakleykia.com/new-inventory', title: 'New 2026 Kia Sportage LX', stock: 'K26114', price: '$29,415', condition: 'new', verdict: 'placeholder' },
+    { url: 'https://www.bleakleykia.com/used/2022-kia-telluride', listUrl: 'https://www.bleakleykia.com/certified-inventory', title: 'Certified 2022 Kia Telluride EX', stock: 'K24631', price: '$38,750', condition: 'certified', verdict: 'stock', imageSample: 'stock-suv-dark.png', imageW: 480, imageH: 360 },
+    { url: 'https://www.bleakleykia.com/used/2017-toyota-camry', listUrl: 'https://www.bleakleykia.com/certified-inventory', title: 'Used 2017 Toyota Camry SE', stock: 'K24390B', price: '$16,250', condition: 'used', verdict: 'stock', imageSample: 'stock-sedan.png', imageW: 480, imageH: 360 },
+    { url: 'https://www.bleakleykia.com/new/2026-kia-sportage', listUrl: 'https://www.bleakleykia.com/new-inventory', title: 'New 2026 Kia Sportage LX', stock: 'K26114', price: '$29,415', condition: 'new', verdict: 'placeholder', imageSample: 'coming-soon.png', imageW: 480, imageH: 360 },
     { url: 'https://www.bleakleykia.com/new/2026-kia-k5', listUrl: 'https://www.bleakleykia.com/new-inventory', title: 'New 2026 Kia K5 GT-Line', stock: 'K26087', price: '$31,990', condition: 'new', verdict: 'missing' },
   ],
   screenshotFileId: null,
