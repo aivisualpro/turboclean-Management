@@ -37,7 +37,10 @@ const repliesToReview = computed(() => emails.value.filter(e => e.direction === 
 // ─── Email ───
 const showCompose = ref(false)
 const composeFollowUp = ref<string | null>(null)
-function openCompose(followUpOf?: string) { composeFollowUp.value = followUpOf || null; showCompose.value = true }
+/** Open the composer on the inventory-audit email as a new conversation (from the audit tab). */
+const composeAudit = ref(false)
+function openCompose(followUpOf?: string) { composeAudit.value = false; composeFollowUp.value = followUpOf || null; showCompose.value = true }
+function openAuditEmail() { composeFollowUp.value = null; composeAudit.value = true; showCompose.value = true }
 const liveInteractions = computed(() => interactions.value.filter(i => !i.voidedAt))
 const openNextActions = computed(() => liveInteractions.value.filter(i => i.nextAction && !i.nextActionDone).sort((a, b) => (a.nextActionDate || '9999').localeCompare(b.nextActionDate || '9999')))
 const audits = computed<CrmAudit[]>(() => data.value?.audits || [])
@@ -465,7 +468,7 @@ const tabs = computed(() => [
 
         <!-- ═══ AUDITS ═══ -->
         <div v-else-if="tab === 'audits'" class="max-w-5xl">
-          <CrmAuditPanel :dealership="dealership" :audits="audits" :can-edit="canEdit" @record="showAudit = true" />
+          <CrmAuditPanel :dealership="dealership" :audits="audits" :can-edit="canEdit" :can-email="canEdit && !dealership.archivedAt" @record="showAudit = true" @email="openAuditEmail" />
         </div>
 
         <!-- ═══ EMAILS ═══ -->
@@ -501,7 +504,7 @@ const tabs = computed(() => [
     </Dialog>
     <CrmConvertDialog v-model:open="showConvert" :dealership="dealership" :contacts="contacts" @converted="refresh()" />
     <CrmAuditForm v-model:open="showAudit" :dealership="dealership" :previous="latestAudit" @saved="refresh()" />
-    <ClientOnly><CrmInventoryScanner v-if="dealership" v-model:open="showScanner" :dealership="{ id, name: dealership.name, website: dealership.website }" @saved="refresh()" /></ClientOnly>
+    <ClientOnly><CrmInventoryScanner v-if="dealership" v-model:open="showScanner" :dealership="{ id, name: dealership.name, website: dealership.website }" @saved="refresh()" @email="openAuditEmail" /></ClientOnly>
     <ClientOnly><CrmScannerReviewDialog v-if="dealership" v-model:open="showReview" :scan-id="latestScanId" :dealership-name="dealership.name" :audit-id="latestAudit ? String((latestAudit as any).id) : null" :audited-at="latestAudit?.auditedAt" @saved="refresh()" /></ClientOnly>
     <Dialog v-model:open="showPark">
       <DialogContent class="sm:max-w-md">
@@ -521,7 +524,7 @@ const tabs = computed(() => [
         <DialogFooter><Button variant="ghost" @click="showPark = false">Cancel</Button><Button @click="savePark">{{ park.stage === NURTURE_STAGE ? 'Move to Nurture' : 'Mark Lost' }}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
-    <CrmEmailComposer v-model:open="showCompose" :dealership="dealership" :contacts="contacts" :emails="emails" :follow-up-of="composeFollowUp" @sent="refresh()" />
+    <CrmEmailComposer v-model:open="showCompose" :dealership="dealership" :contacts="contacts" :emails="emails" :follow-up-of="composeFollowUp" :audit-email="composeAudit" @sent="refresh()" @crawl="showScanner = true" />
     <CrmInteractionForm v-model:open="showLog" :dealership="dealership" :contacts="contacts" :interaction="editingInteraction" :default-type="logType" :open-next-actions="openNextActions.length" @saved="refresh()" @won="showConvert = true" />
   </div>
 </template>

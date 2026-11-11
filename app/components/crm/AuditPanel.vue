@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import type { CrmAudit, CrmDealership } from '~/composables/useCrmDealerships'
-import { ClipboardCheck, Plus, Car, ImageOff, Camera, TrendingUp, TrendingDown, Minus, ChevronDown, ExternalLink, Bot, User, FileDown, Link2, FileBarChart } from 'lucide-vue-next'
+import { ClipboardCheck, Plus, Car, ImageOff, Camera, TrendingUp, TrendingDown, Minus, ChevronDown, ExternalLink, Bot, User, FileDown, Link2, FileBarChart, Mail } from 'lucide-vue-next'
 import { format, formatDistanceToNow } from 'date-fns'
 
-const props = defineProps<{ dealership: CrmDealership, audits: CrmAudit[], canEdit: boolean }>()
-const emit = defineEmits<{ record: [] }>()
+const props = defineProps<{
+  dealership: CrmDealership, audits: CrmAudit[], canEdit: boolean
+  /** The signed-in user may email this dealership (not archived, edit rights). */
+  canEmail?: boolean
+}>()
+const emit = defineEmits<{ record: [], email: [] }>()
+/** The audit email as a PDF (nothing is sent) — to print or hand over. It is always built from the latest audit. */
+const emailPdfUrl = computed(() => `/api/crm/dealerships/${props.dealership.id}/emails/pdf?templateId=audit&download=1`)
 
 const sorted = computed(() => [...props.audits].sort((a, b) => b.auditedAt.localeCompare(a.auditedAt) || b.createdAt.localeCompare(a.createdAt)))
 const latest = computed(() => sorted.value[0] || null)
@@ -41,6 +47,7 @@ function exportCsv() {
       </div>
       <div class="flex items-center gap-2">
         <Button v-if="audits.length" variant="outline" size="sm" class="gap-2" @click="exportCsv"><FileDown class="size-4" /> Export history</Button>
+        <Button v-if="audits.length && canEmail" variant="outline" size="sm" class="gap-2" @click="emit('email')"><Mail class="size-4" /> Email this audit</Button>
         <Button v-if="canEdit" size="sm" class="gap-2 bg-violet-600 hover:bg-violet-600/90 text-white" @click="emit('record')"><Plus class="size-4" /> Record audit</Button>
       </div>
     </div>
@@ -109,8 +116,13 @@ function exportCsv() {
           </button>
           <div v-if="expanded.has(a.id)" class="border-t px-4 pt-3 flex flex-wrap items-center gap-2">
             <Button size="sm" class="h-8 gap-1.5 bg-violet-600 hover:bg-violet-600/90 text-white" @click="openReport(a)"><FileBarChart class="size-4" /> Inventory report</Button>
-            <Button as="a" :href="`/api/crm/audits/${a.id}/report?format=pdf&download=1`" size="sm" variant="outline" class="h-8 gap-1.5"><FileDown class="size-4" /> PDF</Button>
-            <span class="text-[11px] text-muted-foreground">Stored as it read on this date{{ idx < sorted.length - 1 ? ' — includes then vs now' : ' — the baseline' }}.</span>
+            <Button as="a" :href="`/api/crm/audits/${a.id}/report?format=pdf&download=1`" size="sm" variant="outline" class="h-8 gap-1.5"><FileDown class="size-4" /> Report PDF</Button>
+            <template v-if="idx === 0">
+              <span class="h-5 w-px bg-border" aria-hidden="true" />
+              <Button v-if="canEmail" size="sm" class="h-8 gap-1.5" @click="emit('email')"><Mail class="size-4" /> Email this audit</Button>
+              <Button as="a" :href="emailPdfUrl" size="sm" variant="outline" class="h-8 gap-1.5"><FileDown class="size-4" /> Email PDF</Button>
+            </template>
+            <span class="text-[11px] text-muted-foreground basis-full">Stored as it read on this date{{ idx < sorted.length - 1 ? ' — includes then vs now' : ' — the baseline' }}.{{ idx === 0 ? ' The email is built from this audit: subject, numbers and the flagged listings with their photos.' : sorted.length > 1 ? ' Emails always use the latest audit.' : '' }}</span>
           </div>
           <div v-if="expanded.has(a.id)" class="px-4 py-4 grid grid-cols-1 lg:grid-cols-2 gap-5 text-sm">
             <div class="space-y-4">
@@ -149,6 +161,6 @@ function exportCsv() {
         </article>
       </section>
     </template>
-    <CrmAuditReport v-model:open="reportOpen" :audit-id="reportFor?.id || null" :audited-at="reportFor?.auditedAt" :dealership-name="dealership.name" />
+    <CrmAuditReport v-model:open="reportOpen" :audit-id="reportFor?.id || null" :audited-at="reportFor?.auditedAt" :dealership-name="dealership.name" :can-email="!!canEmail && !!latest && reportFor?.id === latest.id" @email="reportOpen = false; emit('email')" />
   </div>
 </template>

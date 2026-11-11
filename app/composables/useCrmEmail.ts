@@ -76,7 +76,11 @@ export interface ExperimentRow {
   revenueInvoiced: number, contractValue: number, revenuePerUnit: number, enoughData: boolean
 }
 export interface ExperimentReport { level: string, model: 'email' | 'sequence', minSample: number, unit: string, rows: ExperimentRow[], totals: { units: number, won: number } }
-export interface EmailPreview { subject: string, html: string, format: 'text' | 'html', missing: string[], auditDate: string | null }
+export interface EmailPreview {
+  subject: string, html: string, format: 'text' | 'html', missing: string[], auditDate: string | null
+  /** Who the dealer sees it from, and where a reply goes ('' = back into the CRM). */
+  from?: { name: string, email: string }, replyTo?: string, auditId?: string | null
+}
 export interface EmailCampaign { id: string, name: string, description: string, status: 'planned' | 'active' | 'paused' | 'completed', startDate: string | null, endDate: string | null, archivedAt: string | null, createdAt: string }
 export interface EmailStatsRow {
   key: any
@@ -85,7 +89,12 @@ export interface EmailStatsRow {
   conversation: number, meeting: number, opportunity: number, proposal: number, won: number, dealershipsReached: number
 }
 export interface EmailStats { rows: EmailStatsRow[], unclassifiedReplies: number, unmatchedReplies: number, attributionDays: number }
-export interface EmailConfig { fromEmail: string, fromBrand: string, replyTracking: 'reply-address' | 'sender-match', webhookSigned: boolean, canSend: boolean, minSample: number, aiConfigured?: boolean, aiModel?: string, aiProvider?: 'gemini' | 'anthropic' | null, aiLabel?: string }
+export interface EmailConfig {
+  /** The address emails really go out from. */
+  fromEmail: string
+  /** What is set on the server; differs from `fromEmail` when it cannot be used as a sender (a Gmail address …). */
+  configuredFrom?: string, fromReplaced?: boolean, fromReplacedReason?: string
+  fromBrand: string, replyTracking: 'reply-address' | 'sender-match', webhookSigned: boolean, canSend: boolean, minSample: number, aiConfigured?: boolean, aiModel?: string, aiProvider?: 'gemini' | 'anthropic' | null, aiLabel?: string }
 
 export interface SendEmailInput {
   contactId?: string | null

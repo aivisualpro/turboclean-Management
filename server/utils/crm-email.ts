@@ -44,7 +44,40 @@ export const TEMPLATE_CATEGORIES = ['First touch', 'Follow-up', 'Meeting', 'Prop
 const ATTRIBUTION_DAYS = 90
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-const FROM_EMAIL = () => process.env.CRM_FROM_EMAIL || 'sales@zrzops.com'
+/** The app's own sending address — on the domain that is verified with Resend. */
+const DEFAULT_FROM = 'sales@zrzops.com'
+/** Public mailbox providers. Nobody can verify these domains, so an address there can never be the From of an app email. */
+const PUBLIC_MAILBOXES = new Set(['gmail.com', 'googlemail.com', 'ymail.com', 'rocketmail.com', 'msn.com', 'icloud.com', 'me.com', 'mac.com', 'aol.com', 'proton.me', 'protonmail.com', 'pm.me', 'gmx.com', 'gmx.net', 'mail.com', 'zoho.com', 'yandex.com', 'comcast.net', 'verizon.net', 'att.net', 'sbcglobal.net'])
+const PUBLIC_MAILBOX_FAMILY = /^(yahoo|hotmail|outlook|live)\.(com?\.)?[a-z]{2,3}$/
+export const isPublicMailbox = (email: string) => { const d = String(email || '').trim().toLowerCase().split('@')[1] || ''; return PUBLIC_MAILBOXES.has(d) || PUBLIC_MAILBOX_FAMILY.test(d) }
+/**
+ * The address emails really go out from. `CRM_FROM_EMAIL` is used when it can be: an address at a
+ * public mailbox (Gmail, Yahoo, Outlook …) cannot — the provider refuses it ("domain is not verified")
+ * — so the app's own address is used instead and the configured one keeps receiving the replies.
+ */
+export function sendingAddress(): { from: string, configured: string, replaced: boolean, reason: string } {
+  const configured = String(process.env.CRM_FROM_EMAIL || '').trim().toLowerCase()
+  if (!configured) return { from: DEFAULT_FROM, configured: '', replaced: false, reason: '' }
+  if (!EMAIL_RE.test(configured)) return { from: DEFAULT_FROM, configured, replaced: true, reason: `“${configured}” is not an email address` }
+  if (isPublicMailbox(configured)) return { from: DEFAULT_FROM, configured, replaced: true, reason: `${configured.split('@')[1]} is a public mailbox, and mail can only be sent from a domain you own` }
+  return { from: configured, configured, replaced: false, reason: '' }
+}
+const FROM_EMAIL = () => sendingAddress().from
+/** Where a dealer's reply goes when replies are not routed through the tracked reply address. */
+function plainReplyTo(actor: SessionActor | null) {
+  const a = sendingAddress()
+  return process.env.CRM_REPLY_TO || (a.replaced && EMAIL_RE.test(a.configured) ? a.configured : '') || actor?.email || a.from
+}
+/** The mail provider's refusal, in words a rep can act on. */
+export function sendErrorMessage(raw: string, fromEmail: string): string {
+  const msg = String(raw || '').trim()
+  const domain = fromEmail.split('@')[1] || 'the sending domain'
+  if (/domain is not verified|verify (a|your) domain|not verified/i.test(msg)) return `Email not sent: ${domain} is not verified with the mail provider yet, so nothing can be sent from ${fromEmail}. Verify ${domain} in Resend → Domains, or set CRM_FROM_EMAIL to an address on a verified domain.`
+  if (/only send testing emails/i.test(msg)) return 'Email not sent: the mail provider is still in test mode — verify your sending domain in Resend → Domains to email dealers.'
+  if (/api key|unauthorized|forbidden/i.test(msg)) return 'Email not sent: the mail provider did not accept the key saved on the server (RESEND_API_KEY).'
+  if (/rate limit|too many requests|quota/i.test(msg)) return 'Email not sent: the mail provider\'s sending limit was reached — try again in a minute.'
+  return `Email not sent: ${msg || 'the mail provider refused it'}`
+}
 const FROM_BRAND = () => process.env.CRM_FROM_BRAND || 'ZRZ Turbo Clean'
 const REPLY_DOMAIN = () => process.env.CRM_REPLY_DOMAIN || ''
 
@@ -513,7 +546,7 @@ export async function sendCrmEmail(db: Db, dealership: any, input: SendInput, ac
   const id = _id.toString()
   const now = new Date().toISOString()
   const fromEmail = FROM_EMAIL()
-  const replyTo = REPLY_DOMAIN() ? `reply+${id}@${REPLY_DOMAIN()}` : (process.env.CRM_REPLY_TO || actor?.email || fromEmail)
+  const replyTo = REPLY_DOMAIN() ? `reply+${id}@${REPLY_DOMAIN()}` : plainReplyTo(actor)
 
   // Subject: the typed one wins; if it is exactly a tracked line, credit that line, else 'custom'.
   const rawSubject = str(input.subject, 300) || subjectLine?.text || ''
@@ -634,7 +667,7 @@ export async function sendCrmEmail(db: Db, dealership: any, input: SendInput, ac
   if (result?.error) {
     const msg = result.error.message || result.error.name || 'Send failed'
     await emails.updateOne({ _id }, { $set: { status: 'failed', failedReason: msg, updatedAt: new Date().toISOString() }, $push: { events: { type: 'failed', at: new Date().toISOString(), detail: msg } } as any })
-    throw createError({ statusCode: 502, statusMessage: `Email not sent: ${msg}` })
+    throw createError({ statusCode: 502, statusMessage: sendErrorMessage(msg, fromEmail), data: { sendFailed: true, providerMessage: msg } })
   }
   await emails.updateOne({ _id }, { $set: { status: 'sent', resendId: result?.data?.id || null, updatedAt: new Date().toISOString() }, $push: { events: { type: 'sent', at: new Date().toISOString() } } as any })
 
@@ -665,19 +698,25 @@ export async function previewCrmEmail(db: Db, dealership: any, input: SendInput,
     template = picked.template
     version = input.templateVersion ? template.versions.find((v: any) => v.version === Number(input.templateVersion)) : picked.version
   }
-  const replyTo = REPLY_DOMAIN() ? `reply+preview@${REPLY_DOMAIN()}` : (process.env.CRM_REPLY_TO || actor?.email || FROM_EMAIL())
+  const replyTo = REPLY_DOMAIN() ? `reply+preview@${REPLY_DOMAIN()}` : plainReplyTo(actor)
   const rawSubject = str(input.subject, 300)
-  const { vars, audit } = await mergeContext(db, dealership, contact, actor, { replyTo, subject: rawSubject })
+  const { vars, audit, sender } = await mergeContext(db, dealership, contact, actor, { replyTo, subject: rawSubject })
   const subj = renderMerge(rawSubject, vars)
   const typedBody = str(input.body, 20_000)
   const useHtml = version?.format === 'html' && (!typedBody || typedBody === version.body)
+  // Who the dealer sees it from, and where their reply lands (the composer shows this as the envelope).
+  const envelope = {
+    from: { name: sender.displayName ? `${sender.displayName} | ${sender.company || FROM_BRAND()}` : FROM_BRAND(), email: FROM_EMAIL() },
+    replyTo: REPLY_DOMAIN() ? '' : replyTo,
+    auditId: audit?._id?.toString?.() || null,
+  }
   if (useHtml) {
     const merged = renderMerge(version.html, vars, { html: true })
     const html = crmFilesToUrls(merged.text.replace(/__AUDIT_SCREENSHOT__/g, audit?.screenshotFileId ? `<img src="/api/crm/files/${audit.screenshotFileId}" alt="Inventory page screenshot" style="display:block;width:100%;max-width:600px;height:auto;border:0" />` : ''))
-    return { subject: subj.text, html, format: 'html', missing: [...new Set([...subj.missing, ...merged.missing])], auditDate: audit?.auditedAt || null }
+    return { subject: subj.text, html, format: 'html', missing: [...new Set([...subj.missing, ...merged.missing])], auditDate: audit?.auditedAt || null, ...envelope }
   }
   const b = renderMerge(typedBody || version?.body || '', vars)
-  return { subject: subj.text, html: textToHtml(b.text.replace(/__AUDIT_SCREENSHOT__/g, '')), format: 'text', missing: [...new Set([...subj.missing, ...b.missing])], auditDate: audit?.auditedAt || null }
+  return { subject: subj.text, html: textToHtml(b.text.replace(/__AUDIT_SCREENSHOT__/g, '')), format: 'text', missing: [...new Set([...subj.missing, ...b.missing])], auditDate: audit?.auditedAt || null, ...envelope }
 }
 
 /**
@@ -731,6 +770,13 @@ export async function emailPreviewDocument(db: Db, dealership: any, input: { tem
   return { html, fileName, subject: p.subject }
 }
 
+/** The inventory-audit email ("Missing Photos") — the template the audit screens preview, send and print. */
+export async function auditEmailTemplateId(db: Db): Promise<string | null> {
+  const { templates } = await emailDb(db)
+  const t = await templates.findOne({ name: 'Missing Photos', archivedAt: null }) || await templates.findOne({ category: 'First touch', archivedAt: null })
+  return t?._id?.toString() || null
+}
+
 /**
  * Everything a template preview needs to render exactly like a real send, in the browser:
  * the merge values (incl. the ready-made HTML blocks) for a real dealership — its latest audit and
@@ -740,7 +786,7 @@ export async function emailPreviewDocument(db: Db, dealership: any, input: { tem
  */
 export async function templatePreviewContext(db: Db, input: any, actor: SessionActor | null) {
   const { SAMPLE_AUDIT, SAMPLE_CONTACT, SAMPLE_DEALERSHIP, SAMPLE_HISTORY, SAMPLE_SENDER } = await import('./crm-email-blocks')
-  const replyTo = REPLY_DOMAIN() ? `reply+preview@${REPLY_DOMAIN()}` : (process.env.CRM_REPLY_TO || actor?.email || FROM_EMAIL())
+  const replyTo = REPLY_DOMAIN() ? `reply+preview@${REPLY_DOMAIN()}` : plainReplyTo(actor)
   const subject = str(input?.subject, 300)
   let vars: Record<string, string>, audit: any, sender: SenderProfile
   let source: 'sample' | 'dealership' = 'sample'
@@ -879,6 +925,10 @@ export async function deliverabilityReport(db: Db) {
   const mx = async (host: string) => { try { return (await dns.resolveMx(host)).map(r => r.exchange) } catch { return [] as string[] } }
   const [rootTxt, sendTxt, dkim, dmarc, sendMx] = await Promise.all([txt(domain), txt(`send.${domain}`), txt(`resend._domainkey.${domain}`), txt(`_dmarc.${domain}`), mx(`send.${domain}`)])
   const items: { key: string, label: string, status: 'ok' | 'warn' | 'fail', detail: string, fix?: string }[] = []
+  const addr = sendingAddress()
+  items.push(addr.replaced
+    ? { key: 'from', label: 'Sending address', status: 'warn', detail: `Emails go out from ${addr.from}. The address set on the server (${addr.configured}) cannot be used: ${addr.reason}.`, fix: `In Vercel → Settings → Environment Variables, set CRM_FROM_EMAIL to an address at ${domain} (for example ${addr.configured.split('@')[0] || 'sales'}@${domain}) and redeploy.` }
+    : { key: 'from', label: 'Sending address', status: 'ok', detail: `Emails go out from ${addr.from}` })
   const spf = [...sendTxt, ...rootTxt].find(t => /^v=spf1/i.test(t))
   items.push(spf
     ? { key: 'spf', label: 'SPF', status: /amazonses|resend/i.test(spf) || sendTxt.length ? 'ok' : 'warn', detail: spf }
@@ -1037,7 +1087,7 @@ export async function ingestInboundEmail(db: Db, payload: any, full: { html?: st
   }
   if (!parent && !contact) {
     // Only keep unmatched mail that was clearly addressed to the CRM.
-    const crmAddressed = toList.some(t => t === FROM_EMAIL().toLowerCase() || /^reply\+/.test(t) || (REPLY_DOMAIN() && t.endsWith(`@${REPLY_DOMAIN()}`)))
+    const crmAddressed = toList.some(t => t === FROM_EMAIL().toLowerCase() || t === sendingAddress().configured || /^reply\+/.test(t) || (REPLY_DOMAIN() && t.endsWith(`@${REPLY_DOMAIN()}`)))
     if (!crmAddressed) return null
   }
 

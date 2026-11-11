@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { FileDown, ExternalLink, Link2, Loader2, FileBarChart } from 'lucide-vue-next'
+import { FileDown, ExternalLink, Link2, Loader2, FileBarChart, Mail } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { format } from 'date-fns'
 
@@ -8,7 +8,8 @@ import { format } from 'date-fns'
  * (then vs now, history, evidence). Open, download as PDF, or copy the dealer's own link
  * (the same link templates insert as {{reportUrl}}).
  */
-const props = defineProps<{ auditId: string | null, auditedAt?: string, dealershipName?: string }>()
+const props = defineProps<{ auditId: string | null, auditedAt?: string, dealershipName?: string, /** Offer "Email to the dealer" (the latest audit of a dealership the user may email). */ canEmail?: boolean }>()
+const emit = defineEmits<{ email: [] }>()
 const open = defineModel<boolean>('open', { default: false })
 const loaded = ref(false)
 watch(() => [open.value, props.auditId], () => { loaded.value = false })
@@ -31,6 +32,7 @@ async function copyLink() {
         <DialogDescription class="text-xs flex flex-wrap items-center gap-2">
           <span>{{ dealershipName }} — stored exactly as it read on the audit date.</span>
           <span class="ml-auto flex gap-2">
+            <Button v-if="canEmail" size="sm" variant="outline" class="h-7 gap-1.5 text-xs" @click="emit('email')"><Mail class="size-3.5" /> Email this audit</Button>
             <Button size="sm" variant="outline" class="h-7 gap-1.5 text-xs" @click="copyLink"><Link2 class="size-3.5" /> Copy link for the dealer</Button>
             <Button as="a" :href="`${base}?format=pdf`" target="_blank" size="sm" variant="outline" class="h-7 gap-1.5 text-xs"><ExternalLink class="size-3.5" /> Open PDF</Button>
             <Button as="a" :href="`${base}?format=pdf&download=1`" size="sm" class="h-7 gap-1.5 text-xs"><FileDown class="size-3.5" /> Download PDF</Button>

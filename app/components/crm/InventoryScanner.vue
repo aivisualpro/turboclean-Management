@@ -7,7 +7,7 @@ import { HEALTH_META, SCOPE_META, TONE, checkScanPage, guessPageLabel, normalize
 import {
   ScanSearch, X, ArrowLeft, ArrowRight, RotateCw, Lock, Globe, ChevronDown, Loader2, Square, MonitorPlay, LayoutGrid, CheckCircle2,
   AlertTriangle, Car, Images, ScanLine, Save, ExternalLink, Cloud, FileStack, Sparkles, History, CircleSlash, MousePointerClick, List, Search,
-  BookmarkCheck, BookmarkPlus, Wand2, Plus, Trash2, Activity, CircleDashed, CornerUpLeft, ShieldCheck, Ban, PlayCircle, ListChecks,
+  BookmarkCheck, BookmarkPlus, Wand2, Plus, Trash2, Activity, CircleDashed, CornerUpLeft, ShieldCheck, Ban, PlayCircle, ListChecks, Mail,
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
@@ -23,7 +23,7 @@ import { toast } from 'vue-sonner'
  */
 const props = defineProps<{ dealership: { id: string, name: string, website?: string | null } }>()
 const open = defineModel<boolean>('open', { default: false })
-const emit = defineEmits<{ saved: [] }>()
+const emit = defineEmits<{ saved: [], /** Email the audit that was just saved (opens the composer on the audit email). */ email: [] }>()
 
 const sc = useInventoryScanner()
 const { preview, previewing, previewError, scan, progress, results, frame, error, log, running } = sc
@@ -259,6 +259,7 @@ async function save() {
     emit('saved')
   } catch (e: any) { toast.error(failText(e, 'Could not save')) } finally { saving.value = false }
 }
+function emailAudit() { open.value = false; emit('email') }
 function closeDialog() {
   if (scanning.value && !confirm('A crawl is running. Close the crawler and stop it? What it found so far is still checked and kept.')) return
   if (ranHere.value && results.value && !results.value.savedAuditId && !confirm('These results are not saved to the CRM yet. Close anyway? (You can reopen them from “Last crawl”.)')) return
@@ -657,7 +658,10 @@ const crawlLabel = computed(() => chosen.value.length ? `Crawl ${chosen.value.le
               </div>
               <div class="ml-auto flex items-center gap-2">
                 <Button variant="outline" size="sm" class="h-8 gap-1.5" @click="tab = 'site'"><MonitorPlay class="size-4" /> Back to the crawl plan</Button>
-                <Button v-if="results.savedAuditId" size="sm" class="h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-600/90 text-white" @click="open = false"><CheckCircle2 class="size-4" /> Saved — close</Button>
+                <template v-if="results.savedAuditId">
+                  <Button variant="outline" size="sm" class="h-8 gap-1.5" @click="open = false"><CheckCircle2 class="size-4 text-emerald-600" /> Saved — close</Button>
+                  <Button size="sm" class="h-8 gap-1.5" @click="emailAudit"><Mail class="size-4" /> Email this audit</Button>
+                </template>
                 <Button v-else size="sm" class="h-8 gap-1.5" :disabled="saving" @click="save"><Loader2 v-if="saving" class="size-4 animate-spin" /><Save v-else class="size-4" /> Save to CRM</Button>
               </div>
             </footer>
