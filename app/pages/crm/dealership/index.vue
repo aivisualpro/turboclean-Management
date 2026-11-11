@@ -20,16 +20,21 @@ import { OPEN_STAGES, QUEUE_STAGES, CLOSED_STAGES, DEALERSHIP_STAGES, LEAD_SOURC
 const { setHeader } = usePageHeader()
 setHeader({ title: 'Dealerships', description: 'CRM · every dealership, its people and its history', icon: 'i-lucide-store' })
 
-const { dealerships, isLoading, lastFetchedAt, fetchDealerships, updateDealership } = useCrmDealerships()
+const { dealerships, isLoading, lastFetchedAt, loadError, fetchDealerships, updateDealership } = useCrmDealerships()
 const { isActionAllowed } = usePermissions()
 const canAdd = computed(() => isActionAllowed('crm_dealership', 'Add'))
 const canEdit = computed(() => isActionAllowed('crm_dealership', 'Edit'))
 const canDelete = computed(() => isActionAllowed('crm_dealership', 'Delete'))
 
 const { pending } = await useAsyncData('crm-dealerships-bootstrap', async () => {
-  if (dealerships.value.length === 0) await fetchDealerships()
+  // A failed load is kept in `loadError` (never shown as an empty book) and tried again in the browser below.
+  if (dealerships.value.length === 0) await fetchDealerships().catch(() => {})
   return true
 }, { lazy: false })
+/** Load the list again (the "Try again" button, and automatically when the first load did not get through). */
+async function retryLoad() { try { await fetchDealerships() } catch {} }
+function reloadPage() { window.location.reload() }
+onMounted(() => { if (!dealerships.value.length && (loadError.value || !lastFetchedAt.value)) retryLoad() })
 
 // ─── Column model — one value per column ───
 type ColKey = 'dealershipId' | 'name' | 'dealerGroup' | 'route' | 'brands' | 'stage' | 'inStage' | 'leadSource' | 'city' | 'state' | 'zip' | 'phone' | 'website' | 'scanPages'
@@ -712,6 +717,17 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
           <Skeleton class="size-4 rounded" /><Skeleton class="size-9 rounded-lg" />
           <div class="flex-1 space-y-2"><Skeleton class="h-3.5 w-56" /><Skeleton class="h-3 w-36" /></div>
           <Skeleton class="h-5 w-20 rounded-full" /><Skeleton class="h-3 w-28" /><Skeleton class="h-3 w-24" />
+        </div>
+      </div>
+
+      <!-- Could not load (never shown as "empty") -->
+      <div v-else-if="loadError && dealerships.length === 0" class="h-full flex flex-col items-center justify-center py-24 text-center px-6" role="alert">
+        <div class="size-16 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center"><AlertTriangle class="size-7" /></div>
+        <h3 class="mt-4 text-lg font-semibold">The dealerships could not be loaded</h3>
+        <p class="mt-1 text-sm text-muted-foreground max-w-sm">{{ loadError }} Your dealerships are safe — this is only the list not arriving.</p>
+        <div class="mt-4 flex gap-2">
+          <Button size="sm" class="gap-2" :disabled="isLoading" @click="retryLoad"><RefreshCw class="size-4" :class="isLoading && 'animate-spin'" /> Try again</Button>
+          <Button variant="outline" size="sm" @click="reloadPage">Reload the page</Button>
         </div>
       </div>
 

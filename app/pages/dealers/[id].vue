@@ -26,13 +26,15 @@ const { dealers, fetchDealers, updateDealer, deleteDealer, isLoading: dealersLoa
 
 // Use useAsyncData to fetch during SSR so <NuxtPage> isn't omitted from the initial render.
 // Omitting <NuxtPage> during SSR causes Nuxt 4 router manifest crashes.
-const { data: fetchedDealer, pending: fetchingById } = useAsyncData(`ensure-dealer-${dealerId}`, async () => {
+// Carries the sign-in cookie when the page is built on the server (see useApi).
+const api = useApi()
+const { data: fetchedDealer, pending: fetchingById, refresh: reloadDealer } = useAsyncData(`ensure-dealer-${dealerId}`, async () => {
   if (dealers.value.find(d => d.id === dealerId)) return null
 
   try {
     await fetchDealers()
     if (!dealers.value.find(d => d.id === dealerId)) {
-      const res = await $fetch<{ dealer: any }>(`/api/dealers/${dealerId}`)
+      const res = await api<{ dealer: any }>(`/api/dealers/${dealerId}`)
       return res?.dealer || null
     }
   } catch (e) {
@@ -44,6 +46,8 @@ const { data: fetchedDealer, pending: fetchingById } = useAsyncData(`ensure-deal
 const dealer = computed(() =>
   dealers.value.find(d => d.id === dealerId) || fetchedDealer.value
 )
+// Safety net: if the dealer did not arrive while the page was built on the server, load it in the browser.
+onMounted(() => { if (!dealer.value) reloadDealer() })
 
 const isPageLoading = computed(() => dealersLoading.value || fetchingById.value)
 

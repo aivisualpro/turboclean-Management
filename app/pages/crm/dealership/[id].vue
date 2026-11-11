@@ -25,6 +25,9 @@ const canEdit = computed(() => isActionAllowed('crm_dealership', 'Edit'))
 const canDelete = computed(() => isActionAllowed('crm_dealership', 'Delete'))
 
 const { data, pending, error, refresh } = await useAsyncData(`crm-dealership-${id}`, () => fetchDealershipRecord(id))
+/** Only a real 404 / bad id means "not found"; anything else is a failed load, tried once more in the browser. */
+const notFound = computed(() => { const c = (error.value as any)?.statusCode || (error.value as any)?.status; return c === 404 || c === 400 })
+onMounted(() => { if (error.value && !notFound.value) refresh() })
 const dealership = computed<CrmDealership | null>(() => data.value?.dealership || null)
 const contacts = computed<CrmContact[]>(() => data.value?.contacts || [])
 const activity = computed<CrmActivity[]>(() => data.value?.activity || [])
@@ -237,6 +240,17 @@ const tabs = computed(() => [
       <div class="flex items-center gap-2"><Skeleton class="size-16 rounded-2xl" /><div class="space-y-2 flex-1"><Skeleton class="h-6 w-64" /><Skeleton class="h-4 w-96" /></div></div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2"><Skeleton v-for="i in 4" :key="i" class="h-20 rounded-xl" /></div>
       <Skeleton class="h-64 rounded-xl" />
+    </div>
+
+    <!-- Could not load (a failed request is not "not found") -->
+    <div v-else-if="error && !notFound" class="flex-1 flex flex-col items-center justify-center text-center p-6" role="alert">
+      <div class="size-16 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center"><Store class="size-7" /></div>
+      <h2 class="mt-2 text-lg font-semibold">This dealership could not be loaded</h2>
+      <p class="text-sm text-muted-foreground mt-1">The record is safe — the page just did not get its data.</p>
+      <div class="mt-2 flex gap-2">
+        <Button size="sm" @click="refresh()">Try again</Button>
+        <Button variant="outline" size="sm" class="gap-2" @click="navigateTo('/crm/dealership')"><ArrowLeft class="size-4" /> Back to dealerships</Button>
+      </div>
     </div>
 
     <!-- Not found -->

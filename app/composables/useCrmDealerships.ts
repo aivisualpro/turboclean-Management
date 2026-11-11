@@ -300,12 +300,22 @@ export function useCrmDealerships() {
   const isLoading = useState<boolean>('crm-dealerships-loading', () => false)
   const lastFetchedAt = useState<number>('crm-dealerships-fetched', () => 0)
 
+  /** Why the list could not be loaded ('' when it loaded) — an error must never look like "no dealerships". */
+  const loadError = useState<string>('crm-dealerships-error', () => '')
+  // Carries the sign-in cookie when the page is built on the server (see useApi).
+  const api = useApi()
+
   async function fetchDealerships(opts: { archived?: boolean } = {}) {
     isLoading.value = true
     try {
-      const res = await $fetch<{ dealerships: CrmDealership[] }>('/api/crm/dealerships', { query: opts.archived ? { archived: '1' } : {} })
+      const res = await api<{ dealerships: CrmDealership[] }>('/api/crm/dealerships', { query: opts.archived ? { archived: '1' } : {} })
       dealerships.value = res.dealerships || []
       lastFetchedAt.value = Date.now()
+      loadError.value = ''
+    } catch (e: any) {
+      const code = e?.statusCode || e?.status || e?.response?.status
+      loadError.value = code === 401 ? 'Your sign-in could not be confirmed.' : (e?.data?.statusMessage || e?.statusMessage || 'The server did not answer.')
+      throw e
     } finally {
       isLoading.value = false
     }
@@ -336,7 +346,7 @@ export function useCrmDealerships() {
   }
 
   async function fetchDealershipRecord(id: string) {
-    return await $fetch<{ dealership: CrmDealership, contacts: CrmContact[], activity: CrmActivity[], audits: CrmAudit[], stageHistory: CrmStageChange[], stageDurations: CrmStageDurations, interactions: CrmInteraction[] }>(`/api/crm/dealerships/${id}`)
+    return await api<{ dealership: CrmDealership, contacts: CrmContact[], activity: CrmActivity[], audits: CrmAudit[], stageHistory: CrmStageChange[], stageDurations: CrmStageDurations, interactions: CrmInteraction[] }>(`/api/crm/dealerships/${id}`)
   }
 
   async function recordAudit(dealershipId: string, input: AuditInput) {
@@ -376,7 +386,7 @@ export function useCrmDealerships() {
   }
 
   async function fetchPipelineReport(opts: { assignedUserId?: string } = {}) {
-    return await $fetch<PipelineReport>('/api/crm/pipeline', { query: opts.assignedUserId ? { assignedUserId: opts.assignedUserId } : {} })
+    return await api<PipelineReport>('/api/crm/pipeline', { query: opts.assignedUserId ? { assignedUserId: opts.assignedUserId } : {} })
   }
 
   async function addNote(dealershipId: string, text: string) {
@@ -384,7 +394,7 @@ export function useCrmDealerships() {
   }
 
   return {
-    dealerships, isLoading, lastFetchedAt,
+    dealerships, isLoading, lastFetchedAt, loadError,
     fetchDealerships, createDealership, updateDealership, deleteDealership, fetchDealershipRecord,
     addContact, updateContact, handoverContact, addNote, convertDealership, recordAudit, fetchPipelineReport, logInteraction, updateInteraction,
   }

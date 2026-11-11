@@ -71,12 +71,14 @@ function createSeedData(): Dealer[] {
 export function useDealers() {
   const dealers = useState<Dealer[]>('dealers', () => [])
   const isLoading = ref(false)
+  // Carries the sign-in cookie when the page is built on the server (see useApi).
+  const api = useApi()
 
   // Initialize data from MongoDB
   async function fetchDealers() {
     isLoading.value = true
     try {
-      const res = await $fetch<{ dealers: Dealer[], meta: any }>('/api/dealers')
+      const res = await api<{ dealers: Dealer[], meta: any }>('/api/dealers')
       dealers.value = res.dealers || []
     } catch (error) {
       console.error('Failed to fetch dealers:', error)

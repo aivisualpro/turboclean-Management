@@ -30,6 +30,8 @@ const { pending: dealersPending } = await useAsyncData(
   },
   { lazy: false }
 )
+// Safety net: if the list did not arrive while the page was built on the server, load it in the browser.
+onMounted(() => { if (dealers.value.length === 0) fetchDealers() })
 const { isActionAllowed, isAdmin } = usePermissions()
 const canAdd = computed(() => isActionAllowed('dealers', 'Add'))
 const canEdit = computed(() => isActionAllowed('dealers', 'Edit'))
