@@ -1,198 +1,214 @@
 <script setup lang="ts">
 import type { CrmDealership } from '~/composables/useCrmDealerships'
-import { Globe, Plus, Trash2, Loader2, Wand2, Car, Sparkles, Link2, ExternalLink, Check, ListChecks, Activity, Ban, ShieldCheck } from 'lucide-vue-next'
+import { AlertTriangle, Check, ListChecks, Loader2, Plus, Wand2, X } from 'lucide-vue-next'
 import type { ScanPage } from '~/lib/scanScope'
-import { HEALTH_META, TONE, checkScanPage, guessPageLabel, normalizeAddress, pagePath, scopeKey } from '~/lib/scanScope'
-import { formatDistanceToNow } from 'date-fns'
+import { HEALTH_META, TONE, checkScanPage, normalizeAddress, scopeKey } from '~/lib/scanScope'
 import { toast } from 'vue-sonner'
 
 /**
- * Scan pages for one dealership — the only pages the crawler reads (each inventory list is followed
- * through all of its result pages; nothing else on the site is opened).
- *  - An address must be an inventory list: the home page or one vehicle's page is refused here, with the reason.
- *  - Every page shows its health: what the last test or crawl really found on it.
- *  - "Detect" opens the website in the cloud browser and adds the pages that really list vehicles.
- * Saves to the dealership (`scanPages`), so the crawler and Mission Control use the same list.
+ * Scan pages for one dealership — the only pages the crawler reads.
+ *
+ * One line per link. Five lines are ready to type or paste into; "Add another line" gives more, and
+ * pasting several links at once fills one line each. A link is tidied when you leave its line
+ * (tracking leftovers removed) and checked on the spot: the home page or a single vehicle's page is
+ * marked in red with the reason and is not saved.
  */
 const props = defineProps<{ dealership: CrmDealership | null }>()
 const open = defineModel<boolean>('open', { default: false })
 const emit = defineEmits<{ saved: [pages: ScanPage[]] }>()
 const { updateDealership } = useCrmDealerships()
 
-const pages = ref<ScanPage[]>([])
-const testing = ref(new Set<string>())
-const draft = ref('')
+const MIN_LINES = 5
+interface Line { id: number, url: string, label: string, health: ScanPage['health'] | null }
+let nextId = 1
+const blank = (): Line => ({ id: nextId++, url: '', label: '', health: null })
+const lines = ref<Line[]>([])
+const inputs = new Map<number, HTMLInputElement>()
 const saving = ref(false)
 const detecting = ref(false)
-interface Found { url: string, label: string, kind: string, cards: number, total: number | null, verified: boolean }
-const found = ref<Found[]>([])
-const suggestions = ref<Found[]>([])
-const detectLog = ref<string[]>([])
 const detectNote = ref('')
+interface Found { url: string, label: string, kind: string, cards: number, total: number | null }
+const suggestions = ref<Found[]>([])
+
+/** Always five lines to work with, and always an empty one at the end. */
+function pad(list: Line[]) {
+  const out = [...list]
+  while (out.length < MIN_LINES || out[out.length - 1]!.url.trim()) out.push(blank())
+  return out
+}
 watch([open, () => props.dealership?.id], () => {
   if (!open.value) return
-  pages.value = (props.dealership?.scanPages || []).map(p => ({ ...p }))
-  draft.value = ''
-  found.value = []
-  suggestions.value = []
-  detectLog.value = []
+  inputs.clear()
+  lines.value = pad((props.dealership?.scanPages || []).map(p => ({ id: nextId++, url: p.url, label: p.label || '', health: p.health || null })))
   detectNote.value = ''
+  suggestions.value = []
 }, { immediate: true })
 
-const has = (u: string) => { const k = scopeKey(u); return !!k && pages.value.some(p => scopeKey(p.url) === k) }
-/** Why a page on the list can never be crawled ('' when it can). */
-const problemOf = (u: string) => { const c = checkScanPage(u); return c.ok ? null : c }
-const usable = computed(() => pages.value.filter(p => !problemOf(p.url)))
-function add(raw: string, label = '') {
-  const url = normalizeAddress(raw)
-  const fit = checkScanPage(url || raw)
-  if (!url || !fit.ok) return toast.error('Not an inventory page', { description: fit.message })
-  if (has(url)) return
-  pages.value = [...pages.value, { url, label }]
+/** Why a link is left out, in one short line. */
+const WHY: Record<string, string> = {
+  'Home page': 'This is the home page, not an inventory page — it will not be saved.',
+  'One vehicle': 'This is one vehicle\'s page, not the list of vehicles — it will not be saved.',
+  'A file': 'This is a file, not a page — it will not be saved.',
+  'Not a web address': 'This is not a valid link — it will not be saved.',
 }
-function addDraft() {
-  // Accept several lines / commas at once.
-  for (const part of draft.value.split(/[\n,]+/)) if (part.trim()) add(part)
-  draft.value = ''
+type State = { kind: 'empty' } | { kind: 'ok', note: string, tone: keyof typeof TONE } | { kind: 'bad', message: string } | { kind: 'twice' }
+/** What a line is right now: empty, a usable link, one that cannot be crawled (with the reason), or a repeat. */
+function stateOf(l: Line, i: number): State {
+  const v = l.url.trim()
+  if (!v) return { kind: 'empty' }
+  const fit = checkScanPage(v)
+  if (!fit.ok) return { kind: 'bad', message: WHY[fit.short] || fit.message }
+  const k = scopeKey(v)
+  if (lines.value.findIndex(x => x.url.trim() && scopeKey(x.url) === k) !== i) return { kind: 'twice' }
+  const h = l.health
+  if (!h) return { kind: 'ok', note: '', tone: 'ok' }
+  if (h.status === 'ok') return { kind: 'ok', note: `${h.advertised || h.vehicles} vehicles`, tone: 'ok' }
+  return { kind: 'ok', note: HEALTH_META[h.status]?.label || '', tone: HEALTH_META[h.status]?.tone || 'warn' }
 }
-const remove = (i: number) => { pages.value = pages.value.filter((_, j) => j !== i) }
-const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(new Date(iso), { addSuffix: true }) : '' } catch { return '' } }
-/** The line under a page: why it cannot be crawled, or what its last test / crawl found. */
-function healthLine(p: ScanPage): { text: string, tone: keyof typeof TONE } {
-  const bad = problemOf(p.url)
-  if (bad) return { text: `${bad.short}, not an inventory list — never crawled. Remove it and add the page that lists the vehicles.`, tone: 'bad' }
-  const h = p.health
-  if (!h) return { text: 'Not tested yet', tone: 'idle' }
-  const m = HEALTH_META[h.status] || HEALTH_META.ok
-  return h.status === 'ok' ? { text: `${m.label} · ${h.advertised || h.vehicles} vehicles · ${ago(h.at)}`, tone: 'ok' } : { text: `${m.label} · ${ago(h.at)}${h.note ? ` — ${h.note}` : ''}`, tone: m.tone }
-}
-/** Open one page in the cloud browser and record what is really on it. */
-async function test(p: ScanPage) {
-  if (!props.dealership || testing.value.has(p.url)) return
-  testing.value = new Set(testing.value).add(p.url)
-  try {
-    const r = await $fetch<{ health: NonNullable<ScanPage['health']> }>('/api/scanner/check-page', { method: 'POST', body: { dealershipId: props.dealership.id, url: p.url } })
-    pages.value = pages.value.map(x => x.url === p.url ? { ...x, health: r.health } : x)
-  }
-  catch (e: any) { toast.error('Could not test the page', { description: e?.data?.message || e?.data?.statusMessage || 'Try again' }) }
-  finally { const t = new Set(testing.value); t.delete(p.url); testing.value = t }
-}
-const KIND_LABEL: Record<string, string> = { used: 'Pre-owned', certified: 'Certified', new: 'New', all: 'Inventory' }
-const kindIcon = (k: string) => k === 'new' ? Sparkles : k === 'used' || k === 'certified' ? Car : Globe
+const states = computed(() => lines.value.map((l, i) => stateOf(l, i)))
+const good = computed(() => lines.value.filter((_, i) => states.value[i]!.kind === 'ok'))
+const skipped = computed(() => states.value.filter(s => s.kind === 'bad').length)
 
-/** Server-side discovery: menu links + known platform paths + AI shortlist, each candidate opened and its vehicle cards counted. */
+/** Leaving a line: tidy the link (https://, no tracking leftovers). What was known about the old link no longer applies. */
+function tidyLine(l: Line) {
+  const v = l.url.trim()
+  if (!v) { l.url = ''; l.label = ''; l.health = null; return }
+  const clean = normalizeAddress(v)
+  if (clean && clean !== l.url) {
+    if (scopeKey(clean) !== scopeKey(l.url)) { l.label = ''; l.health = null }
+    l.url = clean
+  }
+}
+function onInput(l: Line) { l.health = null; if (l === lines.value[lines.value.length - 1] && l.url.trim()) lines.value = pad(lines.value) }
+/** Several links pasted at once → one line each, starting here. */
+function onPaste(e: ClipboardEvent, i: number) {
+  const text = e.clipboardData?.getData('text') || ''
+  const parts = text.split(/[\s,]+/).map(x => x.trim()).filter(Boolean)
+  if (parts.length < 2) return
+  e.preventDefault()
+  const list = [...lines.value]
+  let at = i
+  for (const part of parts) {
+    while (at < list.length && at !== i && list[at]!.url.trim()) at++
+    if (at >= list.length) list.push(blank())
+    Object.assign(list[at]!, { url: normalizeAddress(part) || part, label: '', health: null })
+    at++
+  }
+  lines.value = pad(list)
+}
+function focusLine(i: number) { nextTick(() => inputs.get(lines.value[i]?.id ?? -1)?.focus()) }
+function addLine() { lines.value = [...lines.value, blank()]; focusLine(lines.value.length - 1) }
+function nextLine(i: number) { tidyLine(lines.value[i]!); if (i === lines.value.length - 1) lines.value = [...lines.value, blank()]; focusLine(i + 1) }
+function clearLine(i: number) {
+  const list = lines.value.filter((_, j) => j !== i)
+  lines.value = pad(list)
+}
+
+/** Find the inventory pages automatically; pages that really list vehicles are put on the lines. */
 async function detect() {
-  if (!props.dealership?.website) return toast.error('This dealership has no website')
+  if (!props.dealership?.website) return toast.error('This dealership has no website', { description: 'Paste the inventory page links instead.' })
   detecting.value = true
-  detectNote.value = 'Opening the website, reading its menus and checking each inventory page — 20 to 60 seconds…'
+  detectNote.value = 'Reading the website — 20 to 60 seconds…'
+  suggestions.value = []
   try {
     const r = await $fetch<any>('/api/scanner/discover', { method: 'POST', body: { dealershipId: props.dealership.id } })
-    found.value = r.pages || []
-    suggestions.value = r.candidates || []
-    detectLog.value = r.log || []
-    // Verified pages go straight onto the list (still only saved when you press Save).
-    let added = 0
+    const found: Found[] = r.pages || []
     const at = new Date().toISOString()
-    for (const f of found.value) {
+    const list = lines.value.filter(l => l.url.trim())
+    let added = 0
+    for (const f of found) {
       const health = { status: 'ok' as const, vehicles: f.cards, advertised: f.total, at, note: 'Verified by page detection' }
-      if (has(f.url)) pages.value = pages.value.map(p => scopeKey(p.url) === scopeKey(f.url) ? { ...p, health } : p)
-      else { pages.value = [...pages.value, { url: f.url, label: f.label, health }]; added++ }
+      const have = list.find(l => scopeKey(l.url) === scopeKey(f.url))
+      if (have) have.health = health
+      else { list.push({ id: nextId++, url: f.url, label: f.label || '', health }); added++ }
     }
-    detectNote.value = found.value.length
-      ? `${found.value.length} page${found.value.length === 1 ? '' : 's'} verified — ${found.value.reduce((n: number, f: Found) => n + (f.total || f.cards), 0)} vehicles${r.aiUsed ? ' · AI helped read the menus' : ''}${added ? ` · ${added} added below` : ''}`
-      : 'No page with vehicle listings was found — try a suggestion or paste the address of the inventory page.'
-    if (!found.value.length && !suggestions.value.length) toast('No inventory pages found automatically', { description: 'Paste the inventory page addresses below.' })
+    lines.value = pad(list)
+    suggestions.value = found.length ? [] : (r.candidates || []).slice(0, 6)
+    detectNote.value = found.length
+      ? `${found.length} page${found.length === 1 ? '' : 's'} found · ${found.reduce((n, f) => n + (f.total || f.cards || 0), 0)} vehicles${added ? '' : ' — already on the list'}`
+      : suggestions.value.length ? 'No page was confirmed. These menu links might be the right ones:' : 'Nothing found — paste the link of the inventory page.'
   }
-  catch (e: any) { detectNote.value = ''; toast.error(e?.data?.message || e?.data?.statusMessage || 'Could not open the website') }
+  catch (e: any) { detectNote.value = ''; toast.error('Could not read the website', { description: e?.data?.message || e?.data?.statusMessage || 'Try again' }) }
   finally { detecting.value = false }
 }
+function useSuggestion(s: Found) {
+  const list = lines.value.filter(l => l.url.trim())
+  if (!list.some(l => scopeKey(l.url) === scopeKey(s.url))) list.push({ id: nextId++, url: s.url, label: s.label || '', health: null })
+  lines.value = pad(list)
+  suggestions.value = suggestions.value.filter(x => x.url !== s.url)
+}
+
 async function save() {
   if (!props.dealership) return
+  for (const l of lines.value) tidyLine(l)
   saving.value = true
   try {
-    // Addresses that can never be crawled (a home page saved by an older version) are not saved again.
-    const d = await updateDealership(props.dealership.id, { scanPages: usable.value.map(p => ({ url: p.url, label: p.label })) } as any)
+    // Only links that can be crawled are saved; a line marked in red is left out.
+    const d = await updateDealership(props.dealership.id, { scanPages: good.value.map(l => ({ url: l.url.trim(), label: l.label })) } as any)
     emit('saved', d.scanPages || [])
-    toast.success(usable.value.length ? `${usable.value.length} scan page${usable.value.length === 1 ? '' : 's'} saved` : 'Scan pages cleared — this dealership is skipped by crawls until pages are picked')
+    const n = good.value.length
+    toast.success(n ? `${n} scan page${n === 1 ? '' : 's'} saved` : 'No scan pages saved — this dealership is skipped by crawls', skipped.value ? { description: `${skipped.value} link${skipped.value === 1 ? ' was' : 's were'} left out (not an inventory page).` } : undefined)
     open.value = false
   }
   catch (e: any) { toast.error('Could not save', { description: e?.data?.message || e?.data?.statusMessage || 'Try again' }) }
   finally { saving.value = false }
 }
-const short = (u: string) => u.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')
-const draftProblem = computed(() => { for (const part of draft.value.split(/[\n,]+/)) { const v = part.trim(); if (v) { const c = checkScanPage(v); if (!c.ok) return `${short(v)} — ${c.message}` } } return '' })
 </script>
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-2xl">
+    <DialogContent class="sm:max-w-2xl [&>*]:min-w-0">
       <DialogHeader>
-        <DialogTitle class="flex items-center gap-2"><ListChecks class="size-4 text-red-600" /> Scan pages — {{ dealership?.name }}</DialogTitle>
-        <DialogDescription class="text-xs">The only pages the crawler reads for this dealership (used, new, certified…). Each list is followed through all of its result pages; nothing else on the site is opened — never the home page.</DialogDescription>
+        <DialogTitle class="flex items-center gap-2 min-w-0"><ListChecks class="size-4 shrink-0 text-red-600" /> <span class="truncate">Scan pages — {{ dealership?.name }}</span></DialogTitle>
+        <DialogDescription class="text-xs">Paste the inventory page links, one per line. Only these pages are crawled.</DialogDescription>
       </DialogHeader>
 
-      <div class="space-y-4">
-        <!-- Current pages -->
-        <ul v-if="pages.length" class="rounded-xl border divide-y">
-          <li v-for="(p, i) in pages" :key="p.url" class="flex items-start gap-2 px-3 py-2 text-sm" :class="problemOf(p.url) && 'bg-rose-500/5'">
-            <span v-if="problemOf(p.url)" class="mt-0.5 size-6 shrink-0 rounded-md bg-rose-500/10 text-rose-600 flex items-center justify-center"><Ban class="size-3.5" /></span>
-            <span v-else class="mt-0.5 size-6 shrink-0 rounded-md bg-red-600/10 text-red-600 text-[11px] font-semibold flex items-center justify-center tabular-nums">{{ usable.indexOf(p) + 1 }}</span>
-            <div class="min-w-0 flex-1">
-              <p class="truncate font-medium">{{ p.label || (problemOf(p.url) ? problemOf(p.url)!.short : guessPageLabel(p.url)) }}</p>
-              <p class="truncate text-[11px] text-muted-foreground">{{ problemOf(p.url) ? short(p.url) || p.url : pagePath(p.url) }}</p>
-              <p class="mt-0.5 text-[11px] leading-snug" :class="TONE[healthLine(p).tone].text">{{ healthLine(p).text }}</p>
+      <div class="min-w-0 space-y-2">
+        <ol class="max-h-[52vh] space-y-1.5 overflow-y-auto pr-0.5">
+          <li v-for="(l, i) in lines" :key="l.id" class="min-w-0">
+            <div class="flex min-w-0 items-center gap-2">
+              <span class="w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground" aria-hidden="true">{{ i + 1 }}</span>
+              <div class="relative min-w-0 flex-1">
+                <input
+                  :ref="(el) => { if (el) inputs.set(l.id, el as HTMLInputElement); else inputs.delete(l.id) }"
+                  v-model="l.url" type="url" inputmode="url" autocomplete="off" spellcheck="false"
+                  class="h-9 w-full min-w-0 rounded-md border bg-transparent pl-3 text-sm outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
+                  :class="[states[i]!.kind === 'bad' ? 'border-rose-500/70' : states[i]!.kind === 'twice' ? 'border-amber-500/70' : 'border-input', states[i]!.kind === 'ok' && (states[i] as any).note ? 'pr-32' : 'pr-9']"
+                  :placeholder="i === 0 ? 'https://www.dealer.com/used-inventory/' : 'Paste a link'"
+                  :aria-label="`Scan page link ${i + 1}`" :aria-invalid="states[i]!.kind === 'bad'" :aria-describedby="states[i]!.kind === 'bad' || states[i]!.kind === 'twice' ? `scan-line-${l.id}` : undefined"
+                  @input="onInput(l)" @blur="tidyLine(l)" @paste="onPaste($event, i)" @keydown.enter.prevent="nextLine(i)"
+                >
+                <span v-if="states[i]!.kind === 'ok'" class="pointer-events-none absolute inset-y-0 right-2.5 flex items-center gap-1.5 text-[11px] tabular-nums" :class="TONE[(states[i] as any).tone as keyof typeof TONE].text">
+                  <span v-if="(states[i] as any).note" class="max-w-24 truncate">{{ (states[i] as any).note }}</span><Check v-if="(states[i] as any).tone === 'ok'" class="size-3.5 shrink-0" /><AlertTriangle v-else class="size-3.5 shrink-0" />
+                </span>
+                <AlertTriangle v-else-if="states[i]!.kind !== 'empty'" class="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2" :class="states[i]!.kind === 'bad' ? 'text-rose-600' : 'text-amber-600'" />
+              </div>
+              <Button variant="ghost" size="icon" class="size-8 shrink-0 text-muted-foreground hover:text-rose-600" :class="!l.url && (lines.length <= MIN_LINES || i === lines.length - 1) && 'invisible'" :aria-label="`Remove link ${i + 1}`" title="Remove this line" @click="clearLine(i)"><X class="size-4" /></Button>
             </div>
-            <Button v-if="!problemOf(p.url)" variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-foreground" :disabled="testing.has(p.url)" :aria-label="`Test ${p.label || pagePath(p.url)}`" title="Test this page — opens it and counts the vehicles" @click="test(p)"><Loader2 v-if="testing.has(p.url)" class="size-3.5 animate-spin" /><Activity v-else class="size-3.5" /></Button>
-            <a :href="p.url" target="_blank" rel="noopener" class="mt-1.5 text-muted-foreground hover:text-foreground" title="Open in my browser"><ExternalLink class="size-3.5" /></a>
-            <Button variant="ghost" size="icon" class="size-7 text-muted-foreground hover:text-rose-600" aria-label="Remove" @click="remove(i)"><Trash2 class="size-3.5" /></Button>
+            <p v-if="states[i]!.kind === 'bad'" :id="`scan-line-${l.id}`" class="ml-7 mr-10 mt-1 text-[11px] leading-snug text-rose-600 dark:text-rose-400">{{ (states[i] as any).message }}</p>
+            <p v-else-if="states[i]!.kind === 'twice'" :id="`scan-line-${l.id}`" class="ml-7 mr-10 mt-1 text-[11px] leading-snug text-amber-700 dark:text-amber-300">Same page as a line above — saved once.</p>
           </li>
-        </ul>
-        <div v-else class="rounded-xl border-2 border-dashed border-amber-500/40 bg-amber-500/5 px-4 py-6 text-center text-sm text-muted-foreground">
-          No scan pages yet — this dealership is <b class="text-foreground">skipped</b> by crawls until you detect or add its inventory pages.
+        </ol>
+
+        <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pl-7">
+          <Button variant="ghost" size="sm" class="h-8 gap-1.5 px-2 text-xs" @click="addLine"><Plus class="size-3.5" /> Add another line</Button>
+          <span class="text-[11px] text-muted-foreground">Tip: paste several links at once — each gets its own line.</span>
         </div>
 
-        <!-- Add -->
-        <div class="space-y-2">
-          <Label class="text-xs">Add page addresses <span class="text-muted-foreground font-normal">(one per line, or paste several)</span></Label>
-          <div class="flex gap-2">
-            <Textarea v-model="draft" rows="2" class="text-sm min-h-0 font-mono" placeholder="https://www.dealer.com/used-inventory/index.htm" :aria-invalid="!!draftProblem" @keydown.enter.exact.prevent="!draftProblem && addDraft()" />
-            <Button variant="outline" class="shrink-0 h-auto gap-1.5" :disabled="!draft.trim() || !!draftProblem" @click="addDraft"><Plus class="size-4" /> Add</Button>
+        <div v-if="detectNote || suggestions.length" class="min-w-0 space-y-1.5 pl-7">
+          <p v-if="detectNote" class="flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 v-if="detecting" class="size-3.5 shrink-0 animate-spin" />{{ detectNote }}</p>
+          <div v-if="suggestions.length" class="flex flex-wrap gap-1.5">
+            <button v-for="s in suggestions" :key="s.url" type="button" class="inline-flex h-7 max-w-full items-center gap-1 rounded-full border bg-background px-2.5 text-[11px] font-medium hover:border-primary/50" :title="s.url" @click="useSuggestion(s)"><Plus class="size-3 shrink-0 text-muted-foreground" /><span class="truncate">{{ s.label || s.url }}</span></button>
           </div>
-          <p v-if="draftProblem" class="text-[11px] leading-snug text-rose-600 dark:text-rose-400" role="alert">{{ draftProblem }}</p>
-          <p v-else class="flex items-center gap-1.5 text-[11px] text-muted-foreground"><ShieldCheck class="size-3.5 text-emerald-600" /> Only inventory lists can be saved — the home page is refused, so a crawl can never wander the whole site.</p>
-        </div>
-
-        <!-- Detect -->
-        <div class="rounded-xl border bg-muted/20 p-3 space-y-2">
-          <div class="flex items-center gap-2">
-            <Button size="sm" class="h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white" :disabled="detecting || !dealership?.website" @click="detect"><Loader2 v-if="detecting" class="size-4 animate-spin" /><Wand2 v-else class="size-4" /> Detect inventory pages</Button>
-            <span class="text-[11px] text-muted-foreground">{{ detectNote || `Opens ${dealership?.website ? short(dealership.website) : 'the website'}, reads its menus (AI helps), opens each candidate and keeps only pages that really list vehicles.` }}</span>
-          </div>
-          <ul v-if="found.length" class="space-y-1">
-            <li v-for="f in found" :key="f.url" class="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-2.5 py-1.5 text-xs">
-              <Check class="size-3.5 text-emerald-600 shrink-0" />
-              <span class="font-medium">{{ f.label }}</span>
-              <span v-if="KIND_LABEL[f.kind]" class="text-muted-foreground">· {{ KIND_LABEL[f.kind] }}</span>
-              <span class="ml-auto tabular-nums text-emerald-700 dark:text-emerald-300">{{ f.total ? `${f.total} vehicles` : `${f.cards}+ on screen` }}</span>
-              <Button v-if="!has(f.url)" variant="ghost" size="sm" class="h-6 px-2 text-[11px]" @click="add(f.url, f.label)"><Plus class="size-3" /> Add</Button>
-            </li>
-          </ul>
-          <div v-if="suggestions.length" class="space-y-1">
-            <p class="text-[11px] text-muted-foreground">Other menu links that might be inventory (not verified):</p>
-            <div class="flex flex-wrap gap-1.5">
-              <button v-for="s in suggestions" :key="s.url" type="button" class="inline-flex items-center gap-1.5 rounded-full border bg-background px-2.5 h-7 text-[11px] font-medium hover:border-primary/40 disabled:opacity-50" :title="s.url" :disabled="has(s.url)" @click="add(s.url, s.label)">
-                <Check v-if="has(s.url)" class="size-3 text-emerald-600" /><component :is="kindIcon(s.kind)" v-else class="size-3 text-muted-foreground" />
-                {{ s.label }}<span v-if="KIND_LABEL[s.kind]" class="text-muted-foreground">· {{ KIND_LABEL[s.kind] }}</span>
-              </button>
-            </div>
-          </div>
-          <details v-if="detectLog.length" class="text-[11px] text-muted-foreground"><summary class="cursor-pointer">What was checked</summary><pre class="mt-1 whitespace-pre-wrap font-mono text-[10px] leading-4">{{ detectLog.join('\n') }}</pre></details>
         </div>
       </div>
 
-      <DialogFooter>
-        <Button variant="ghost" @click="open = false">Cancel</Button>
-        <Button :disabled="saving" class="min-w-28 gap-1.5" @click="save"><Loader2 v-if="saving" class="size-4 animate-spin" /><Link2 v-else class="size-4" /> Save pages</Button>
+      <DialogFooter class="gap-2 sm:justify-between">
+        <Button variant="outline" class="gap-1.5" :disabled="detecting || !dealership?.website" :title="dealership?.website ? 'Reads the website and adds the pages that really list vehicles' : 'This dealership has no website'" @click="detect"><Loader2 v-if="detecting" class="size-4 animate-spin" /><Wand2 v-else class="size-4" /> {{ detecting ? 'Detecting…' : 'Detect automatically' }}</Button>
+        <div class="flex flex-col-reverse gap-2 sm:flex-row">
+          <Button variant="ghost" @click="open = false">Cancel</Button>
+          <Button :disabled="saving" class="min-w-32 gap-1.5" @click="save"><Loader2 v-if="saving" class="size-4 animate-spin" /><Check v-else class="size-4" /> {{ good.length ? `Save ${good.length} page${good.length === 1 ? '' : 's'}` : 'Save' }}</Button>
+        </div>
       </DialogFooter>
     </DialogContent>
   </Dialog>

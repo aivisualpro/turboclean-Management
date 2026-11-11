@@ -148,6 +148,14 @@ export function matchScanPage<T extends { url: string }>(url: string, pages: T[]
   return (k && pages.find(p => scopeKey(p.url) === k)) || null
 }
 
+/** Ad-click / analytics leftovers that make a pasted link long and change nothing on the page. */
+const JUNK_PARAM = /^(utm_\w+|gclid|gbraid|wbraid|fbclid|msclkid|_ga|_gl|mc_[ce]id)$/i
+/** The address as it is stored: no #fragment, no tracking leftovers; filters stay exactly as pasted (not re-encoded). */
+function tidy(u: URL) {
+  const kept = u.search.replace(/^\?/, '').split('&').filter(part => part && !JUNK_PARAM.test(part.split('=')[0] || ''))
+  return `${u.origin}${u.pathname}${kept.length ? `?${kept.join('&')}` : ''}`
+}
+
 /**
  * Clean a list of scan pages about to be saved. Bad addresses are returned with the reason instead of
  * being stored; labels and health of pages that stay are kept.
@@ -165,14 +173,14 @@ export function sanitizeScanPages(input: any, before: any[] = []): { pages: Scan
     const u = parse(raw)
     const c = checkScanPage(raw)
     if (!u || !c.ok) { rejected.push({ url: raw, message: c.message || 'That is not a valid web address' }); continue }
-    u.hash = ''
-    const k = scopeKey(u.href)
+    const href = tidy(u)
+    const k = scopeKey(href)
     if (seen.has(k)) continue
     seen.add(k)
     const prev = old.get(k)
     const label = String((typeof p === 'object' && p?.label) || '').trim().slice(0, 80) || String(prev?.label || '').slice(0, 80)
     const health = prev?.health && typeof prev.health === 'object' ? prev.health : null
-    pages.push({ url: u.href, label, ...(health ? { health } : {}) })
+    pages.push({ url: href, label, ...(health ? { health } : {}) })
   }
   return { pages: pages.slice(0, 40), rejected }
 }

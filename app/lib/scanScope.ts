@@ -74,7 +74,18 @@ export function checkScanPage(raw: string): { ok: boolean, short: string, messag
   if (isVehiclePage(u.href)) return { ok: false, short: 'One vehicle', message: 'That is one vehicle\'s own page — pick the page that lists all of them' }
   return { ok: true, short: '', message: '' }
 }
-export const normalizeAddress = (raw: string) => { const u = parse(String(raw || '').trim()); if (!u) return ''; u.hash = ''; return u.href }
+/** Ad-click / analytics leftovers that make a pasted link long and change nothing on the page. */
+const JUNK_PARAM = /^(utm_\w+|gclid|gbraid|wbraid|fbclid|msclkid|_ga|_gl|mc_[ce]id)$/i
+/**
+ * A pasted link, tidied: "https://" added when missing, #fragment and tracking leftovers (utm_…, gclid, _gl …)
+ * removed. The rest of the address — filters included — is kept exactly as pasted (not re-encoded).
+ */
+export function normalizeAddress(raw: string) {
+  const u = parse(String(raw || '').trim())
+  if (!u) return ''
+  const kept = u.search.replace(/^\?/, '').split('&').filter(part => part && !JUNK_PARAM.test(part.split('=')[0] || ''))
+  return `${u.origin}${u.pathname}${kept.length ? `?${kept.join('&')}` : ''}`
+}
 /** "/used-inventory/index.htm?start=18" */
 export const pagePath = (raw: string) => { const u = parse(raw); if (!u) return raw; try { return decodeURIComponent(u.pathname + u.search) || '/' } catch { return (u.pathname + u.search) || '/' } }
 export const pageHost = (raw: string) => parse(raw)?.hostname.replace(/^www\./, '') || ''
