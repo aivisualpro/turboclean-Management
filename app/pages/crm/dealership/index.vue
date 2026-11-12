@@ -9,7 +9,7 @@ import {
   Plus, Search, Store, ShieldAlert, Download, RefreshCw, ChevronUp, ChevronDown,
   ChevronsUpDown, X, Filter, UserCircle2,
   CheckSquare, Tag, UserCheck, Loader2, ExternalLink, Briefcase, Trophy, SlidersHorizontal, Upload, Binoculars,
-  ScanSearch, Radar, Layers, Mail, CheckCircle2, CircleDashed, Route, Grid3x3, Trash2, ArchiveRestore, ShieldCheck, AlertTriangle,
+  ScanSearch, Radar, Layers, Mail, CheckCircle2, CircleDashed, Route, Grid3x3, Trash2, ArchiveRestore, ShieldCheck, AlertTriangle, CopyX,
 } from 'lucide-vue-next'
 import type { Batch as ScanBatch } from '~/composables/useBatchScan'
 import { toast } from 'vue-sonner'
@@ -350,8 +350,17 @@ async function onDiscoverImported() {
 const refreshing = ref(false)
 async function refresh() {
   refreshing.value = true
-  try { await Promise.all([fetchDealerships(), loadFacts()]); toast.success('Dealerships refreshed') } catch { toast.error('Refresh failed') } finally { refreshing.value = false }
+  try { await Promise.all([fetchDealerships(), loadFacts()]); loadDuplicates(); toast.success('Dealerships refreshed') } catch { toast.error('Refresh failed') } finally { refreshing.value = false }
 }
+// ─── Duplicates (the same dealership entered more than once) ───
+const showDuplicates = ref(false)
+const duplicates = ref<{ groups: number, records: number } | null>(null)
+async function loadDuplicates() {
+  try { duplicates.value = await $fetch<{ groups: number, records: number }>('/api/crm/data-quality/duplicates', { query: { summary: 1 } }) } catch {}
+}
+onMounted(loadDuplicates)
+/** After a merge (or its undo): the list, the facts and the duplicate count are all different. */
+async function onDuplicatesChanged() { await Promise.all([fetchDealerships(), loadFacts()]).catch(() => {}); loadDuplicates() }
 function open(d: CrmDealership) { navigateTo(`/crm/dealership/${d.id}`) }
 
 function exportCsv(onlySelected = false) {
@@ -620,6 +629,9 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <Button v-if="canEdit && duplicates?.records" variant="outline" size="sm" class="h-8 gap-1.5 border-amber-500/50 text-amber-700 hover:bg-amber-500/10 hover:text-amber-800 dark:text-amber-300" :title="`${duplicates.records} duplicate record${duplicates.records === 1 ? '' : 's'} — the same dealership entered more than once. Review and clear them.`" @click="showDuplicates = true">
+          <CopyX class="size-4" /><span class="hidden lg:inline">Duplicates</span><span class="tabular-nums font-semibold">{{ duplicates.records }}</span>
+        </Button>
         <Button v-if="canDelete" variant="outline" size="icon" class="size-8" title="Trash — restore deleted dealerships (30 days)" @click="openTrash"><Trash2 class="size-4" /></Button>
         <Button variant="outline" size="icon" class="size-8" title="Refresh" :disabled="refreshing" @click="refresh">
           <RefreshCw class="size-4" :class="refreshing && 'animate-spin'" />
@@ -904,6 +916,7 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
 
     <ClientOnly>
       <CrmDiscoverDialog v-model:open="showDiscover" @imported="onDiscoverImported" />
+      <CrmDuplicatesDialog v-model:open="showDuplicates" @changed="onDuplicatesChanged" />
       <CrmScanPagesEditor v-model:open="showPages" :dealership="pagesFor" />
       <CrmBatchScanner v-model:open="showBatch" :dealership-ids="batchIds" :batch-id="batchResumeId" @done="onBatchDone" />
     </ClientOnly>

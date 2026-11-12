@@ -23,10 +23,12 @@ import type { SessionActor } from './crm'
 import { CRM_COLLECTIONS, str } from './crm'
 import { isServerless, openBrowser, SCANNER_VIEWPORT, scannerProxy } from './scanner-cdp'
 import type { BrowserHandle, CdpConnection } from './scanner-cdp'
-import { ANALYZE_FN_JS, EXTRACT_JS, FIND_NEXT_JS, HOTSPOTS_JS, NAV_LINKS_JS, SCANNER_BOOTSTRAP_JS, SCROLL_STEP_JS } from './scanner-page'
+import { ANALYZE_FN_JS, EXTRACT_JS, FIND_NEXT_JS, HOTSPOTS_JS, NAV_LINKS_JS, SCANNER_BOOTSTRAP_JS, SCROLL_STEP_JS, extractWith } from './scanner-page'
+import type { CardLayout } from './scanner-page'
+import { forgetLayout, learnLayout, readingProblem, savedLayout, unreliableResult } from './scanner-layout'
 import { classify, countable, downloadImage, finalVerdict, isAd, listRules, RULES_COLLECTION, summarize, VERDICT_LABEL } from './scanner-images'
 import type { ImageCluster, ImageInfo, PhotoVerdict, ScanVehicle } from './scanner-images'
-import { checkScanPage, healthFromScope, inList, landing, matchScanPage, scopeKey, scopeOf, shortPath } from './scanner-scope'
+import { checkScanPage, healthFromScope, inList, landing, matchScanPage, scopeKey, scopeOf, scopePath } from './scanner-scope'
 import type { ScopeEntry } from './scanner-scope'
 
 export const SCANS_COLLECTION = 'turboCleanScannerScans'
@@ -44,6 +46,8 @@ function budgetMs() {
 
 export type ScanPhase = 'collecting' | 'analyzing' | 'done' | 'stopped' | 'error'
 export interface ScanProgress { phase: ScanPhase, page: number, vehicles: number, advertised: number | null, analyzed: number, toAnalyze: number, message: string, startedAt: string, finishedAt: string | null, pagesVisited: string[]
+  /** Set when the finished reading cannot be right (cards without titles / photos) — shown for review, never saved by itself. */
+  unreliable?: string | null
   /** Checkpoints — a resumed scan skips finished inventory pages and re-opens the exact result page it was on. */
   doneUrls?: string[], resumeAt?: { url: string, href: string, page: number, clicks?: number } | null, memMb?: number, restarts?: number
   /** What each inventory list says it has ("42 vehicles") — coverage = collected vs these. */
@@ -407,7 +411,7 @@ export async function previewSite(db: Db, dealershipId: string, urlInput: string
     const [title, navLinks, cards, metrics] = await Promise.all([
       evaluate<string>(t, 'document.title').catch(() => ''),
       evaluate<any[]>(t, NAV_LINKS_JS).catch(() => []),
-      evaluate<any>(t, EXTRACT_JS, 30_000).catch(() => null),
+      evaluate<any>(t, extractWith(await savedLayout(db, url).catch(() => null)), 30_000).catch(() => null),
       t.conn.send('Page.getLayoutMetrics', {}, t.sid).catch(() => null),
     ])
     const fullH = Math.round(metrics?.cssContentSize?.height || metrics?.contentSize?.height || SCANNER_VIEWPORT.height)
@@ -500,6 +504,8 @@ export function resultsOf(doc: ScanDoc) {
   const cmap = new Map(doc.clusters.map(c => [c.id, c]))
   return {
     scanId: String(doc._id), summary, countStockAsMissing: doc.countStockAsMissing, advertised: advertisedTotal(doc), pages: doc.progress.pagesVisited,
+    // The reading cannot be right (see scanner-layout.ts): shown as a warning, saving is refused.
+    unreliable: unreliableResult(doc.vehicles, summary),
     // Coverage: how much of what the site lists we could actually check (blocked pages are retried from their checkpoint).
     coverage: { checked: countable(doc.vehicles).length, advertised: advertisedTotal(doc), blocked: (doc.progress.blocked || []).map(b => ({ url: b.url, page: b.page })) },
     vehicles: doc.vehicles.map(v => ({ ...v, listUrl: listKey(v, doc), final: finalVerdict(v, cmap) })), clusters: doc.clusters, images,
@@ -597,17 +603,17 @@ export function crawlPlan(d: any, requested: string[] = []) {
     if (rejected.length) throw fail('Scan page is not an inventory page', `${rejected.length === 1 ? 'The saved scan page' : 'The saved scan pages'} for ${d.name || 'this dealership'} cannot be crawled: ${rejected[0]!.message}. Open Scan pages and pick the page that lists the vehicles.`)
     throw fail('No scan pages yet', `${d.name || 'This dealership'} has no scan pages. Crawls only read saved scan pages — add its inventory pages first (Scan pages → Detect, or paste the address).`)
   }
-  const notes: string[] = rejected.map(r => `Left out: ${shortPath(r.url)} — ${r.message.split(' — ')[0]}`)
+  const notes: string[] = rejected.map(r => `Left out: ${scopePath(r.url)} — ${r.message.split(' — ')[0]}`)
   let picked = saved
   if (requested.length) {
     picked = []
     const outside: string[] = []
     for (const r of requested) { const m = matchScanPage(r, saved); if (m) { if (!picked.includes(m)) picked.push(m) } else outside.push(r) }
-    if (!picked.length) throw fail('Not a scan page', `“${shortPath(outside[0]!)}” is not one of ${d.name || 'this dealership'}'s scan pages. Crawls only read saved scan pages — save it as a scan page first.`)
-    for (const o of outside) notes.push(`Left out: ${shortPath(o)} — not a saved scan page`)
+    if (!picked.length) throw fail('Not a scan page', `“${scopePath(outside[0]!)}” is not one of ${d.name || 'this dealership'}'s scan pages. Crawls only read saved scan pages — save it as a scan page first.`)
+    for (const o of outside) notes.push(`Left out: ${scopePath(o)} — not a saved scan page`)
   }
   const pages: { url: string, label: string, crawlUrl: string }[] = []
-  for (const p of picked) { try { pages.push({ url: p.url, label: p.label, crawlUrl: safeUrl(p.url) }) } catch { notes.push(`Left out: ${shortPath(p.url)} — not a public web address`) } }
+  for (const p of picked) { try { pages.push({ url: p.url, label: p.label, crawlUrl: safeUrl(p.url) }) } catch { notes.push(`Left out: ${scopePath(p.url)} — not a public web address`) } }
   if (!pages.length) throw fail('No scan pages yet', 'None of the saved scan pages is a public web address.')
   return { pages, notes }
 }
@@ -832,7 +838,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
         }
         const note = where === 'home' ? 'The site forwards this address to its home page — it is not an inventory page' : `The site forwards this address to another website (${(() => { try { return new URL(landed).hostname } catch { return 'unknown' } })()})`
         mark(entry, { status: 'redirected', landedUrl: landed, vehicles: listCount(), note })
-        log(`✗ ${shortPath(startUrl)} — ${note}. Nothing was read from it.`)
+        log(`✗ ${scopePath(startUrl)} — ${note}. Nothing was read from it.`)
         await persist(true)
         continue
       }
@@ -840,8 +846,8 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
         // Two saved addresses that end on the same list are read once.
         const twin = doc.progress.scope!.find(x => x !== entry && ['done', 'stuck', 'blocked'].includes(x.status) && (scopeKey(x.url) === scopeKey(landed) || (!!x.landedUrl && scopeKey(x.landedUrl) === scopeKey(landed))))
         if (twin && !resumeAt) {
-          const name = twin.label || shortPath(twin.url)
-          log(`The site forwards this address to ${shortPath(landed)} — the same list as “${name}”, already read`)
+          const name = twin.label || scopePath(twin.url)
+          log(`The site forwards this address to ${scopePath(landed)} — the same list as “${name}”, already read`)
           doc.progress.doneUrls.push(startUrl)
           mark(entry, { status: 'done', landedUrl: landed, vehicles: 0, note: `Same list as “${name}” — read once` })
           await persist(true)
@@ -849,7 +855,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
         }
         listBase = landed
         entry.landedUrl = landed
-        log(`The site forwards this address to ${shortPath(landed)} — reading that list`)
+        log(`The site forwards this address to ${scopePath(landed)} — reading that list`)
       }
       // Click-paginated lists (no page address): fast-forward to the saved result page without re-reading the ones before it.
       if (resumeAt?.clicks) {
@@ -868,6 +874,9 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       if (urls.length > 1) { log(`Skipped: ${e?.message || e}`); continue }
       throw e
     }
+    // The card layout learned for this website on an earlier crawl (if the built-in reading needed help).
+    let layout: CardLayout | null = await savedLayout(db, startUrl).catch(() => null)
+    let layoutChecked = false
     let ckBase = resumeAt?.href || startUrl
     let ckClicks = resumeAt?.clicks || 0
     let blockedHere: { url: string, href: string, page: number, at: string } | null = null
@@ -880,9 +889,25 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       let res: any = null
       let added = 0
       let pageCards = 0
-      const collect = async () => {
-        const r = await evaluate<any>(tab, EXTRACT_JS, 45_000).catch(() => null)
+      const collect = async (final = false) => {
+        let r = await evaluate<any>(tab, extractWith(layout), 45_000).catch(() => null)
         if (!r) return
+        // Once per list, before anything is kept: is this a real reading of the cards? A reading that
+        // cannot be right (a button per vehicle instead of the card) is handed to the AI layout reader.
+        if (!layoutChecked && ((r.cards?.length || 0) > 0 || final)) {
+          layoutChecked = true
+          if (layout && (r.strategy !== 'learned' || readingProblem(r.cards || []))) {
+            log('The layout remembered for this website no longer fits (the site changed) — reading it afresh')
+            await forgetLayout(db, startUrl)
+            layout = null
+            r = (await evaluate<any>(tab, EXTRACT_JS, 45_000).catch(() => null)) || r
+          }
+          const now: any[] = r.cards || []
+          if (!layout && (!now.length || readingProblem(now))) {
+            const learned = await learnLayout(db, startUrl, (expr, ms) => evaluate(tab, expr, ms), log, now).catch((e: any) => { if (isBrowserGone(e)) throw e; return null })
+            if (learned) { layout = learned.layout; r = learned.result }
+          }
+        }
         res = r
         pageCards = Math.max(pageCards, r.cards?.length || 0)
         if (r.total) { advertised = Math.max(advertised || 0, r.total); (doc.progress.advertisedByUrl ||= {})[startUrl] = advertised }
@@ -920,13 +945,13 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
         }
         lastH = r.h
       }
-      await collect()
+      await collect(true)
       if (tab.conn.closed) throw new Error('Browser connection is closed')
       // After a browser restart (or a resumed scan) pages are seen again: nothing "new" is normal then.
       const revisit = doc.progress.pagesVisited.includes(res?.url || tab.url)
       if (!revisit) doc.progress.pagesVisited.push(res?.url || tab.url)
       await persist(true)
-      log(`${urls.length > 1 ? 'Result page' : 'Page'} ${page}: ${pageCards} cards on screen, ${added} new — ${res?.strategy === 'known' ? 'recognised layout' : 'detected by structure'}`)
+      log(`${urls.length > 1 ? 'Result page' : 'Page'} ${page}: ${pageCards} cards on screen, ${added} new — ${res?.strategy === 'known' ? 'recognised layout' : res?.strategy === 'learned' ? 'layout read by AI' : 'detected by structure'}`)
       mark(entry, { vehicles: listCount(), resultPages: Math.max(entry.resultPages, page), advertised: doc.progress.advertisedByUrl?.[startUrl] ?? entry.advertised })
       if (pageCards === 0 && p === 1) { log('No vehicle cards on this page — moving on'); emptyHere = !resumeAt; break }
       if (!doc.allPages || doc.vehicles.length >= MAX_VEHICLES) break
@@ -944,7 +969,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       if (next.kind === 'href') {
         // Scope guard: a "next" link is only followed while it stays inside this list.
         if (!inList(listBase, String(next.href))) {
-          log(`The “${next.label}” link leads outside this list (${shortPath(String(next.href))}) — not followed`)
+          log(`The “${next.label}” link leads outside this list (${scopePath(String(next.href))}) — not followed`)
           if (shortOfAdvertised()) stuckPage = page + 1
           break
         }
@@ -965,7 +990,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
         }
         if (!through) { blockedHere = { url: startUrl, href: ckBase, page: page + 1, at: new Date().toISOString() }; break }
         if (/^https?:/i.test(tab.url) && !inList(listBase, tab.url)) {
-          log(`The next page left this list (${shortPath(tab.url)}) — stopping this list here; nothing is read from that page`)
+          log(`The next page left this list (${scopePath(tab.url)}) — stopping this list here; nothing is read from that page`)
           doc.progress.resumeAt = null
           if (shortOfAdvertised()) stuckPage = page + 1
           break
@@ -982,7 +1007,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
         // Checkpoint: if the click changed the address use it; otherwise remember how many clicks from the last address.
         const urlAfter = tab.url
         if (urlAfter && urlAfter !== urlBefore && /^https?:/.test(urlAfter) && !inList(listBase, urlAfter)) {
-          log(`“${next.label}” left this list (${shortPath(urlAfter)}) — stopping this list here; nothing is read from that page`)
+          log(`“${next.label}” left this list (${scopePath(urlAfter)}) — stopping this list here; nothing is read from that page`)
           if (shortOfAdvertised()) stuckPage = page + 1
           break
         }
@@ -1046,7 +1071,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     refreshScopeCounts(doc)
     await recordPageHealth(db, doc)
     const off = (doc.progress.scope || []).filter(e => e.status === 'redirected' || e.status === 'empty' || e.status === 'error')
-    if (off.length) log(`${off.length} scan page${off.length === 1 ? '' : 's'} need${off.length === 1 ? 's' : ''} attention: ${off.map(e => `${e.label || shortPath(e.url)} (${SCOPE_WORD[e.status] || e.status})`).join(' · ')}`)
+    if (off.length) log(`${off.length} scan page${off.length === 1 ? '' : 's'} need${off.length === 1 ? 's' : ''} attention: ${off.map(e => `${e.label || scopePath(e.url)} (${SCOPE_WORD[e.status] || e.status})`).join(' · ')}`)
 
     const sum = summarize(doc.vehicles, doc.clusters, { countStockAsMissing: doc.countStockAsMissing })
     const blockedPages = doc.progress.blocked || []
@@ -1055,12 +1080,18 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     doc.error = blockedPages.length ? `Blocked by the dealer's site on result page ${blockedPages.map(b => b.page).join(', ')} — ${coverageText(doc)}; a retry continues from there`
       : stuck.length ? `Could not get past result page ${stuck.map(b => b.page - 1).join(', ')} — ${coverageText(doc)}` : null
     if (!blockedPages.length && stuck.length) doc.status = 'stopped'
-    Object.assign(doc.progress, { phase: doc.status, message: `${stop ? 'Stopped early — ' : blockedPages.length ? 'Partly blocked — ' : ''}${sum.total} vehicles · ${sum.withoutReal} without a real photo (${sum.withoutRealPct ?? 0}%)`, finishedAt: new Date().toISOString() })
+    // A reading that cannot be right ("every card without a title or a photo") is not a finding:
+    // it is shown for review, never saved to the CRM or emailed by itself.
+    const unreliable = unreliableResult(doc.vehicles, sum)
+    if (unreliable) { doc.status = 'stopped'; doc.error = unreliable; log(unreliable) }
+    doc.progress.unreliable = unreliable || null
+    Object.assign(doc.progress, { phase: doc.status, message: unreliable ? 'The vehicle cards could not be read properly — the numbers are not reliable' : `${stop ? 'Stopped early — ' : blockedPages.length ? 'Partly blocked — ' : ''}${sum.total} vehicles · ${sum.withoutReal} without a real photo (${sum.withoutRealPct ?? 0}%)`, finishedAt: new Date().toISOString() })
     log(`Done in ${Math.round((Date.now() - t0) / 1000)}s`)
     await col.updateOne({ _id: doc._id }, { $set: { status: doc.status, error: doc.error, progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, images: doc.images.map(stripImage), clusters: doc.clusters, evidenceThumbs: doc.evidenceThumbs || {}, heartbeatAt: new Date().toISOString() } })
     emit('progress', doc.progress)
     let auditId: string | null = null
-    if (doc.autoSave) {
+    if (doc.autoSave && unreliable) log('Not saved to the CRM — the reading is not reliable')
+    if (doc.autoSave && !unreliable) {
       try {
         const r = await saveScan(db, String(doc._id), { id: doc.createdBy.id, name: doc.createdBy.name, email: '' })
         auditId = r.audit?.id || null
@@ -1071,7 +1102,8 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       catch (e: any) { log(`Could not save the audit: ${e?.message || e}`) }
     }
     emit('done', { id: String(doc._id), status: doc.status, summary: sum, auditId })
-    if (doc.batchId) batchNote(db, doc, doc.status === 'stopped' ? 'stopped' : 'done', { summary: { total: sum.total, withoutReal: sum.withoutReal, withoutRealPct: sum.withoutRealPct, by: sum.by, advertised: advertisedTotal(doc) }, auditId, error: doc.error || null, scope: scopeBrief(doc) }).catch(() => {})
+    // (an unreadable site counts as failed in a batch: its numbers stay out of the totals and no email is drafted)
+    if (doc.batchId) batchNote(db, doc, unreliable ? 'failed' : doc.status === 'stopped' ? 'stopped' : 'done', { summary: { total: sum.total, withoutReal: sum.withoutReal, withoutRealPct: sum.withoutRealPct, by: sum.by, advertised: advertisedTotal(doc) }, auditId, error: doc.error || null, scope: scopeBrief(doc) }).catch(() => {})
   }
   catch (e: any) {
     const message = e?.message || e?.statusMessage || 'Scan failed'
@@ -1106,13 +1138,13 @@ const SCOPE_WORD: Record<string, string> = { pending: 'waiting', running: 'readi
 /** Why a crawl found nothing, in terms of its scan pages. */
 function emptyScopeMessage(doc: ScanDoc) {
   const sc = doc.progress.scope || []
-  const names = (list: ScopeEntry[]) => list.length === 1 ? `“${shortPath(list[0]!.url)}”` : `${list.length} scan pages`
+  const names = (list: ScopeEntry[]) => list.length === 1 ? `“${scopePath(list[0]!.url)}”` : `${list.length} scan pages`
   const red = sc.filter(e => e.status === 'redirected')
   const blk = sc.filter(e => e.status === 'blocked')
   const fix = 'Open Scan pages and pick the page that lists the vehicles.'
   if (red.length && red.length === sc.length) return `${names(red)} ${red.length === 1 ? 'forwards' : 'forward'} to the website's home page, so ${red.length === 1 ? 'it is' : 'they are'} not an inventory page. Nothing was read. ${fix}`
   if (blk.length && blk.length === sc.length) return `Blocked by the dealer's site: it refused ${names(blk)} (bot protection). Nothing could be read — try again later.`
-  const bits = sc.map(e => `${shortPath(e.url)} — ${SCOPE_WORD[e.status] || e.status}`)
+  const bits = sc.map(e => `${scopePath(e.url)} — ${SCOPE_WORD[e.status] || e.status}`)
   return `No vehicle cards were found on ${names(sc)}${sc.length > 1 ? ` (${bits.join(' · ')})` : red.length ? ' — it forwards to the home page' : ''}. ${fix}`
 }
 
@@ -1417,6 +1449,8 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
   if (!hasResults(doc)) throw createError({ statusCode: 409, statusMessage: 'Wait for the scan to finish' })
   const d = await loadDealership(db, doc.dealershipId)
   const sum = summarize(doc.vehicles, doc.clusters, { countStockAsMissing: doc.countStockAsMissing })
+  const unreliable = unreliableResult(doc.vehicles, sum)
+  if (unreliable) throw createError({ statusCode: 409, statusMessage: 'This crawl cannot be saved', message: unreliable })
   const cmap = new Map(doc.clusters.map(c => [c.id, c]))
   const { ranked } = rankEvidence(doc, cmap)
   const pages = doc.progress.pagesVisited

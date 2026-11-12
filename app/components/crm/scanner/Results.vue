@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { FinalVerdict, ImageGroup, ImageRule, PhotoVerdict, ScanResults, ScannedVehicle } from '~/composables/useInventoryScanner'
 import { VERDICT_META } from '~/composables/useInventoryScanner'
-import { ImageOff, Search, ExternalLink, Check, Brain, Layers, Trash2, Plus, Sparkles, ChevronDown, Info, ShieldCheck, Link2, Ban } from 'lucide-vue-next'
+import { ImageOff, Search, ExternalLink, Check, Brain, Layers, Trash2, Plus, Sparkles, ChevronDown, Info, ShieldCheck, Link2, Ban, AlertTriangle } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 /** Review screen: KPIs, every vehicle with its photo verdict + reasons, repeated-image groups, saved rules. */
@@ -209,6 +209,11 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
       </div>
     </section>
 
+    <!-- The reading cannot be right: say so before anyone trusts (or sends) these numbers -->
+    <div v-if="results.unreliable" role="alert" class="shrink-0 border-b border-rose-500/30 bg-rose-500/10 px-3 py-2.5 text-sm flex items-start gap-2.5">
+      <AlertTriangle class="size-5 text-rose-600 dark:text-rose-400 shrink-0 mt-px" />
+      <p class="leading-snug"><span class="font-semibold">These numbers are not reliable.</span> {{ results.unreliable }}</p>
+    </div>
     <!-- Scope: the saved scan pages this crawl read — and nothing else -->
     <CrmScannerScopeReport v-if="scope.length" :rows="scope" class="shrink-0 border-b bg-card" />
 

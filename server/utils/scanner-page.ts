@@ -72,7 +72,7 @@ export const NAV_LINKS_JS = `(() => {
  * Find every vehicle card on the page and describe it (title, VIN, stock, price, condition, link,
  * main photo with its natural size, photo count, any "photos coming soon" wording).
  */
-export const EXTRACT_JS = `(() => {
+const EXTRACT_SRC = `(function (cfg) {
   var VIN_RE = /\\b(?=[A-HJ-NPR-Z0-9]*\\d)(?=[A-HJ-NPR-Z0-9]*[A-HJ-NPR-Z])[A-HJ-NPR-Z0-9]{17}\\b/
   var YEAR_RE = /(?:^|[^\\d])(19[89]\\d|20[0-3]\\d)(?!\\d)/
   var PRICE_RE = /\\$\\s?\\d{1,3}(?:,\\d{3})+(?:\\.\\d{2})?|\\$\\s?\\d{4,6}(?!\\d)/
@@ -98,13 +98,56 @@ export const EXTRACT_JS = `(() => {
   function dropAncestors(list) {
     return list.filter(function (el) { return !list.some(function (o) { return o !== el && el.contains(o) }) })
   }
+  // A match can be only a PART of a vehicle's card: a "Build My Deal" button that carries data-vin /
+  // data-year, a price box, a details column. Such a part has no photo and no title, so the vehicle
+  // would be counted as "no photo". Climb from the part to the vehicle's whole card: the smallest
+  // ancestor that has a picture and the year in its text, never one that holds another vehicle.
+  function vinOf(el) {
+    var a = el.getAttribute && el.getAttribute('data-vin')
+    if (a && /^[A-HJ-NPR-Z0-9]{17}$/i.test(a)) return a.toUpperCase()
+    var d = el.querySelector && el.querySelector('[data-vin]')
+    if (d && /^[A-HJ-NPR-Z0-9]{17}$/i.test(d.getAttribute('data-vin') || '')) return d.getAttribute('data-vin').toUpperCase()
+    var m = (el.textContent || '').toUpperCase().match(VIN_RE)
+    return m ? m[0] : ''
+  }
+  function hasPicture(el) {
+    var ims = el.querySelectorAll('img')
+    for (var i = 0; i < ims.length; i++) { var r = ims[i].getBoundingClientRect(); if ((r.width >= 80 && r.height >= 50) || (ims[i].naturalWidth >= 120 && ims[i].naturalHeight >= 80)) return true }
+    return !!el.querySelector('picture, [style*="background-image"], [data-bg]')
+  }
+  function whole(el) { return hasPicture(el) && YEAR_RE.test(textOf(el)) }
+  function promote(list) {
+    if (!list.length) return list
+    var ids = list.map(function (el, i) { return vinOf(el) || ('#' + i) })
+    var out = []
+    list.forEach(function (el, i) {
+      var cur = el
+      if (!whole(cur)) {
+        for (var depth = 0; depth < 12; depth++) {
+          var p = cur.parentElement
+          if (!p || p === document.body || p === document.documentElement) break
+          var foreign = false
+          for (var k = 0; k < list.length && !foreign; k++) if (k !== i && ids[k] !== ids[i] && p.contains(list[k])) foreign = true
+          if (foreign) break
+          if ((p.textContent || '').length > 6000 || p.getBoundingClientRect().height > 2200) break
+          cur = p
+          if (whole(cur)) break
+        }
+      }
+      if (out.indexOf(cur) < 0) out.push(cur)
+    })
+    return dropAncestors(out)
+  }
+  /** How many of these are complete vehicle cards (a picture and a year in view). */
+  function complete(list) { var n = 0; for (var i = 0; i < list.length; i++) if (whole(list[i])) n++; return n }
   // 1) Known selectors
   var best = []
   for (var i = 0; i < KNOWN.length; i++) {
     var found = []
     try { found = Array.prototype.slice.call(document.querySelectorAll(KNOWN[i])) } catch (e) {}
-    found = dropAncestors(found.filter(cardLike))
-    if (found.length > best.length) best = found
+    // (a part that carries the VIN counts as a way in — it is kept only if it leads to a whole card)
+    found = promote(dropAncestors(found.filter(function (el) { return cardLike(el) || /^[A-HJ-NPR-Z0-9]{17}$/i.test(el.getAttribute('data-vin') || '') }))).filter(cardLike)
+    if (found.length > best.length || (found.length === best.length && found.length && complete(found) > complete(best))) best = found
   }
   // 2) Structural detector: the parent with the most similar, card-like children
   var parents = Array.prototype.slice.call(document.querySelectorAll('body *')).filter(function (p) { return p.children && p.children.length >= 3 }).slice(0, 6000)
@@ -120,8 +163,23 @@ export const EXTRACT_JS = `(() => {
       if (ok.length >= 3 && ok.length / g.length >= 0.5 && ok.length > gen.length) gen = ok
     }
   }
+  gen = promote(gen)
+  // More cards wins — unless those are mostly parts without a picture and the other reading found whole cards.
   var useGen = gen.length > best.length * 1.15 || !best.length
+  if (best.length >= 3 && gen.length >= 3) {
+    var cb = complete(best) / best.length, cg = complete(gen) / gen.length
+    if (useGen && cg < 0.5 && cb >= 0.8 && best.length >= gen.length * 0.6) useGen = false
+    else if (!useGen && cb < 0.5 && cg >= 0.8 && gen.length >= best.length * 0.6) useGen = true
+  }
   var cards = useGen ? gen : best
+  var strategy = useGen ? 'structure' : 'known'
+  // 3) A layout learned for this website (the card and its parts, as CSS selectors) replaces the guesswork.
+  function q(root, sel) { if (!sel) return null; try { return root.matches && root.matches(sel) ? root : root.querySelector(sel) } catch (e) { return null } }
+  if (cfg && cfg.card) {
+    var learned = []
+    try { learned = dropAncestors(Array.prototype.slice.call(document.querySelectorAll(cfg.card))) } catch (e) {}
+    if (learned.length) { cards = learned; strategy = 'learned' }
+  }
   cards = cards.filter(function (c) { return getComputedStyle(c).display !== 'none' })
 
   function bestFromSrcset(ss) {
@@ -161,11 +219,23 @@ export const EXTRACT_JS = `(() => {
     var t = textOf(card)
     var links = Array.prototype.slice.call(card.querySelectorAll('a[href]'))
     if (card.tagName === 'A') links.unshift(card)
-    var detail = links.find(function (a) { return YEAR_RE.test(textOf(a)) && !/^(tel|mailto|javascript):/i.test(a.getAttribute('href') || '') }) || links.find(function (a) { return /vehicle|inventory|detail|vdp|\\/(new|used|certified)\\//i.test(a.href) }) || links[0]
-    var href = detail ? detail.href : ''
-    var heading = card.querySelector('h1,h2,h3,h4,[class*="title"],[class*="Title"],[class*="name"]')
-    var title = heading && YEAR_RE.test(textOf(heading)) ? textOf(heading) : ''
-    if (!title) { var m = t.match(/(?:new|used|certified|pre-owned)?\\s*(?<!\\d)(19[89]\\d|20[0-3]\\d)\\s*[A-Za-z][\\w\\-]+(?:\\s+[\\w\\-\\.\\/+]+){0,4}/i); title = m ? m[0].trim() : t.slice(0, 80) }
+    // A link that only opens a pop-up on this same page ("#", "javascript:", the list's own address) is not the vehicle's page.
+    var here = location.href.split('#')[0]
+    function goesSomewhere(a) { var h = a.getAttribute('href') || ''; return !!h && !/^(#|tel:|mailto:|javascript:)/i.test(h) && a.href.split('#')[0] !== here }
+    var away = links.filter(goesSomewhere)
+    var detail = (cfg && cfg.link && q(card, cfg.link)) || away.find(function (a) { return YEAR_RE.test(textOf(a)) }) || away.find(function (a) { return /vehicle|inventory|detail|vdp|\\/(new|used|certified)\\//i.test(a.href) }) || away[0] || links[0]
+    if (detail && detail.tagName !== 'A') detail = detail.closest('a[href]') || detail.querySelector('a[href]') || away[0] || links[0]
+    var href = detail && detail.href ? detail.href : ''
+    var heading = (cfg && cfg.title && q(card, cfg.title)) || card.querySelector('h1,h2,h3,h4,[class*="title"],[class*="Title"],[class*="name"]')
+    var title = heading && (YEAR_RE.test(textOf(heading)) || (cfg && cfg.title)) ? textOf(heading) : ''
+    if (!title) { var m = t.match(/(?:new|used|certified|pre-owned)?\\s*(?<!\\d)(19[89]\\d|20[0-3]\\d)\\s*[A-Za-z][\\w\\-]+(?:\\s+[\\w\\-\\.\\/+]+){0,4}/i); title = m ? m[0].trim() : '' }
+    // Still nothing: the year / make / model the site wrote into the card's data attributes, then the photo's description.
+    if (!title) {
+      var dn = card.hasAttribute('data-make') ? card : card.querySelector('[data-make]')
+      if (dn && dn.getAttribute('data-make')) { title = [dn.getAttribute('data-year'), dn.getAttribute('data-make'), dn.getAttribute('data-model'), dn.getAttribute('data-trim')].filter(function (x) { return x && x !== 'null' && x !== 'undefined' }).join(' ') }
+      if (!title) { var alts = Array.prototype.slice.call(card.querySelectorAll('img[alt]')).map(function (im) { return (im.alt || '').trim() }).filter(function (a) { return YEAR_RE.test(a) }); if (alts.length) title = alts[0] }
+      if (!title) title = t.slice(0, 80)
+    }
     title = title.replace(/^(new|used|certified|pre-owned)(?=\\d)/i, '$1 ')
     title = title.slice(0, 140)
     var ymm = title.match(/(19[89]\\d|20[0-3]\\d)\\s*([A-Za-z][\\w\\-]+)\\s+([\\w\\-]+)/)
@@ -181,13 +251,16 @@ export const EXTRACT_JS = `(() => {
     // Main photo: the largest rendered image in the card; fall back to any image / background image.
     var imgs = Array.prototype.slice.call(card.querySelectorAll('img')).filter(function (im) { return !/logo|icon|badge|carfax|autocheck|sprite|spinner|loader|dealer-rater|rating|award/i.test((im.getAttribute('src') || '') + ' ' + (im.alt || '') + ' ' + (im.className || '')) })
     var main = null, area = -1
-    imgs.forEach(function (im) { var r = rect(im); var a = r.w * r.h; if (a > area) { area = a; main = im } })
+    var chosen = cfg && cfg.image ? q(card, cfg.image) : null
+    if (chosen && chosen.tagName !== 'IMG') chosen = chosen.querySelector('img') || chosen
+    if (chosen && chosen.tagName === 'IMG') main = chosen
+    else imgs.forEach(function (im) { var r = rect(im); var a = r.w * r.h; if (a > area) { area = a; main = im } })
     var image = null
     if (main) {
       var src = imgSrc(main)
       image = { url: src === 'data:' ? '' : src, alt: (main.alt || '').slice(0, 160), nw: main.naturalWidth || 0, nh: main.naturalHeight || 0, complete: !!main.complete, rw: Math.round(rect(main).w), rh: Math.round(rect(main).h), kind: 'img' }
     } else {
-      var bgEl = [card].concat(Array.prototype.slice.call(card.querySelectorAll('[style*="background-image"], [data-bg], [class*="photo"], [class*="image"], [class*="img"]'))).find(function (e) { return !!bgUrl(e) })
+      var bgEl = (chosen ? [chosen] : []).concat([card]).concat(Array.prototype.slice.call(card.querySelectorAll('[style*="background-image"], [data-bg], [class*="photo"], [class*="image"], [class*="img"]'))).find(function (e) { return !!bgUrl(e) })
       if (bgEl) { var r2 = rect(bgEl); image = { url: bgUrl(bgEl), alt: '', nw: 0, nh: 0, complete: true, rw: Math.round(r2.w), rh: Math.round(r2.h), kind: 'background' } }
     }
     var srcs = {}
@@ -210,8 +283,13 @@ export const EXTRACT_JS = `(() => {
   var total = null
   var pats = [/showing\\s+all\\s+(\\d[\\d,]{0,6})/i, /\\d[\\d,]*\\s*(?:-|–|to)\\s*\\d[\\d,]*\\s+of\\s+(\\d[\\d,]{0,6})/i, /(\\d[\\d,]{0,6})\\s+(?:vehicles|results|matches|cars|listings|units)\\s+(?:found|available|match|in stock)/i, /(\\d[\\d,]{0,6})\\s+(?:vehicles|results|matches|listings)\\b/i]
   for (var p = 0; p < pats.length && total === null; p++) { var mm = body.match(pats[p]); if (mm) { var n = parseInt(mm[1].replace(/,/g, ''), 10); if (n > 0 && n < 20000) total = n } }
-  return { url: location.href, title: document.title, cards: out, total: total, strategy: useGen ? 'structure' : 'known', scrollHeight: document.documentElement.scrollHeight }
-})()`
+  return { url: location.href, title: document.title, cards: out, total: total, strategy: strategy, scrollHeight: document.documentElement.scrollHeight }
+})`
+export const EXTRACT_JS = `${EXTRACT_SRC}(null)`
+/** The parts of a vehicle card on one website, as CSS selectors (learned once, reused on every crawl of that site). */
+export interface CardLayout { card: string, title?: string, image?: string, link?: string }
+/** Read the cards with a learned layout (falls back to the built-in reading when the selector matches nothing). */
+export const extractWith = (layout: CardLayout | null) => layout?.card ? `${EXTRACT_SRC}(${JSON.stringify({ card: layout.card, title: layout.title || '', image: layout.image || '', link: layout.link || '' })})` : EXTRACT_JS
 
 /**
  * Find "Next page" / "Load more". Order: rel=next → the site's pagination control (next arrow, or the
@@ -469,3 +547,76 @@ export const ANALYZE_FN_JS = `async (items) => {
   }
   return out
 }`
+
+
+/**
+ * What an AI needs to see to learn a website's vehicle card: the simplified HTML of two listings
+ * (tags, classes, data-attributes, link / image addresses, short texts) and the path above them.
+ * One "anchor" per vehicle is found first (a VIN, or a link to the vehicle's own page); the listing
+ * is the largest block around an anchor that holds no other vehicle. Null when the page shows no vehicles.
+ */
+export const LAYOUT_SAMPLE_JS = `(() => {
+  var VIN = /^[A-HJ-NPR-Z0-9]{17}$/i
+  var here = location.href.split('#')[0]
+  var anchors = [], seen = {}
+  var els = document.querySelectorAll('[data-vin]')
+  for (var i = 0; i < els.length; i++) { var v = (els[i].getAttribute('data-vin') || '').toUpperCase(); if (VIN.test(v) && !seen[v]) { seen[v] = 1; anchors.push(els[i]) } }
+  if (anchors.length < 3) {
+    anchors = []; seen = {}
+    var as = document.querySelectorAll('a[href]')
+    for (var j = 0; j < as.length; j++) {
+      var h = as[j].href.split('#')[0].split('?')[0]
+      if (h === here.split('?')[0] || seen[h]) continue
+      if (!/(19[89]\\d|20[0-3]\\d)[-_\\/]|[-_\\/](19[89]\\d|20[0-3]\\d)(?!\\d)|\\/(vehicle|vehicles|inventory|vdp|detail|details|used|new|certified)[-_\\/][^?#]*\\d/i.test(h)) continue
+      var r = as[j].getBoundingClientRect()
+      if (r.width < 4 || r.height < 4) continue
+      seen[h] = 1; anchors.push(as[j])
+    }
+  }
+  if (anchors.length < 3) return null
+  function block(i) {
+    var cur = anchors[i]
+    for (var d = 0; d < 14; d++) {
+      var p = cur.parentElement
+      if (!p || p === document.body || p === document.documentElement) break
+      var foreign = false
+      for (var k = 0; k < anchors.length && !foreign; k++) if (k !== i && p.contains(anchors[k])) foreign = true
+      if (foreign) break
+      cur = p
+    }
+    return cur
+  }
+  function cut(s, n) { s = String(s || '').replace(/\\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n) + '…' : s }
+  function addr(u) { try { var x = new URL(u, location.href); return cut(x.pathname, 70) } catch (e) { return cut(u, 40) } }
+  function open(el) {
+    var out = '<' + el.tagName.toLowerCase()
+    var cls = typeof el.className === 'string' ? el.className.split(/\\s+/).filter(Boolean).slice(0, 6).join(' ') : ''
+    if (el.id && !/\\d{3,}/.test(el.id)) out += ' id="' + cut(el.id, 40) + '"'
+    if (cls) out += ' class="' + cut(cls, 110) + '"'
+    for (var a = 0; a < el.attributes.length && a < 24; a++) {
+      var n = el.attributes[a].name, val = el.attributes[a].value
+      if (/^data-/.test(n) && n.length < 36) out += ' ' + n + '="' + cut(val, 26) + '"'
+      else if (n === 'href') out += ' href="' + addr(val) + '"'
+      else if (n === 'src') out += ' src="' + (/^data:/.test(val) ? 'data:…' : addr(val)) + '"'
+      else if (n === 'alt' || n === 'itemprop' || n === 'role' || n === 'aria-label') out += ' ' + n + '="' + cut(val, 60) + '"'
+    }
+    if (el.tagName === 'IMG') { var r = el.getBoundingClientRect(); out += ' shown="' + Math.round(r.width) + 'x' + Math.round(r.height) + '"' }
+    return out + '>'
+  }
+  function ser(el, state) {
+    if (state.left <= 0) return ''
+    if (/^(SCRIPT|STYLE|SVG|NOSCRIPT|IFRAME|TEMPLATE|LINK|META)$/i.test(el.tagName)) return ''
+    var s = open(el)
+    state.left -= s.length
+    for (var c = el.firstChild; c; c = c.nextSibling) {
+      if (state.left <= 0) { s += '…'; break }
+      if (c.nodeType === 3) { var t = cut(c.nodeValue, 70); if (t) { s += t; state.left -= t.length } }
+      else if (c.nodeType === 1) s += ser(c, state)
+    }
+    return s + '</' + el.tagName.toLowerCase() + '>'
+  }
+  var b0 = block(0), b1 = block(Math.min(anchors.length - 1, 2))
+  var path = []
+  for (var p = b0.parentElement, n = 0; p && p !== document.documentElement && n < 5; p = p.parentElement, n++) path.push(open(p))
+  return { count: anchors.length, by: els.length >= 3 && anchors[0].hasAttribute('data-vin') ? 'vin' : 'link', html: [ser(b0, { left: 7000 }), ser(b1, { left: 3500 })], path: path, siblings: b0.parentElement ? b0.parentElement.children.length : 0 }
+})()`

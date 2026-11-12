@@ -120,7 +120,8 @@ export function landing(listUrl: string, landedUrl: string): Landing {
   return inList(listUrl, landedUrl) ? 'same' : 'moved'
 }
 
-export const shortPath = (raw: string) => { const u = parse(raw); if (!u) return raw; try { return decodeURIComponent(u.pathname + u.search) || '/' } catch { return u.pathname + u.search || '/' } }
+/** (named scopePath — "shortPath" is the email blocks' helper; server/utils names are shared by auto-import and must not clash) */
+export const scopePath = (raw: string) => { const u = parse(raw); if (!u) return raw; try { return decodeURIComponent(u.pathname + u.search) || '/' } catch { return u.pathname + u.search || '/' } }
 
 /** The saved scan pages of a dealership, cleaned: valid ones to crawl, and the ones that can never be crawled (with the reason). */
 export function scopeOf(dealership: any): { pages: ScanPage[], rejected: { url: string, label: string, message: string }[] } {

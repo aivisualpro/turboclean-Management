@@ -52,6 +52,8 @@ export interface AskOptions {
   timeoutMs?: number
   /** Cache the system prompt too (Anthropic; Gemini caches long prompts implicitly). */
   cacheSystem?: boolean
+  /** Use Claude for this call whenever a Claude key is set, whichever provider is the default (precision work: reading page layouts). */
+  prefer?: 'anthropic'
 }
 
 async function brainBlock(opts: AskOptions): Promise<string> {
@@ -337,9 +339,9 @@ export async function askClaudeVision(opts: { system: string, prompt: string, im
 
 // ───────────────────────── Public API ─────────────────────────
 export async function askClaude(opts: AskOptions) {
-  const provider = aiProvider()
+  const provider = opts.prefer === 'anthropic' && anthropicKey() ? 'anthropic' : aiProvider()
   if (!provider) throw new Error(AI_SETUP_HINT)
-  const model = aiModel()
+  const model = provider === aiProvider() ? aiModel() : (process.env.ANTHROPIC_MODEL || AI_DEFAULT_MODEL)
   const t = withTimeout(opts.timeoutMs ?? 90_000)
   const t0 = Date.now()
   try {

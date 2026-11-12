@@ -687,7 +687,7 @@ const crawlLabel = computed(() => chosen.value.length ? `Crawl ${chosen.value.le
                   <Button variant="outline" size="sm" class="h-8 gap-1.5" @click="open = false"><CheckCircle2 class="size-4 text-emerald-600" /> Saved — close</Button>
                   <Button size="sm" class="h-8 gap-1.5" @click="emailAudit"><Mail class="size-4" /> Email this audit</Button>
                 </template>
-                <Button v-else size="sm" class="h-8 gap-1.5" :disabled="saving" @click="save"><Loader2 v-if="saving" class="size-4 animate-spin" /><Save v-else class="size-4" /> Save to CRM</Button>
+                <Button v-else size="sm" class="h-8 gap-1.5" :disabled="saving || !!results.unreliable" :title="results.unreliable ? 'Not saved: the vehicle cards could not be read properly — crawl again' : undefined" @click="save"><Loader2 v-if="saving" class="size-4 animate-spin" /><Save v-else class="size-4" /> Save to CRM</Button>
               </div>
             </footer>
           </div>

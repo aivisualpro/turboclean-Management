@@ -53,6 +53,8 @@ export interface ScannedImage { id: string, url: string, ok: boolean, error: str
 export interface ImageGroup { id: string, imageIds: string[], hash: string, hash2?: string, vehicles: number, models: number, modelNames: string[], thumb: string, url: string, verdict: PhotoVerdict, reason: string, override: FinalVerdict | null }
 export interface ScanResults {
   scanId: string
+  /** Why these numbers cannot be trusted (the site's cards were not read properly) — saving is refused. */
+  unreliable?: string | null
   summary: { total: number, by: Record<FinalVerdict, number>, withoutReal: number, withoutRealPct: number | null, review: number, counts: { newTotal: number, usedTotal: number, newMissingPhotos: number, usedMissingPhotos: number }, newPct: number | null, usedPct: number | null }
   countStockAsMissing: boolean
   advertised: number | null

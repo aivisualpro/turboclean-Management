@@ -5,9 +5,9 @@
  */
 import { ObjectId } from 'mongodb'
 import type { Db } from 'mongodb'
-import { CRM_COLLECTIONS, logActivity } from './crm'
+import { CRM_COLLECTIONS, OPEN_STAGE_ORDER, logActivity } from './crm'
 import type { SessionActor } from './crm'
-import { emailKey, nameKey, personKey, phoneKey, websiteKey } from './crm-normalize'
+import { emailKey, nameKey, normalizeCity, personKey, phoneKey, websiteKey } from './crm-normalize'
 
 export interface DealershipMatch { id: string, dealershipId: string, name: string, city: string, state: string, stage: string, reasons: string[], archived: boolean }
 
@@ -123,7 +123,7 @@ const FILLABLE = ['dealerGroup', 'website', 'address', 'city', 'state', 'zip', '
  * Merge `mergeId` into `keepId`: every contact, activity, email, audit, time entry… moves to the kept record,
  * blank fields on the kept record are filled from the duplicate, and the duplicate is archived with `mergedInto`.
  */
-export async function mergeDealerships(db: Db, keepId: string, mergeId: string, actor: SessionActor | null) {
+export async function mergeDealerships(db: Db, keepId: string, mergeId: string, actor: SessionActor | null, batch?: string) {
   if (keepId === mergeId || !ObjectId.isValid(keepId) || !ObjectId.isValid(mergeId)) throw createError({ statusCode: 400, statusMessage: 'Pick two different dealerships' })
   const col = db.collection(CRM_COLLECTIONS.dealerships)
   const [keep, dup] = await Promise.all([col.findOne({ _id: new ObjectId(keepId) }), col.findOne({ _id: new ObjectId(mergeId) })])
@@ -137,6 +137,9 @@ export async function mergeDealerships(db: Db, keepId: string, mergeId: string, 
   const now = new Date().toISOString()
   const fill: Record<string, any> = {}
   for (const k of FILLABLE) if ((keep[k] == null || keep[k] === '') && dup[k] != null && dup[k] !== '') fill[k] = dup[k]
+  // The crawl plan and the visit route survive the merge too.
+  if (!(Array.isArray(keep.scanPages) && keep.scanPages.length) && Array.isArray(dup.scanPages) && dup.scanPages.length) fill.scanPages = dup.scanPages
+  for (const k of ['route', 'routeDay']) if ((keep[k] == null || keep[k] === '') && dup[k] != null && dup[k] !== '') fill[k] = dup[k]
   const brands = [...new Set([...(keep.brands || []), ...(dup.brands || [])])]
   const tags = [...new Set([...(keep.tags || []), ...(dup.tags || [])])]
   const notes = [keep.notes, dup.notes && dup.notes !== keep.notes ? `— merged from ${dup.dealershipId} —\n${dup.notes}` : ''].filter(Boolean).join('\n\n')
@@ -144,11 +147,119 @@ export async function mergeDealerships(db: Db, keepId: string, mergeId: string, 
   const primaries = await db.collection(CRM_COLLECTIONS.contacts).find({ dealershipId: keepId, isPrimary: true }).sort({ addedAt: 1 }).toArray()
   if (primaries.length > 1) await db.collection(CRM_COLLECTIONS.contacts).updateMany({ _id: { $in: primaries.slice(1).map(p => p._id) } }, { $set: { isPrimary: false } })
   await col.updateOne({ _id: keep._id }, { $set: { ...fill, brands, tags, notes, updatedAt: now } })
-  await col.updateOne({ _id: dup._id }, { $set: { archivedAt: now, mergedInto: keepId, mergedAt: now, mergedBy: actor, updatedAt: now } })
+  await col.updateOne({ _id: dup._id }, { $set: { archivedAt: now, mergedInto: keepId, mergedAt: now, mergedBy: actor, updatedAt: now, ...(batch ? { mergeBatch: batch } : {}) } })
   const total = Object.values(moved).reduce((a, b) => a + b, 0)
   await logActivity(db, { dealershipId: keepId, type: 'dealership.updated', actor, message: `Merged duplicate ${dup.dealershipId} (${dup.name}) into this record — ${total} linked records moved${Object.keys(fill).length ? `, filled ${Object.keys(fill).join(', ')}` : ''}` })
   await logActivity(db, { dealershipId: mergeId, type: 'dealership.archived', actor, message: `Merged into ${keep.dealershipId} (${keep.name}) as a duplicate` })
   return { moved, filled: Object.keys(fill) }
+}
+
+// ───────────────────────── Clear duplicates (one click, reviewed first) ─────────────────────────
+export interface DuplicateRow { id: string, code: string, name: string, city: string, state: string, stage: string, website: string, won: boolean, createdAt: string | null, links: { contacts: number, activities: number, emails: number, audits: number }, scanPages: number }
+export interface DuplicateGroup { key: string, reason: string, keep: DuplicateRow, remove: DuplicateRow[] }
+
+/** Split a list by a key; records where the key is blank go with the others when there is only one value to go with. */
+function splitBy<T>(list: T[], keyOf: (d: T) => string): T[][] {
+  const vals = [...new Set(list.map(keyOf).filter(Boolean))]
+  if (vals.length <= 1) return [list]
+  const out = vals.map(v => list.filter(d => keyOf(d) === v))
+  const blanks = list.filter(d => !keyOf(d))
+  if (blanks.length) out.push(blanks)
+  return out
+}
+const cityKey = (v: unknown) => normalizeCity(v).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+
+/**
+ * The same dealership entered more than once (typically the same list imported twice): same name,
+ * same state, same city, no different website. These are safe to merge in one go. Anything looser
+ * (same phone, same name in another city) stays in Data quality for a person to decide.
+ *
+ * For each group one record is kept — a won account first, then the one with the most history
+ * (contacts, activities, emails, audits, scan pages), the furthest stage, and finally the oldest.
+ */
+export async function duplicatePlan(db: Db, opts: { counts?: boolean } = {}): Promise<{ groups: DuplicateGroup[], records: number }> {
+  const ds = await db.collection(CRM_COLLECTIONS.dealerships).find({ archivedAt: null, mergedInto: null }, { projection: { name: 1, website: 1, phone: 1, city: 1, state: 1, stage: 1, dealershipId: 1, dealerId: 1, createdAt: 1, scanPages: 1, address: 1, dealerGroup: 1, assignedUserId: 1 } }).toArray()
+  const buckets = new Map<string, any[]>()
+  for (const d of ds) {
+    const n = nameKey(d.name)
+    if (!n) continue
+    const k = `${n}|${String(d.state || '').trim().toUpperCase()}`
+    buckets.set(k, [...(buckets.get(k) || []), d])
+  }
+  const sets: any[][] = []
+  for (const list of buckets.values()) {
+    if (list.length < 2) continue
+    for (const byCity of splitBy(list, d => cityKey(d.city))) for (const g of splitBy(byCity, d => websiteKey(d.website))) if (g.length > 1) sets.push(g)
+  }
+  const ids = sets.flat().map(d => d._id.toString())
+  const count = async (collection: string) => {
+    if (!opts.counts || !ids.length) return new Map<string, number>()
+    const rows = await db.collection(collection).find({ dealershipId: { $in: ids } }, { projection: { dealershipId: 1 } }).toArray().catch(() => [] as any[])
+    const m = new Map<string, number>()
+    for (const r of rows) m.set(String(r.dealershipId), (m.get(String(r.dealershipId)) || 0) + 1)
+    return m
+  }
+  const [contacts, activities, emails, audits] = await Promise.all([count(CRM_COLLECTIONS.contacts), count('turboCleanCrmInteractions'), count('turboCleanCrmEmails'), count('turboCleanCrmAudits')])
+  const row = (d: any): DuplicateRow => {
+    const id = d._id.toString()
+    return { id, code: d.dealershipId || '', name: d.name || '', city: d.city || '', state: d.state || '', stage: d.stage || '', website: websiteKey(d.website), won: !!d.dealerId, createdAt: d.createdAt || null,
+      links: { contacts: contacts.get(id) || 0, activities: activities.get(id) || 0, emails: emails.get(id) || 0, audits: audits.get(id) || 0 }, scanPages: Array.isArray(d.scanPages) ? d.scanPages.length : 0 }
+  }
+  const filled = (d: any) => ['website', 'phone', 'address', 'dealerGroup', 'assignedUserId'].filter(k => d[k]).length
+  const score = (d: any, r: DuplicateRow) => (r.won ? 1e9 : 0) + (r.links.contacts + r.links.activities + r.links.emails + r.links.audits) * 100 + r.scanPages * 60 + Math.max(0, OPEN_STAGE_ORDER.indexOf(d.stage)) * 20 + filled(d)
+  const groups: DuplicateGroup[] = []
+  for (const g of sets) {
+    const rows = g.map(d => ({ d, r: row(d) })).sort((a, b) => score(b.d, b.r) - score(a.d, a.r) || String(a.d.createdAt || '').localeCompare(String(b.d.createdAt || '')) || a.r.code.localeCompare(b.r.code))
+    const keep = rows[0]!.r
+    // A second won account is a real account — it is never merged away.
+    const remove = rows.slice(1).map(x => x.r).filter(r => !r.won)
+    if (!remove.length) continue
+    const sameCity = g.every(d => cityKey(d.city) === cityKey(g[0].city))
+    groups.push({ key: [keep.id, ...remove.map(r => r.id).sort()].join(':'), reason: `Same name${sameCity && keep.city ? `, ${keep.city}` : ''}${keep.state ? ` ${keep.state}` : ''}${keep.website ? ` · ${keep.website}` : ''}`, keep, remove })
+  }
+  groups.sort((a, b) => a.keep.name.localeCompare(b.keep.name))
+  return { groups, records: groups.reduce((n, g) => n + g.remove.length, 0) }
+}
+
+/**
+ * Merge the chosen duplicate groups (as shown by `duplicatePlan` — the plan is rebuilt here and only
+ * groups that still look exactly the same are touched). Nothing is deleted: everything linked to a
+ * duplicate moves onto the kept record and the duplicate is archived as "merged". Undo with the batch id.
+ */
+export async function clearDuplicates(db: Db, keys: unknown, actor: SessionActor | null) {
+  const wanted = new Set((Array.isArray(keys) ? keys : []).map(k => String(k)).slice(0, 5000))
+  // (with the linked-record counts — they decide which record is kept, exactly as the person saw it)
+  const plan = await duplicatePlan(db, { counts: true })
+  const todo = plan.groups.filter(g => wanted.has(g.key))
+  const batch = new ObjectId().toString()
+  let merged = 0
+  const failed: { name: string, message: string }[] = []
+  // A few groups at a time — quick, without flooding the database.
+  for (let i = 0; i < todo.length; i += 6) {
+    await Promise.all(todo.slice(i, i + 6).map(async (g) => {
+      for (const r of g.remove) {
+        try { await mergeDealerships(db, g.keep.id, r.id, actor, batch); merged++ }
+        catch (e: any) { failed.push({ name: r.name, message: String(e?.statusMessage || e?.message || e).slice(0, 160) }) }
+      }
+    }))
+  }
+  return { batch, groups: todo.length, merged, skipped: wanted.size - todo.length, failed, remaining: (await duplicatePlan(db)).records }
+}
+
+/** Take a "clear duplicates" run back: the merged records return to the list with their own contacts, activities, emails and audits. */
+export async function undoClearDuplicates(db: Db, batch: string, actor: SessionActor | null) {
+  if (!ObjectId.isValid(batch)) throw createError({ statusCode: 400, statusMessage: 'Nothing to undo' })
+  const col = db.collection(CRM_COLLECTIONS.dealerships)
+  const dups = await col.find({ mergeBatch: batch }).toArray()
+  let restored = 0
+  for (const d of dups) {
+    const id = d._id.toString()
+    for (const c of CHILD_COLLECTIONS) await db.collection(c).updateMany({ mergedFrom: id }, { $set: { dealershipId: id }, $unset: { mergedFrom: '' } })
+    await col.updateOne({ _id: d._id }, { $set: { archivedAt: null, mergedInto: null, updatedAt: new Date().toISOString() }, $unset: { mergedAt: '', mergedBy: '', mergeBatch: '' } })
+    await logActivity(db, { dealershipId: id, type: 'dealership.updated', actor, message: 'Merge undone — this record is separate again' }).catch(() => {})
+    restored++
+  }
+  return { restored }
 }
 
 /** Merge contact `mergeId` into `keepId` (same dealership): activities and emails are re-pointed, blanks filled, duplicate removed. */
