@@ -532,3 +532,10 @@ table:not([role="grid"], .table-plain) > thead > tr:first-child > th:last-child 
 :is(.border, .border-2, [data-slot="card"]):not(.overflow-auto, .overflow-x-auto, .overflow-y-auto, .overflow-scroll):has(> table:not([role="grid"], .table-plain), > div > table:not([role="grid"], .table-plain), > div > div > table:not([role="grid"], .table-plain)) {
   overflow: hidden;
 }
+
+/* ───────────── Toasts over open windows ─────────────
+   An open dialog / side sheet switches clicks off for everything outside it — including the
+   toasts, so a button inside one ("Undo", "Send anyway") could be seen but not pressed.
+   Toasts are always pressable. */
+[data-sonner-toaster],
+[data-sonner-toaster] [data-sonner-toast] { pointer-events: auto !important; }

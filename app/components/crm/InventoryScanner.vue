@@ -186,8 +186,10 @@ watch(open, (v) => { if (v) start(); else { sc.dispose(); stopClock() } }, { imm
 
 /** Open a page in the cloud browser and show its snapshot (looking only — nothing is crawled). */
 async function show(url?: string, opts: { history?: boolean } = {}) {
+  wanted.value = url || ''
   await sc.loadPreview(props.dealership.id, url)
-  if (previewError.value) { toast.error(previewError.value); return }
+  // (the reason is shown where the page would be — with what to do next — not as a passing toast)
+  if (previewError.value) return
   if (preview.value && opts.history !== false) {
     visited.value = [...visited.value.slice(0, at.value + 1), preview.value.url]
     at.value = visited.value.length - 1
@@ -200,8 +202,15 @@ function forward() { if (canForward.value) { at.value++; show(visited.value[at.v
 function reload() { show(preview.value?.url, { history: false }) }
 
 watch(() => preview.value?.url, (u) => { if (u && !editingAddress.value) address.value = u })
-const shownUrl = computed(() => (preview.value?.url || website.value || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''))
-const secure = computed(() => (preview.value?.url || website.value || '').startsWith('https://'))
+/** The page that was asked for (shown in the address bar while it loads, or when it could not be shown). */
+const wanted = ref('')
+const shownUrl = computed(() => (preview.value?.url || wanted.value || website.value || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''))
+const secure = computed(() => (preview.value?.url || wanted.value || website.value || '').startsWith('https://'))
+/**
+ * The picture of the page is only a look-around. When the dealer's site would not show it to us
+ * (its visitor check), a crawl is still possible — it opens the page its own way and keeps trying.
+ */
+const previewBlocked = computed(() => !!previewError.value && /access denied|blocked this visit|refus|HTTP 403|bot protection|rate-limit|too many requests/i.test(previewError.value))
 function submitAddress() {
   editingAddress.value = false
   const v = address.value.trim()
@@ -552,18 +561,34 @@ const crawlLabel = computed(() => chosen.value.length ? `Crawl ${chosen.value.le
               </div>
 
               <div class="flex-1 min-h-0 relative bg-[radial-gradient(ellipse_at_top,#27272a,#09090b)]">
-                <!-- Opening the first page / it could not be opened -->
-                <div v-if="!preview" class="absolute inset-0 flex items-center justify-center p-6 text-white">
-                  <div v-if="previewing" class="text-center space-y-3">
-                    <Loader2 class="mx-auto size-7 animate-spin text-white/70" />
-                    <p class="text-sm font-medium">Opening {{ shownUrl || 'the page' }}</p>
-                    <p class="text-xs text-white/60">A private browser loads it at desktop size — the first open can take 10–20 seconds.</p>
+                <!-- No picture of the page (yet): opening it · a crawl is running · it could not be shown -->
+                <div v-if="!preview && !(scanning && liveSrc)" class="absolute inset-0 flex items-center justify-center p-6 text-white">
+                  <!-- A crawl runs whether or not the preview worked -->
+                  <div v-if="scanning" class="text-center space-y-3 max-w-md" role="status">
+                    <Loader2 class="mx-auto size-7 animate-spin text-red-400" />
+                    <p class="text-sm font-medium">Crawling {{ chosen.length === 1 ? 'the scan page' : `${chosen.length} scan pages` }}…</p>
+                    <p class="text-xs text-white/60">{{ progress?.message || 'Opening the first scan page' }}</p>
                   </div>
-                  <div v-else class="max-w-md rounded-2xl border border-white/10 bg-white/5 p-5 space-y-3">
-                    <div class="flex items-center gap-2 text-amber-400"><AlertTriangle class="size-5" /><p class="font-semibold">{{ previewError ? 'The page could not be opened' : 'Nothing to show yet' }}</p></div>
-                    <p class="text-sm text-white/80">{{ previewError || 'Add a scan page on the left, or paste a page address in the bar above.' }}</p>
-                    <div class="flex gap-2">
-                      <Button v-if="previewError" class="bg-red-600 hover:bg-red-700 text-white" @click="show(crawlable[0]?.url)">Try again</Button>
+                  <div v-else-if="previewing" class="text-center space-y-3 max-w-md min-w-0" role="status">
+                    <Loader2 class="mx-auto size-7 animate-spin text-white/70" />
+                    <p class="text-sm font-medium truncate">Opening {{ shownUrl || 'the page' }}</p>
+                    <p class="text-xs text-white/60">A private browser loads it at desktop size — usually 10–20 seconds, up to a minute when the site checks its visitors first.</p>
+                  </div>
+                  <!-- The site would not show the page for the preview: the crawl is still ready -->
+                  <div v-else-if="previewBlocked" class="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-5 space-y-3">
+                    <div class="flex items-center gap-2 text-sky-300"><ShieldCheck class="size-5 shrink-0" /><p class="font-semibold">No preview right now — the crawl still works</p></div>
+                    <p class="text-sm text-white/80">This dealer's website checks its visitors and did not let the preview through this time. That only affects the picture here. A crawl opens the page its own way and keeps trying until it is let in.</p>
+                    <div class="flex flex-wrap gap-2">
+                      <Button v-if="chosen.length" class="bg-red-600 hover:bg-red-700 text-white gap-1.5" @click="crawl()"><ScanSearch class="size-4" /> Crawl {{ chosen.length }} scan page{{ chosen.length === 1 ? '' : 's' }}</Button>
+                      <Button variant="outline" class="bg-transparent text-white border-white/20 hover:bg-white/10" @click="show(wanted || crawlable[0]?.url)">Try the preview again</Button>
+                      <Button v-if="lastScan && results" variant="outline" class="bg-transparent text-white border-white/20 hover:bg-white/10" @click="tab = 'results'">Last crawl results</Button>
+                    </div>
+                  </div>
+                  <div v-else class="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-5 space-y-3">
+                    <div class="flex items-center gap-2 text-amber-400"><AlertTriangle class="size-5 shrink-0" /><p class="font-semibold">{{ previewError ? 'The page could not be opened' : 'Nothing to show yet' }}</p></div>
+                    <p class="text-sm text-white/80 break-words [overflow-wrap:anywhere]">{{ previewError || 'Add a scan page on the left, or paste a page address in the bar above.' }}</p>
+                    <div class="flex flex-wrap gap-2">
+                      <Button v-if="previewError" class="bg-red-600 hover:bg-red-700 text-white" @click="show(wanted || crawlable[0]?.url)">Try again</Button>
                       <Button v-if="lastScan && results" variant="outline" class="bg-transparent text-white border-white/20 hover:bg-white/10" @click="tab = 'results'">Last crawl results</Button>
                     </div>
                   </div>

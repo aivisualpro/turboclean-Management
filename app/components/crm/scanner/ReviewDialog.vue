@@ -37,6 +37,11 @@ async function save() {
     emit('saved')
   } catch (e: any) { toast.error(e?.data?.statusMessage || 'Could not save') } finally { saving.value = false }
 }
+/** Pressing a toast button ("Undo") is not a click away from this window — it must not close it. */
+function onOutside(e: any) {
+  const el = (e?.detail?.originalEvent?.target || e?.target) as HTMLElement | null
+  if (el?.closest?.('[data-sonner-toaster]')) e.preventDefault()
+}
 function close() {
   if (dirty.value && !confirm('You changed some verdicts but did not save them. Close anyway? (They stay here as a draft.)')) return
   open.value = false
@@ -45,7 +50,7 @@ function close() {
 
 <template>
   <Dialog :open="open" @update:open="(o: boolean) => { if (!o) close() }">
-    <DialogContent class="sm:max-w-[min(1400px,96vw)] h-[92vh] p-0 gap-0 flex flex-col overflow-hidden">
+    <DialogContent class="sm:max-w-[min(1400px,96vw)] h-[92vh] p-0 gap-0 flex flex-col overflow-hidden" @interact-outside="onOutside">
       <DialogHeader class="px-5 pt-4 pb-3 border-b">
         <DialogTitle class="text-base flex items-center gap-2"><ScanSearch class="size-4 text-red-600" /> Crawl results{{ dealershipName ? ` · ${dealershipName}` : '' }}</DialogTitle>
         <DialogDescription class="text-xs flex flex-wrap items-center gap-2">

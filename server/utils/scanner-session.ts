@@ -236,6 +236,16 @@ export async function goto(t: Tab, url: string, timeoutMs = 25_000, log?: (s: st
     // Akamai / Cloudflare "Access Denied": the site's bot protection refused this visitor.
     if (t.status === 403) {
       const title = await evaluate<string>(t, 'document.title', 5_000).catch(() => '')
+      // Cloudflare's "Just a moment…" is a visitor check, not a refusal: it usually lets the browser
+      // through by itself after a few seconds (the page reloads on its own). Give it that time.
+      if (/just a moment|checking your browser|verifying you are human|one more step/i.test(title)) {
+        log?.('The site is checking the visitor ("Just a moment…") — waiting for it to finish')
+        for (let i = 0; i < 8; i++) {
+          await sleep(1_200)
+          if (t.loading) await waitForSettle(t, 10_000)
+          if (!(await isBlockedPage(t))) { log?.('The visitor check passed'); return }
+        }
+      }
       const where = process.env.SCANNER_PROXY ? 'even through SCANNER_PROXY — try another proxy location / a residential proxy, or try again later'
         : isServerless() ? 'from our cloud server — many dealer sites block cloud (data-centre) addresses. Set SCANNER_PROXY to a US residential proxy in Vercel so the crawler visits like a normal US home visitor'
           : 'from this computer — dealer websites usually block traffic from outside the US. Run it from zrzops.com, or set SCANNER_PROXY to a US residential proxy'
@@ -358,13 +368,15 @@ async function followNextLink(t: Tab, href: string, lastGood: string, log: (s: s
 
 /**
  * A scan page the site refused on the very first request: come back as a brand-new visitor (twice,
- * with a pause). Only this address is opened — the crawler does not wander to the home page.
+ * with a pause; once for a preview, where someone is waiting). Only this address is opened — the crawler does not wander to the home page.
  */
-async function reopenRefused(t: Tab, url: string, log: (s: string) => void) {
+async function reopenRefused(t: Tab, url: string, log: (s: string) => void, tries = 2) {
+  const pauseMs = 9_000
   log('The dealer\'s site refused this page (bot protection) — opening it as a fresh first visit')
   if (await freshVisit(t, url, log)) { log('Got through as a fresh visitor'); return true }
+  if (tries < 2) return false
   log('Still refused — pausing, then one more fresh visit')
-  await sleep(9_000 + Math.round(Math.random() * 4_000))
+  await sleep(pauseMs + Math.round(Math.random() * 4_000))
   if (await freshVisit(t, url, log)) { log('Got through on the second try'); return true }
   return false
 }
@@ -381,7 +393,13 @@ export async function previewSite(db: Db, dealershipId: string, urlInput: string
   const url = safeUrl(raw)
   const t = await openTab()
   try {
-    await goto(t, url)
+    // Open it exactly the way a crawl does — arriving from the site itself, and when the site's
+    // bot protection refuses the first request, again as a brand-new visitor. (A crawl got through
+    // where the preview used to give up after one try, which made the crawler look broken.)
+    try { await goto(t, url, 25_000, undefined, `${new URL(url).origin}/`) }
+    catch (e: any) {
+      if (e?.statusCode !== 403 || !(await reopenRefused(t, url, () => {}, 1))) throw e
+    }
     // Nudge lazy-loaded images in the first few screens, then back to the top.
     for (let y = 0; y < 3600; y += 900) { await evaluate(t, `window.scrollTo(0, ${y})`).catch(() => {}); await sleep(220) }
     await evaluate(t, 'window.scrollTo(0, 0)').catch(() => {})

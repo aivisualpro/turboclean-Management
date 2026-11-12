@@ -39,6 +39,8 @@ const showVariants = ref(false)
 const device = ref<'desktop' | 'mobile'>('desktop')
 const sending = ref(false)
 const sendError = ref('')
+/** "Already sent to this address recently" — asked here, inside the window (a toast behind an open window cannot be clicked). */
+const duplicate = ref('')
 /** Templates have been fetched for this opening (so "no templates" is a fact, not a loading state). */
 const libraryLoaded = ref(false)
 const errors = ref<Record<string, string>>({})
@@ -187,7 +189,7 @@ const pdfUrl = computed(() => props.dealership && template.value && designed.val
 watch(isOpen, async (o) => {
   if (!o) { if (timer) clearTimeout(timer); return }
   booting = true
-  errors.value = {}; sendError.value = ''; previewError.value = ''
+  errors.value = {}; sendError.value = ''; duplicate.value = ''; previewError.value = ''
   preview.value = null; previewedSubject.value = null
   subjectEdited.value = false; showVariants.value = false
   libraryLoaded.value = false
@@ -228,6 +230,8 @@ const bounced = computed(() => contact.value && (contact.value as any).emailBoun
 // A complaint disappears as soon as the field it is about is fixed.
 watch(() => form.value.subject, (v) => { if (errors.value.subject && v.trim()) errors.value = { ...errors.value, subject: '' } })
 watch(toEmail, () => { if (errors.value.to) errors.value = { ...errors.value, to: '' } })
+// The "already sent" question belongs to one recipient + email: it goes away when either changes.
+watch([toEmail, () => form.value.templateId, () => form.value.followUpOf], () => { duplicate.value = '' })
 
 function validate() {
   const e: Record<string, string> = {}
@@ -242,6 +246,7 @@ async function submit(allowDuplicate = false) {
   if (!props.dealership || noAudit.value || !validate()) return
   sending.value = true
   sendError.value = ''
+  duplicate.value = ''
   try {
     const email = await sendEmail(props.dealership.id, { ...payload(), ...(allowDuplicate ? { allowDuplicate: true } : {}) } as any)
     toast.success('Email sent', { description: `${email.subject} → ${email.toEmail}` })
@@ -249,9 +254,7 @@ async function submit(allowDuplicate = false) {
     isOpen.value = false
   } catch (err: any) {
     // Duplicate guard: same template / subject to this address recently — ask before sending again.
-    if (err?.statusCode === 409 && err?.data?.data?.duplicateEmail) {
-      toast.warning(err.data.statusMessage, { duration: 15000, action: { label: 'Send anyway', onClick: () => submit(true) } })
-    }
+    if (err?.statusCode === 409 && err?.data?.data?.duplicateEmail) duplicate.value = err.data.statusMessage || 'This email was already sent to this address recently. Send again anyway?'
     else {
       // Stays on screen until the next try: a toast is gone before a long reason can be read.
       sendError.value = err?.data?.statusMessage || err?.message || 'Email not sent'
@@ -416,6 +419,14 @@ function goCrawl() { isOpen.value = false; emit('crawl') }
         <p class="text-[11px] text-muted-foreground flex items-start gap-1.5"><Info class="size-3.5 shrink-0 mt-px" /> Logged to the relationship history as “Email sent”. A first email moves the dealership to Outreach Active; a reply moves it to Replied.</p>
       </form>
 
+      <div v-if="duplicate" role="alertdialog" aria-label="Already sent" class="mx-6 my-3 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2.5 text-sm flex flex-wrap items-center gap-3">
+        <AlertTriangle class="size-5 text-amber-600 shrink-0" />
+        <p class="flex-1 min-w-[220px] leading-snug break-words">{{ duplicate }}</p>
+        <div class="flex gap-2 ml-auto">
+          <Button type="button" size="sm" variant="outline" :disabled="sending" @click="duplicate = ''">Don't send</Button>
+          <Button type="button" size="sm" class="gap-1.5" :disabled="sending" @click="submit(true)"><Loader2 v-if="sending" class="size-4 animate-spin" /><Send v-else class="size-4" /> Send anyway</Button>
+        </div>
+      </div>
       <div v-if="sendError" role="alert" class="mx-6 my-3 rounded-lg border border-rose-500/40 bg-rose-500/5 px-3 py-2 text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2">
         <AlertTriangle class="size-4 shrink-0 mt-px" /><p class="flex-1 leading-relaxed">{{ sendError }}</p>
       </div>
