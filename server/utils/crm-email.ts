@@ -58,6 +58,9 @@ export const isPublicMailbox = (email: string) => { const d = String(email || ''
 export function sendingAddress(): { from: string, configured: string, replaced: boolean, reason: string } {
   const configured = String(process.env.CRM_FROM_EMAIL || '').trim().toLowerCase()
   if (!configured) return { from: DEFAULT_FROM, configured: '', replaced: false, reason: '' }
+  // Only the domain was entered ("zrzops.com"): send from sales@ that domain.
+  const bare = configured.replace(/^@/, '')
+  if (!configured.slice(1).includes('@') && /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(bare) && !isPublicMailbox(`x@${bare}`)) return { from: `sales@${bare}`, configured, replaced: false, reason: '' }
   if (!EMAIL_RE.test(configured)) return { from: DEFAULT_FROM, configured, replaced: true, reason: `“${configured}” is not an email address` }
   if (isPublicMailbox(configured)) return { from: DEFAULT_FROM, configured, replaced: true, reason: `${configured.split('@')[1]} is a public mailbox, and mail can only be sent from a domain you own` }
   return { from: configured, configured, replaced: false, reason: '' }

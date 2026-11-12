@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Check, Loader2, Pencil, ScanSearch, FileDown } from 'lucide-vue-next'
+import { Check, Loader2, Pencil, ScanSearch, FileDown, Mail } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { format } from 'date-fns'
 import { useInventoryScanner } from '~/composables/useInventoryScanner'
@@ -8,9 +8,13 @@ import { useInventoryScanner } from '~/composables/useInventoryScanner'
  * Review a saved crawl again — the same results screen as a fresh crawl (re-label photos, image
  * groups, rules). "Save corrections" updates the audit it produced (same date), its report and emails.
  */
-const props = defineProps<{ scanId: string | null, dealershipName?: string, auditId?: string | null, auditedAt?: string }>()
+const props = defineProps<{
+  scanId: string | null, dealershipName?: string, auditId?: string | null, auditedAt?: string
+  /** Offer "Email this audit" (the user may email this dealership). */
+  canEmail?: boolean
+}>()
 const open = defineModel<boolean>('open', { default: false })
-const emit = defineEmits<{ saved: [] }>()
+const emit = defineEmits<{ saved: [], /** Open the composer on the audit email. */ email: [] }>()
 const sc = useInventoryScanner()
 const loading = ref(false)
 const saving = ref(false)
@@ -46,7 +50,10 @@ function close() {
         <DialogTitle class="text-base flex items-center gap-2"><ScanSearch class="size-4 text-red-600" /> Crawl results{{ dealershipName ? ` · ${dealershipName}` : '' }}</DialogTitle>
         <DialogDescription class="text-xs flex flex-wrap items-center gap-2">
           <span>{{ auditedAt ? `Audit of ${format(new Date(auditedAt), 'MMM d, yyyy h:mm a')} — ` : '' }}fix any photo the crawler got wrong; teach it with rules so the next crawl gets it right.</span>
-          <Button v-if="auditId" as="a" :href="`/api/crm/audits/${auditId}/report?format=pdf&download=1`" size="sm" variant="outline" class="ml-auto h-7 gap-1.5 text-xs"><FileDown class="size-3.5" /> Report PDF</Button>
+          <span v-if="auditId" class="ml-auto flex items-center gap-2">
+            <Button v-if="canEmail" size="sm" class="h-7 gap-1.5 text-xs" :disabled="dirty" :title="dirty ? 'Save the corrections first — the email uses the saved numbers' : 'Email this audit to the dealer'" @click="emit('email')"><Mail class="size-3.5" /> Email this audit</Button>
+            <Button as="a" :href="`/api/crm/audits/${auditId}/report?format=pdf&download=1`" size="sm" variant="outline" class="h-7 gap-1.5 text-xs"><FileDown class="size-3.5" /> Report PDF</Button>
+          </span>
         </DialogDescription>
       </DialogHeader>
       <div v-if="dirty" class="shrink-0 flex flex-wrap items-center gap-3 px-5 py-2.5 bg-amber-500/10 border-b border-amber-500/20 text-sm">

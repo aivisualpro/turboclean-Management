@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { CrmContact, CrmDealership } from '~/composables/useCrmDealerships'
 import type { CrmEmail, EmailPreview } from '~/composables/useCrmEmail'
-import { Loader2, Send, Mail, Reply, AlertTriangle, Braces, FileText, Megaphone, Info, FlaskConical, Shuffle, ChevronDown, FileDown, PencilLine, RotateCcw, ScanSearch, Sparkles } from 'lucide-vue-next'
+import { Loader2, Send, Mail, Reply, AlertTriangle, FileText, Megaphone, Info, FlaskConical, Shuffle, ChevronDown, FileDown, RotateCcw, ScanSearch, Sparkles } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { format } from 'date-fns'
 import { EMAIL_MERGE_FIELDS } from '~/constants/crm'
@@ -9,8 +9,8 @@ import { EMAIL_MERGE_FIELDS } from '~/constants/crm'
 /**
  * Send an email from the dealership record. The email IS the template: pick one and the subject
  * line and the whole message are filled in from this dealership's latest inventory audit — there is
- * nothing to write. What is shown is exactly what goes out (rendered by the server, like the send).
- * A plain note in the rep's own words stays possible (answering a dealer, a quick follow-up).
+ * nothing to write and no message box. What is shown is exactly what goes out (rendered by the
+ * server, like the send). Wording is changed where it belongs: in the template (Email → Templates).
  *
  * Sent through Resend; delivery, bounces, opens / clicks and replies flow back automatically. With a
  * template, the body version and subject line rotate (fewest sends first) so experiments stay balanced.
@@ -33,16 +33,15 @@ const OTHER = '__other'
 const NONE = '__none'
 const blank = () => ({ contactId: NONE as string, to: '', templateId: NONE, templateVersion: 0, subjectVariant: NONE, campaignId: NONE, followUpOf: NONE, subject: '', body: '' })
 const form = ref(blank())
-/** The rep writes the message in their own words (always the case without a template). */
-const writing = ref(false)
 /** The subject was typed over — it is sent as typed and no longer credited to a tracked subject line. */
 const subjectEdited = ref(false)
 const showVariants = ref(false)
 const device = ref<'desktop' | 'mobile'>('desktop')
 const sending = ref(false)
 const sendError = ref('')
+/** Templates have been fetched for this opening (so "no templates" is a fact, not a loading state). */
+const libraryLoaded = ref(false)
 const errors = ref<Record<string, string>>({})
-const bodyEl = ref<any>(null)
 /** True while the composer fills itself in on open (the watchers below stay quiet). */
 let booting = false
 
@@ -84,13 +83,11 @@ const subjectIsCustom = computed(() => !!template.value && (!subjectLine.value |
 /** The inventory-audit email — what a first email to a dealership is. */
 const auditTemplate = computed(() => activeTemplates.value.find(t => /missing photos/i.test(t.name)) || activeTemplates.value.find(t => t.category === 'First touch' && t.versions.some(v => v.status === 'active' && v.format === 'html')) || null)
 const followUpTemplate = computed(() => activeTemplates.value.find(t => t.category === 'Follow-up') || null)
-/** The message comes from the template as designed (nothing to write). */
-const designed = computed(() => !!version.value && !writing.value)
+/** The message is the template, as designed. */
+const designed = computed(() => !!version.value)
 
 function applyVersion(vn: number) {
   form.value.templateVersion = vn
-  const v = template.value?.versions.find(x => x.version === vn)
-  if (v && writing.value) form.value.body = v.body || ''
 }
 function applySubject(key: string) {
   form.value.subjectVariant = key
@@ -100,41 +97,17 @@ function applySubject(key: string) {
 function applyTemplate(id: string) {
   form.value.templateId = id
   const t = templates.value.find(x => x.id === id)
-  if (!t) {
-    // Plain note: the rep writes it.
-    form.value.templateVersion = 0; form.value.subjectVariant = NONE; writing.value = true
-    if (!subjectEdited.value && !thread.value) form.value.subject = ''
-    nextTick(() => focusBody())
-    return
-  }
-  writing.value = false
+  if (!t) return
+  errors.value = { ...errors.value, template: '' }
   // Balanced rotation: the active version / subject line with the fewest sends.
   const v = [...t.versions.filter(x => x.status === 'active')].sort((a, b) => (t.usage.versions[a.version] || 0) - (t.usage.versions[b.version] || 0) || b.version - a.version)[0] || t.versions.at(-1)
   const s = [...t.subjects.filter(x => x.status === 'active')].sort((a, b) => (t.usage.subjects[a.key] || 0) - (t.usage.subjects[b.key] || 0))[0]
   if (v) applyVersion(v.version)
   if (s) applySubject(s.key)
 }
-/** Keep the template for credit, but send the rep's own words (flagged "edited"). */
-function writeOwnWords() {
-  writing.value = true
-  form.value.body = version.value?.body || ''
-  nextTick(() => focusBody())
-}
-function useDesign() { writing.value = false; errors.value = { ...errors.value, body: '' } }
 function resetSubject() {
   subjectEdited.value = false
   form.value.subject = thread.value ? reSubject(thread.value.first.subject) : (subjectLine.value?.text || '')
-}
-const textarea = () => { const el: any = bodyEl.value?.$el ?? bodyEl.value; return (el?.tagName === 'TEXTAREA' ? el : el?.querySelector?.('textarea')) as HTMLTextAreaElement | undefined }
-function focusBody() { textarea()?.focus() }
-function insertField(key: string) {
-  const tag = `{{${key}}}`
-  const ta = textarea()
-  if (ta && typeof ta.selectionStart === 'number') {
-    const s = ta.selectionStart, e = ta.selectionEnd
-    form.value.body = form.value.body.slice(0, s) + tag + form.value.body.slice(e)
-    nextTick(() => { ta.focus(); ta.setSelectionRange(s + tag.length, s + tag.length) })
-  } else form.value.body += tag
 }
 
 // ─── The email, rendered by the server exactly like the send ───
@@ -144,13 +117,13 @@ const previewError = ref('')
 /** The raw subject the current preview was rendered from (so a stale one is never shown as the subject). */
 const previewedSubject = ref<string | null>(null)
 function payload() {
-  const t = form.value.templateId !== NONE
+  const t = !!template.value
   return {
     contactId: form.value.contactId === OTHER || form.value.contactId === NONE ? null : form.value.contactId,
     to: toEmail.value,
     subject: form.value.subject,
-    // Designed HTML is sent as it is; a text template goes out with its own wording unless the rep rewrote it.
-    body: writing.value ? form.value.body : (version.value?.format === 'html' ? '' : (version.value?.body || '')),
+    // The body is never typed here: designed HTML is sent as it is, a text template with its own wording.
+    body: version.value?.format === 'html' ? '' : (version.value?.body || ''),
     templateId: t ? form.value.templateId : null,
     templateVersion: t ? form.value.templateVersion : null,
     subjectVariant: !t || subjectIsCustom.value ? null : form.value.subjectVariant,
@@ -173,12 +146,12 @@ async function loadPreview() {
     if (n === seq) previewError.value = e?.data?.statusMessage || 'The email could not be loaded — check the connection and try again.'
   } finally { if (n === seq) previewing.value = false }
 }
-const previewKey = computed(() => JSON.stringify([form.value.contactId, toEmail.value, form.value.templateId, form.value.templateVersion, form.value.subject, writing.value, writing.value ? form.value.body : '', form.value.followUpOf]))
+const previewKey = computed(() => JSON.stringify([form.value.contactId, toEmail.value, form.value.templateId, form.value.templateVersion, form.value.subject, form.value.followUpOf]))
 watch(previewKey, () => {
   if (booting || !isOpen.value) return
   if (timer) clearTimeout(timer)
   // Typing waits for a pause; a choice (template, contact) refreshes right away.
-  timer = setTimeout(loadPreview, writing.value || subjectEdited.value ? 450 : 40)
+  timer = setTimeout(loadPreview, subjectEdited.value ? 450 : 40)
 })
 onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
 
@@ -195,8 +168,7 @@ const subjectShown = computed({
 const subjectFilling = computed(() => !subjectEdited.value && hasFields(form.value.subject) && !subjectResolved.value && !previewError.value)
 const previewHtml = computed(() => {
   const p = preview.value
-  // An empty note has nothing to show yet (the server would fall back to the template's design).
-  if (!p?.html || (writing.value && !form.value.body.trim())) return ''
+  if (!p?.html || !template.value) return ''
   return p.format === 'html' ? p.html : `<div style="padding:24px 24px 10px">${p.html}</div>`
 })
 const fromLine = computed(() => preview.value?.from || { name: config.value?.fromBrand || 'ZRZ OPS', email: config.value?.fromEmail || '' })
@@ -217,8 +189,9 @@ watch(isOpen, async (o) => {
   booting = true
   errors.value = {}; sendError.value = ''; previewError.value = ''
   preview.value = null; previewedSubject.value = null
-  writing.value = false; subjectEdited.value = false; showVariants.value = false
-  try { await loadLibrary(true) } catch { toast.error('Could not load templates') }
+  subjectEdited.value = false; showVariants.value = false
+  libraryLoaded.value = false
+  try { await loadLibrary(true); libraryLoaded.value = true } catch { toast.error('Could not load the email templates', { description: 'Close this window and open it again.' }) }
   const primary = props.contacts.find(c => c.isActive && c.isPrimary && c.email) || emailable.value.find(c => c.isActive)
   form.value = { ...blank(), contactId: props.contactId || primary?.id || (emailable.value[0]?.id ?? OTHER) }
   if (props.followUpOf && !props.auditEmail) {
@@ -235,11 +208,9 @@ watch(isOpen, async (o) => {
   if (t) {
     form.value.subject = reSubject(t.first.subject)
     form.value.campaignId = t.first.campaignId || NONE
-    if (followUpTemplate.value) applyTemplate(followUpTemplate.value.id)
-    else writing.value = true
   }
-  else if (auditTemplate.value) applyTemplate(auditTemplate.value.id)
-  else writing.value = true
+  const start = (t ? followUpTemplate.value : null) || auditTemplate.value || activeTemplates.value[0] || null
+  if (start) applyTemplate(start.id)
   await nextTick()
   booting = false
   loadPreview()
@@ -256,18 +227,17 @@ watch(() => form.value.followUpOf, () => {
 const bounced = computed(() => contact.value && (contact.value as any).emailBouncedAt)
 // A complaint disappears as soon as the field it is about is fixed.
 watch(() => form.value.subject, (v) => { if (errors.value.subject && v.trim()) errors.value = { ...errors.value, subject: '' } })
-watch(() => form.value.body, (v) => { if (errors.value.body && v.trim()) errors.value = { ...errors.value, body: '' } })
 watch(toEmail, () => { if (errors.value.to) errors.value = { ...errors.value, to: '' } })
 
 function validate() {
   const e: Record<string, string> = {}
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toEmail.value)) e.to = 'Choose a contact with an email, or enter a valid address'
   if (!form.value.subject.trim()) e.subject = 'The subject line is empty'
-  if (writing.value && !form.value.body.trim()) e.body = 'Write the message, or pick a template'
+  if (!template.value) e.template = 'Choose the email to send'
   errors.value = e
   return !Object.values(e).some(Boolean)
 }
-const blocked = computed(() => sending.value || !!(config.value && !config.value.canSend) || noAudit.value)
+const blocked = computed(() => sending.value || !!(config.value && !config.value.canSend) || noAudit.value || (libraryLoaded.value && !activeTemplates.value.length))
 async function submit(allowDuplicate = false) {
   if (!props.dealership || noAudit.value || !validate()) return
   sending.value = true
@@ -345,13 +315,13 @@ function goCrawl() { isOpen.value = false; emit('crawl') }
           <div class="space-y-1.5 min-w-0">
             <Label class="flex items-center gap-1.5"><FileText class="size-3.5 text-muted-foreground" /> Email</Label>
             <Select :model-value="form.templateId" @update:model-value="(v: any) => applyTemplate(String(v))">
-              <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+              <SelectTrigger class="w-full" :aria-invalid="!!errors.template"><SelectValue placeholder="Choose the email" /></SelectTrigger>
               <SelectContent class="max-h-72">
                 <SelectItem v-for="t in activeTemplates" :key="t.id" :value="t.id">{{ t.name }}<span class="text-muted-foreground text-xs"> · {{ t.category }}</span></SelectItem>
                 <SelectItem v-if="template && !activeTemplates.some(t => t.id === template!.id)" :value="template.id">{{ template.name }}</SelectItem>
-                <SelectItem :value="NONE">Plain note — I'll write it</SelectItem>
               </SelectContent>
             </Select>
+            <p v-if="errors.template" class="text-xs text-destructive">{{ errors.template }}</p>
           </div>
           <div class="space-y-1.5 min-w-0">
             <Label class="flex items-center gap-1.5"><Megaphone class="size-3.5 text-muted-foreground" /> Campaign</Label>
@@ -416,20 +386,11 @@ function goCrawl() { isOpen.value = false; emit('crawl') }
           </div>
         </section>
 
-        <!-- Own words (plain note, or a template rewritten for this send) -->
-        <section v-if="writing" class="space-y-1.5">
-          <div class="flex items-center justify-between gap-2">
-            <Label for="em-body">Message <span class="text-destructive">*</span></Label>
-            <button v-if="version" type="button" class="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground" @click="useDesign"><RotateCcw class="size-3" /> Back to the {{ version.format === 'html' ? 'designed email' : 'template wording' }}</button>
-          </div>
-          <Textarea id="em-body" ref="bodyEl" v-model="form.body" rows="9" class="text-sm leading-relaxed" placeholder="Hi {{firstName}}, …" :aria-invalid="!!errors.body" />
-          <p v-if="errors.body" class="text-xs text-destructive">{{ errors.body }}</p>
-          <p v-if="version && form.body.trim() !== (version.body || '').trim()" class="text-[11px] text-amber-600">Your own wording for this send — still credited to {{ version.label || `V${version.version}` }}, flagged as edited.</p>
-          <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
-            <span class="text-[11px] text-muted-foreground inline-flex items-center gap-1 mr-1"><Braces class="size-3" /> Insert:</span>
-            <button v-for="f in EMAIL_MERGE_FIELDS" :key="f.key" type="button" class="rounded-full border bg-background px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted" @click="insertField(f.key)">{{ f.label }}</button>
-          </div>
-        </section>
+        <!-- No template to send -->
+        <div v-if="libraryLoaded && !activeTemplates.length" role="alert" class="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-3 text-sm flex items-start gap-3">
+          <AlertTriangle class="size-5 text-amber-600 shrink-0" />
+          <p><span class="font-semibold">No email template is active.</span> Emails are sent from templates — open Email → Templates and activate one (the inventory-audit email is called “Missing Photos”).</p>
+        </div>
 
         <!-- No audit to build the email from -->
         <div v-if="noAudit" role="alert" class="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-3 text-sm flex flex-wrap items-center gap-3">
@@ -441,7 +402,7 @@ function goCrawl() { isOpen.value = false; emit('crawl') }
         <!-- The email itself -->
         <section class="space-y-1.5">
           <div class="flex items-center justify-between gap-2 flex-wrap">
-            <p class="text-sm font-medium leading-none">{{ designed ? 'The email' : 'How it will arrive' }}</p>
+            <p class="text-sm font-medium leading-none">The email</p>
             <p v-if="designed" class="text-[11px] text-muted-foreground">Nothing to write — this is exactly what {{ contact?.firstName || 'the dealer' }} receives.<template v-if="auditDate && auditAgeDays !== null && auditAgeDays > 14"> <span class="text-amber-600">Numbers are {{ auditAgeDays }} days old ({{ auditDate }}).</span></template></p>
           </div>
           <p v-if="preview?.missing.length && !noAudit" class="text-[11px] text-amber-600 flex items-center gap-1"><AlertTriangle class="size-3 shrink-0" /> Nothing on file for: {{ preview.missing.map(fieldLabel).join(', ') }} — those spots stay empty.</p>
@@ -449,11 +410,7 @@ function goCrawl() { isOpen.value = false; emit('crawl') }
             <AlertTriangle class="size-4 shrink-0" /><span class="flex-1">{{ previewError }}</span>
             <Button type="button" size="sm" variant="outline" class="h-7 text-xs" @click="loadPreview">Try again</Button>
           </div>
-          <CrmEmailPreview v-model:device="device" :html="previewHtml" :subject="subjectResolved || preview?.subject || ''" :from="fromLine" :to="toLine" :loading="previewing">
-            <template #toolbar>
-              <Button v-if="designed" type="button" variant="ghost" size="sm" class="h-7 gap-1.5 text-xs" @click="writeOwnWords"><PencilLine class="size-3.5" /> Write my own words instead</Button>
-            </template>
-          </CrmEmailPreview>
+          <CrmEmailPreview v-model:device="device" :html="previewHtml" :subject="subjectResolved || preview?.subject || ''" :from="fromLine" :to="toLine" :loading="previewing" />
         </section>
 
         <p class="text-[11px] text-muted-foreground flex items-start gap-1.5"><Info class="size-3.5 shrink-0 mt-px" /> Logged to the relationship history as “Email sent”. A first email moves the dealership to Outreach Active; a reply moves it to Replied.</p>

@@ -505,7 +505,7 @@ const tabs = computed(() => [
     <CrmConvertDialog v-model:open="showConvert" :dealership="dealership" :contacts="contacts" @converted="refresh()" />
     <CrmAuditForm v-model:open="showAudit" :dealership="dealership" :previous="latestAudit" @saved="refresh()" />
     <ClientOnly><CrmInventoryScanner v-if="dealership" v-model:open="showScanner" :dealership="{ id, name: dealership.name, website: dealership.website }" @saved="refresh()" @email="openAuditEmail" /></ClientOnly>
-    <ClientOnly><CrmScannerReviewDialog v-if="dealership" v-model:open="showReview" :scan-id="latestScanId" :dealership-name="dealership.name" :audit-id="latestAudit ? String((latestAudit as any).id) : null" :audited-at="latestAudit?.auditedAt" @saved="refresh()" /></ClientOnly>
+    <ClientOnly><CrmScannerReviewDialog v-if="dealership" v-model:open="showReview" :scan-id="latestScanId" :dealership-name="dealership.name" :audit-id="latestAudit ? String((latestAudit as any).id) : null" :audited-at="latestAudit?.auditedAt" @saved="refresh()" :can-email="canEdit && !dealership.archivedAt" @email="showReview = false; openAuditEmail()" /></ClientOnly>
     <Dialog v-model:open="showPark">
       <DialogContent class="sm:max-w-md">
         <DialogHeader>
