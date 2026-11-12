@@ -122,7 +122,7 @@ function exportCsv() {
               <Button v-if="canEmail" size="sm" class="h-8 gap-1.5" @click="emit('email')"><Mail class="size-4" /> Email this audit</Button>
               <Button as="a" :href="emailPdfUrl" size="sm" variant="outline" class="h-8 gap-1.5"><FileDown class="size-4" /> Email PDF</Button>
             </template>
-            <span class="text-[11px] text-muted-foreground basis-full">Stored as it read on this date{{ idx < sorted.length - 1 ? ' — includes then vs now' : ' — the baseline' }}.{{ idx === 0 ? ' The email is built from this audit: subject, numbers and the flagged listings with their photos.' : sorted.length > 1 ? ' Emails always use the latest audit.' : '' }}</span>
+            <span class="text-[11px] text-muted-foreground basis-full">Stored as it read on this date.{{ idx === 0 ? ' The email is built from this audit: subject, numbers and the flagged listings with their photos.' : sorted.length > 1 ? ' Emails always use the latest audit.' : '' }}</span>
           </div>
           <div v-if="expanded.has(a.id)" class="px-4 py-4 grid grid-cols-1 lg:grid-cols-2 gap-5 text-sm">
             <div class="space-y-4">

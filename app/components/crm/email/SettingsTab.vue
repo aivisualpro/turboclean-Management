@@ -24,7 +24,7 @@ async function save() {
   try { form.value = await saveSenderProfile(form.value); toast.success('Sender profile saved') } catch (e: any) { toast.error(e?.data?.statusMessage || 'Could not save') } finally { saving.value = false }
 }
 // Reports & emails: where the "over time" chart appears (team-wide, saved on change).
-type ReportSettings = { historyChartInReport: boolean, historyChartInEmail: boolean, onePointPerDay: boolean }
+type ReportSettings = { historyInReport: boolean, historyChartInEmail: boolean, onePointPerDay: boolean }
 const rs = ref<ReportSettings | null>(null)
 const rsSaving = ref(false)
 onMounted(async () => { try { rs.value = (await $fetch<{ settings: ReportSettings }>('/api/crm/email/report-settings')).settings } catch {} })
@@ -37,7 +37,7 @@ async function setRs(k: keyof ReportSettings, v: boolean) {
   catch (e: any) { rs.value = { ...rs.value!, [k]: before }; toast.error(e?.data?.statusMessage || 'Could not save') } finally { rsSaving.value = false }
 }
 const RS_ROWS: { k: keyof ReportSettings, label: string, hint: string }[] = [
-  { k: 'historyChartInReport', label: 'Show the over-time chart in the PDF / dealer report', hint: '“Pre-owned listings without a real photo, over time” line chart.' },
+  { k: 'historyInReport', label: 'Show earlier reviews in the PDF / dealer report', hint: '“Then vs now”, the over-time chart and the review history table. Off → the report is about this review only.' },
   { k: 'historyChartInEmail', label: 'Show the over-time chart in emails', hint: 'The bars inside {{auditTrend}} and the {{auditHistoryChart}} block. Off → both are left out.' },
   { k: 'onePointPerDay', label: 'One point per day', hint: 'Several crawls on the same day count once (the last one) — no “Nov 6, Nov 6, Nov 6”.' },
 ]

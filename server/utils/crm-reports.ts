@@ -19,7 +19,7 @@ import { auditPages, shortPath } from './crm-email-blocks'
 export const REPORTS_COLLECTION = 'turboCleanCrmAuditReports'
 export const PDF_COLLECTION = 'turboCleanCrmPdfs'
 const AUDITS = 'turboCleanCrmAudits'
-export const REPORT_VERSION = 3
+export const REPORT_VERSION = 4
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -36,8 +36,14 @@ const FONT = `font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,
  * The chart sits between markers in stored reports and email blocks, so switching it off takes effect
  * immediately — also for reports already stored.
  */
-export interface ReportSettings { historyChartInReport: boolean, historyChartInEmail: boolean, onePointPerDay: boolean }
-export const REPORT_SETTINGS_DEFAULTS: ReportSettings = { historyChartInReport: true, historyChartInEmail: true, onePointPerDay: true }
+export interface ReportSettings {
+  /** The report shows earlier reviews too: "Then vs now", the over-time chart, the review history table. Off = this review only. */
+  historyInReport: boolean
+  historyChartInEmail: boolean, onePointPerDay: boolean
+}
+// History is off unless someone switches it on (Email → Settings): a report is about what the site shows today.
+// (An older "historyChartInReport" switch that may still be stored is ignored on purpose.)
+export const REPORT_SETTINGS_DEFAULTS: ReportSettings = { historyInReport: false, historyChartInEmail: true, onePointPerDay: true }
 const SETTINGS = 'turboCleanCrmSettings'
 export async function getReportSettings(db: Db): Promise<ReportSettings> {
   try {
@@ -55,7 +61,7 @@ const HISTORY_OPEN = '<!--zrz-history-->', HISTORY_CLOSE = '<!--/zrz-history-->'
 /** Remove the over-time chart (between the markers) from a report or an email block. */
 export const stripHistory = (html: string) => String(html || '').replace(/<!--zrz-history-->[\s\S]*?<!--\/zrz-history-->/g, '')
 /** Apply the settings to a stored report before it is shown or printed. */
-export const applyReportSettings = (html: string, s: ReportSettings) => s.historyChartInReport ? html : stripHistory(html)
+export const applyReportSettings = (html: string, s: ReportSettings) => s.historyInReport ? html : stripHistory(html)
 /** Several reviews on the same day (re-crawls) → keep the last one of each day, so the chart shows days, not attempts. */
 export function onePerDay<T extends { auditedAt: string }>(history: T[]): T[] {
   const byDay = new Map<string, T>()
@@ -233,8 +239,10 @@ const icon = (name: string, cls = 'ic') => `<span class="${cls}"><svg viewBox="0
  *   5. How ZRZ OPS helps — pain point vs response, the 4-step flow, daily accountability, the outcome
  * Every page is exactly one sheet (fixed footer with "page / total"); nothing runs into the footer.
  */
-export function buildReportHtml(o: { dealership: any, audit: any, history: any[], sender: { name: string, company: string, email: string, phone: string }, onePointPerDay?: boolean }) {
-  const { dealership: d, audit: a, history, sender } = o
+export function buildReportHtml(o: { dealership: any, audit: any, history: any[], sender: { name: string, company: string, email: string, phone: string }, onePointPerDay?: boolean, /** Include earlier reviews (then vs now, over-time chart, review history). Default: this review only. */ withHistory?: boolean }) {
+  const { dealership: d, audit: a, sender } = o
+  // Without history the report is built as if this were the only review — no comparison of any kind.
+  const history = o.withHistory ? o.history : o.history.filter(x => String(x._id ?? x.id) === String(a._id ?? a.id))
   const name = esc(d.name || 'Your dealership')
   const NAME = esc(String(d.name || 'Your dealership').toUpperCase())
   const base = pickBaseline(history, a)
@@ -483,33 +491,43 @@ async function senderFor(db: Db, audit: any) {
   } catch { return { name: '', company: 'ZRZ OPS', email: process.env.CRM_FROM_EMAIL || '', phone: '' } }
 }
 
-/** Render + store the report for an audit (once). Called when an audit is recorded. */
+/**
+ * Render + store the report for an audit. Called when an audit is recorded; a stored report is
+ * reused as long as it was built by the current report design and with the current "history" setting.
+ */
 export async function snapshotAuditReport(db: Db, dealership: any, audit: any) {
   const col = db.collection(REPORTS_COLLECTION)
   const auditId = String(audit._id ?? audit.id)
+  const settings = await getReportSettings(db)
   const existing = await col.findOne({ auditId })
-  if (existing) return existing
+  if (existing && !reportIsStale(existing, settings)) return existing
   const history = await auditHistory(db, String(dealership._id), audit.auditedAt)
   if (!history.some(h => String(h._id) === auditId)) history.push(audit)
-  const html = buildReportHtml({ dealership, audit, history, sender: await senderFor(db, audit), onePointPerDay: (await getReportSettings(db)).onePointPerDay })
-  const base = pickBaseline(history, audit)
+  const html = buildReportHtml({ dealership, audit, history, sender: await senderFor(db, audit), onePointPerDay: settings.onePointPerDay, withHistory: settings.historyInReport })
+  const base = settings.historyInReport ? pickBaseline(history, audit) : null
+  const now = new Date().toISOString()
   const doc = {
-    auditId, dealershipId: String(dealership._id), dealershipName: dealership.name || '', auditedAt: audit.auditedAt,
-    version: REPORT_VERSION, html, sha256: sha(html), createdAt: new Date().toISOString(),
+    dealershipId: String(dealership._id), dealershipName: dealership.name || '', auditedAt: audit.auditedAt,
+    version: REPORT_VERSION, withHistory: settings.historyInReport, html, sha256: sha(html), builtAt: now,
     data: { totalVehicles: audit.totalVehicles, totalMissingPhotos: audit.totalMissingPhotos, usedTotal: audit.usedTotal, usedMissingPhotos: audit.usedMissingPhotos, usedMissingPhotoPct: audit.usedMissingPhotoPct, baselineAuditId: base ? String(base._id ?? base.id) : null, baselineDate: base?.auditedAt || null, auditsInHistory: history.length },
   }
-  await col.updateOne({ auditId }, { $setOnInsert: doc }, { upsert: true })
+  await col.updateOne({ auditId }, { $set: doc, $setOnInsert: { auditId, createdAt: now } }, { upsert: true })
   return col.findOne({ auditId })
 }
+/** A stored report from an older design, or built with the other "history" setting, is rebuilt from its audit. */
+const reportIsStale = (r: any, s: ReportSettings) => Number(r?.version) !== REPORT_VERSION || !!r?.withHistory !== s.historyInReport
 
 export async function getAuditReport(db: Db, auditId: string) {
   if (!ObjectId.isValid(auditId)) throw createError({ statusCode: 400, statusMessage: 'Invalid report' })
   const found = await db.collection(REPORTS_COLLECTION).findOne({ auditId })
-  if (found) return found
+  if (found && !reportIsStale(found, await getReportSettings(db))) return found
   const audit = await db.collection(AUDITS).findOne({ _id: new ObjectId(auditId) })
-  if (!audit) throw createError({ statusCode: 404, statusMessage: 'Report not found' })
-  const dealership = await db.collection(CRM_COLLECTIONS.dealerships).findOne({ _id: new ObjectId(audit.dealershipId) })
-  if (!dealership) throw createError({ statusCode: 404, statusMessage: 'Dealership not found' })
+  const dealership = audit ? await db.collection(CRM_COLLECTIONS.dealerships).findOne({ _id: new ObjectId(audit.dealershipId) }) : null
+  // The audit (or its dealership) is gone: the stored report is all there is — show it as it is.
+  if (!audit || !dealership) {
+    if (found) return found
+    throw createError({ statusCode: 404, statusMessage: audit ? 'Dealership not found' : 'Report not found' })
+  }
   return snapshotAuditReport(db, dealership, audit)
 }
 
