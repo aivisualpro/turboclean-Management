@@ -204,3 +204,63 @@ export async function reviseAudit(db: Db, dealership: any, auditId: string, body
   } catch (e) { console.error('[CRM] audit report rebuild failed:', (e as Error).message) }
   return serializeAudit({ ...before, ...fields, revisedAt: revision.at })
 }
+
+// ───────────────────────── Delete / restore an audit ─────────────────────────
+const DELETIONS = 'turboCleanCrmDeletions'
+const INTERACTIONS = 'turboCleanCrmInteractions'
+const AUDIT_REPORTS = 'turboCleanCrmAuditReports'
+const dayOf = (iso: unknown) => { const d = new Date(String(iso || '')); return Number.isNaN(d.getTime()) ? 'unknown date' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) }
+/** The dealership's "last audit" date follows the audits that are left. */
+async function refreshLastAudit(db: Db, dealershipId: string) {
+  if (!ObjectId.isValid(dealershipId)) return
+  const left = await db.collection(AUDIT_COLLECTION).find({ dealershipId }, { projection: { auditedAt: 1 } }).sort({ auditedAt: -1 }).limit(1).toArray()
+  await db.collection(CRM_COLLECTIONS.dealerships).updateOne({ _id: new ObjectId(dealershipId) }, { $set: { lastAuditAt: left[0]?.auditedAt || null, updatedAt: new Date().toISOString() } })
+}
+
+/**
+ * Delete one audit (a wrong crawl, a test). Goes with it: its stored report and the "research
+ * completed" entry it left in the relationship history; the crawl it came from is no longer marked
+ * as saved. Emails already sent stay. A copy is kept for 30 days — `restoreAudit` puts it all back.
+ */
+export async function deleteAudit(db: Db, auditId: string, session: any) {
+  if (!ObjectId.isValid(auditId)) throw createError({ statusCode: 400, statusMessage: 'Invalid audit' })
+  const col = db.collection(AUDIT_COLLECTION)
+  const audit = await col.findOne({ _id: new ObjectId(auditId) })
+  if (!audit) throw createError({ statusCode: 404, statusMessage: 'Audit not found — it may already be deleted' })
+  const actor = actorFromSession(session)
+  const dealershipId = String(audit.dealershipId)
+  const [report, interactions] = await Promise.all([
+    db.collection(AUDIT_REPORTS).findOne({ auditId }),
+    db.collection(INTERACTIONS).find({ 'refs.auditId': auditId }).toArray(),
+  ])
+  const undoToken = new ObjectId().toString()
+  const now = new Date().toISOString()
+  await db.collection(DELETIONS).insertOne({ kind: 'audit', undoToken, auditId, dealershipId, name: `Audit of ${dayOf(audit.auditedAt)}`, snapshot: { audit, report, interactions }, deletedAt: now, deletedBy: actor, restoredAt: null })
+  await col.deleteOne({ _id: audit._id })
+  await db.collection(AUDIT_REPORTS).deleteOne({ auditId })
+  if (interactions.length) await db.collection(INTERACTIONS).deleteMany({ 'refs.auditId': auditId })
+  // The crawl behind it can be reviewed and saved again.
+  await db.collection('turboCleanScannerScans').updateMany({ auditId }, { $set: { auditId: null, status: 'done' } }).catch(() => {})
+  await refreshLastAudit(db, dealershipId)
+  await logActivity(db, {
+    dealershipId, type: 'audit.recorded', actor,
+    message: `Inventory audit of ${dayOf(audit.auditedAt)} deleted — it showed ${audit.totalMissingPhotos ?? 0} of ${audit.totalVehicles ?? 0} vehicles without a photo`,
+    changes: { 'Missing photos': { from: audit.totalMissingPhotos ?? null, to: null } },
+  }).catch(() => {})
+  return { ok: true, undoToken, auditedAt: audit.auditedAt, remaining: await col.countDocuments({ dealershipId }) }
+}
+
+/** Put a deleted audit back (with its report and history entry). */
+export async function restoreAudit(db: Db, undoToken: string, session: any) {
+  const del = await db.collection(DELETIONS).findOne({ kind: 'audit', undoToken: String(undoToken || ''), restoredAt: null })
+  if (!del?.snapshot?.audit) throw createError({ statusCode: 404, statusMessage: 'Nothing to restore' })
+  const { audit, report, interactions } = del.snapshot
+  const col = db.collection(AUDIT_COLLECTION)
+  if (!(await col.findOne({ _id: audit._id }))) await col.insertOne(audit)
+  if (report && !(await db.collection(AUDIT_REPORTS).findOne({ auditId: del.auditId }))) await db.collection(AUDIT_REPORTS).insertOne(report)
+  for (const i of interactions || []) if (!(await db.collection(INTERACTIONS).findOne({ _id: i._id }))) await db.collection(INTERACTIONS).insertOne(i)
+  await db.collection(DELETIONS).updateOne({ _id: del._id }, { $set: { restoredAt: new Date().toISOString(), restoredBy: actorFromSession(session) } })
+  await refreshLastAudit(db, String(del.dealershipId))
+  await logActivity(db, { dealershipId: String(del.dealershipId), type: 'audit.recorded', actor: actorFromSession(session), message: `Inventory audit of ${dayOf(audit.auditedAt)} restored` }).catch(() => {})
+  return { ok: true, audit: serializeAudit(audit) }
+}

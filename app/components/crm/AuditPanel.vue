@@ -1,14 +1,38 @@
 <script setup lang="ts">
 import type { CrmAudit, CrmDealership } from '~/composables/useCrmDealerships'
-import { ClipboardCheck, Plus, Car, ImageOff, Camera, TrendingUp, TrendingDown, Minus, ChevronDown, ExternalLink, Bot, User, FileDown, Link2, FileBarChart, Mail } from 'lucide-vue-next'
+import { ClipboardCheck, Plus, Car, ImageOff, Camera, TrendingUp, TrendingDown, Minus, ChevronDown, ExternalLink, Bot, User, FileDown, Link2, FileBarChart, Mail, Trash2, Loader2 } from 'lucide-vue-next'
+import { toast } from 'vue-sonner'
 import { format, formatDistanceToNow } from 'date-fns'
 
 const props = defineProps<{
   dealership: CrmDealership, audits: CrmAudit[], canEdit: boolean
   /** The signed-in user may email this dealership (not archived, edit rights). */
   canEmail?: boolean
+  /** The signed-in user may delete audits (a wrong crawl, a test). */
+  canDelete?: boolean
 }>()
-const emit = defineEmits<{ record: [], email: [] }>()
+const emit = defineEmits<{ record: [], email: [], changed: [] }>()
+
+// ─── Delete an audit (asked first; can be undone) ───
+const toDelete = ref<CrmAudit | null>(null)
+const deleteOpen = ref(false)
+const deleting = ref(false)
+function askDelete(a: CrmAudit) { toDelete.value = a; deleteOpen.value = true }
+async function undoDelete(token: string) {
+  try { await $fetch('/api/crm/audits/restore', { method: 'POST', body: { undoToken: token } }); toast.success('Audit restored'); emit('changed') }
+  catch (e: any) { toast.error('Could not restore the audit', { description: e?.data?.statusMessage || 'Try again.' }) }
+}
+async function confirmDelete() {
+  const a = toDelete.value
+  if (!a || deleting.value) return
+  deleting.value = true
+  try {
+    const r = await $fetch<{ undoToken: string }>(`/api/crm/audits/${a.id}`, { method: 'DELETE' })
+    deleteOpen.value = false
+    emit('changed')
+    toast.success(`Audit of ${format(new Date(a.auditedAt), 'MMM d, yyyy')} deleted`, { description: 'Its report is gone too. Emails already sent are kept.', duration: 15_000, action: { label: 'Undo', onClick: () => undoDelete(r.undoToken) } })
+  } catch (e: any) { toast.error('The audit was not deleted', { description: e?.data?.statusMessage || 'Try again.' }) } finally { deleting.value = false }
+}
 /** The audit email as a PDF (nothing is sent) — to print or hand over. It is always built from the latest audit. */
 const emailPdfUrl = computed(() => `/api/crm/dealerships/${props.dealership.id}/emails/pdf?templateId=audit&download=1`)
 
@@ -122,6 +146,7 @@ function exportCsv() {
               <Button v-if="canEmail" size="sm" class="h-8 gap-1.5" @click="emit('email')"><Mail class="size-4" /> Email this audit</Button>
               <Button as="a" :href="emailPdfUrl" size="sm" variant="outline" class="h-8 gap-1.5"><FileDown class="size-4" /> Email PDF</Button>
             </template>
+            <Button v-if="canDelete" size="sm" variant="ghost" class="h-8 gap-1.5 ml-auto text-rose-600 hover:text-rose-700 hover:bg-rose-500/10 dark:text-rose-400" @click="askDelete(a)"><Trash2 class="size-4" /> Delete audit</Button>
             <span class="text-[11px] text-muted-foreground basis-full">Stored as it read on this date.{{ idx === 0 ? ' The email is built from this audit: subject, numbers and the flagged listings with their photos.' : sorted.length > 1 ? ' Emails always use the latest audit.' : '' }}</span>
           </div>
           <div v-if="expanded.has(a.id)" class="px-4 py-4 grid grid-cols-1 lg:grid-cols-2 gap-5 text-sm">
@@ -161,6 +186,27 @@ function exportCsv() {
         </article>
       </section>
     </template>
+    <!-- Delete an audit -->
+    <Dialog v-model:open="deleteOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <div class="flex items-start gap-3">
+            <div class="size-10 shrink-0 rounded-xl bg-rose-500/10 flex items-center justify-center"><Trash2 class="size-5 text-rose-600" /></div>
+            <div class="min-w-0">
+              <DialogTitle class="text-base">Delete this audit?</DialogTitle>
+              <DialogDescription v-if="toDelete" class="text-xs mt-1">
+                <b class="text-foreground">{{ format(new Date(toDelete.auditedAt), 'EEE, MMM d, yyyy') }}</b> — {{ toDelete.totalMissingPhotos }} of {{ toDelete.totalVehicles }} vehicles without a photo ({{ toDelete.missingPhotoPct ?? '—' }}%).
+              </DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+        <p class="text-sm text-muted-foreground">It disappears from this dealership's history and trend, together with its report and the “research completed” line it added. Emails already sent stay as they are. You can undo this right after.</p>
+        <DialogFooter>
+          <Button variant="ghost" :disabled="deleting" @click="deleteOpen = false">Cancel</Button>
+          <Button variant="destructive" class="gap-1.5 min-w-32" :disabled="deleting" @click="confirmDelete"><Loader2 v-if="deleting" class="size-4 animate-spin" /><Trash2 v-else class="size-4" /> Delete audit</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <CrmAuditReport v-model:open="reportOpen" :audit-id="reportFor?.id || null" :audited-at="reportFor?.auditedAt" :dealership-name="dealership.name" :can-email="!!canEmail && !!latest && reportFor?.id === latest.id" @email="reportOpen = false; emit('email')" />
   </div>
 </template>

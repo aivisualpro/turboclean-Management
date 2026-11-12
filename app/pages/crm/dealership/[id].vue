@@ -468,7 +468,7 @@ const tabs = computed(() => [
 
         <!-- ═══ AUDITS ═══ -->
         <div v-else-if="tab === 'audits'" class="max-w-5xl">
-          <CrmAuditPanel :dealership="dealership" :audits="audits" :can-edit="canEdit" :can-email="canEdit && !dealership.archivedAt" @record="showAudit = true" @email="openAuditEmail" />
+          <CrmAuditPanel :dealership="dealership" :audits="audits" :can-edit="canEdit" :can-email="canEdit && !dealership.archivedAt" :can-delete="canDelete" @record="showAudit = true" @email="openAuditEmail" @changed="refresh()" />
         </div>
 
         <!-- ═══ EMAILS ═══ -->
