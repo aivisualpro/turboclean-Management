@@ -98,7 +98,7 @@ export async function emailDb(db: Db) {
       e.createIndex({ toEmail: 1, sentAt: -1 }),
       e.createIndex({ campaignId: 1 }), e.createIndex({ templateId: 1, templateVersion: 1 }),
     ]).catch(err => console.warn('[CRM email] index creation skipped:', err?.message))
-    seedDefaultTemplates(db).catch(err => console.warn('[CRM email] template seed skipped:', err?.message))
+    void seedOnce(db)
   }
   return {
     emails: db.collection(EMAIL_COLLECTIONS.emails),
@@ -307,7 +307,11 @@ async function templateUsage(db: Db, templateIds: string[]) {
   return out
 }
 
+let _seeding: Promise<void> | null = null
+/** The built-in templates are in place before anything lists or picks one (once per server instance). */
+function seedOnce(db: Db) { return (_seeding ||= seedDefaultTemplates(db).catch((err) => { _seeding = null; console.warn('[CRM email] template seed skipped:', err?.message) })) }
 export async function listTemplates(db: Db, includeArchived = false) {
+  await seedOnce(db)
   const { templates } = await emailDb(db)
   const rows = await templates.find(includeArchived ? {} : { archivedAt: null }).sort({ category: 1, name: 1 }).toArray()
   const usage = await templateUsage(db, rows.map(r => r._id.toString()))
@@ -484,6 +488,44 @@ export interface SendInput {
 /** Days within which the same template / subject to the same address counts as a duplicate send. */
 export const DUPLICATE_EMAIL_DAYS = 7
 
+/**
+ * An audit saved before listing pictures were kept has none, so its email could only list the
+ * flagged vehicles as text. The crawl it came from still knows which photo every listing showed:
+ * take the photo addresses from there (once — they are written back to the audit), so the email
+ * shows the listings pictured. Nothing changes when the crawl is gone or the audit was typed in.
+ */
+export async function fillAuditPictures(db: Db, audit: any): Promise<boolean> {
+  const examples: any[] = Array.isArray(audit?.examples) ? audit.examples : []
+  if (!examples.length || audit.picturesFilledAt || examples.some(e => e?.imageFileId || e?.imageUrl)) return false
+  const runId = String(audit.collector?.runId || '')
+  const auditId = audit._id?.toString?.() || ''
+  // The crawl that produced this audit (its id is on the audit; older ones are linked from the crawl's side).
+  const by: any[] = [...(ObjectId.isValid(runId) ? [{ _id: new ObjectId(runId) }] : []), ...(auditId ? [{ auditId }] : [])]
+  const scan = by.length ? await db.collection('turboCleanScannerScans').findOne({ $or: by }, { projection: { 'vehicles.url': 1, 'vehicles.image': 1, 'vehicles.imageId': 1, 'images.id': 1, 'images.w': 1, 'images.h': 1 } }) : null
+  const now = new Date().toISOString()
+  let filled = 0
+  if (scan) {
+    const sizes = new Map<string, any>((scan.images || []).map((i: any) => [String(i.id), i]))
+    const byUrl = new Map<string, any>((scan.vehicles || []).filter((v: any) => v?.url).map((v: any) => [String(v.url), v]))
+    for (const e of examples) {
+      const v = byUrl.get(String(e?.url || ''))
+      const url = String(v?.image?.url || '')
+      if (!/^https:\/\//i.test(url) || url.length > 1000) continue
+      const img = v.imageId ? sizes.get(String(v.imageId)) : null
+      const w = Number(img?.w ?? v.image?.nw) || 0, h = Number(img?.h ?? v.image?.nh) || 0
+      // A tracking pixel or a tiny spacer is not a picture.
+      if (w && h && (w < 80 || h < 60)) continue
+      e.imageUrl = url
+      if (w && h) { e.imageW = w; e.imageH = h }
+      filled++
+    }
+  }
+  // Remember that this audit was looked at, so the crawl is not searched again on every preview.
+  await db.collection('turboCleanCrmAudits').updateOne({ _id: audit._id }, { $set: { ...(filled ? { examples } : {}), picturesFilledAt: now } })
+  audit.picturesFilledAt = now
+  return filled > 0
+}
+
 /** Everything the merge needs for one recipient. */
 export async function mergeContext(db: Db, dealership: any, contact: any, actor: SessionActor | null, extra: { replyTo?: string, subject?: string } = {}) {
   const [sender, recent] = await Promise.all([
@@ -491,6 +533,7 @@ export async function mergeContext(db: Db, dealership: any, contact: any, actor:
     db.collection('turboCleanCrmAudits').find({ dealershipId: dealership._id.toString() }).sort({ auditedAt: -1, createdAt: -1 }).limit(24).toArray(),
   ])
   const audit = recent[0] || null
+  if (audit) await fillAuditPictures(db, audit).catch(() => {})
   const history = [...recent].reverse()
   const rs = await getReportSettings(db)
   const vars = applyEmailChartSetting(mergeVars(dealership, contact, sender, audit, { ...extra, history, reportUrl: audit ? auditReportUrl(audit._id.toString()) : '', onePerDay: rs.onePointPerDay }), rs)
@@ -1468,6 +1511,40 @@ export async function seedDefaultTemplates(db: Db) {
   await seedThenVsNow(db)
   await seedMissingPhotosV3(db)
   await seedMissingPhotosV4(db)
+  await seedMissingPhotosV5(db)
+}
+/**
+ * V5 of "Missing Photos": the V4 email laid out for a desktop inbox — a fluid column up to 820px
+ * instead of a fixed 600px strip, larger type, bigger listing photos, and the middle tile reads
+ * "Listings flagged for missing photos". Added once as the new active version (same subject line).
+ */
+async function seedMissingPhotosV5(db: Db) {
+  const counters = db.collection(CRM_COLLECTIONS.counters)
+  const flag = await counters.findOne({ _id: 'crmEmailSeedV5' as any })
+  if (flag?.done) return
+  // A run that was cut off (the server was stopped mid-way) left its claim behind: take it over after two minutes.
+  const stale = !!flag?.startedAt && Date.now() - new Date(flag.startedAt).getTime() > 120_000
+  const claim = stale
+    ? await counters.updateOne({ _id: 'crmEmailSeedV5' as any, startedAt: flag!.startedAt, done: { $ne: true } }, { $set: { startedAt: new Date().toISOString() } }).catch(() => null)
+    : await counters.updateOne({ _id: 'crmEmailSeedV5' as any, startedAt: { $exists: false } }, { $set: { startedAt: new Date().toISOString() } }, { upsert: true }).catch(() => null)
+  if (!claim || (!claim.upsertedCount && !claim.modifiedCount)) return
+  try {
+    const { templates } = await emailDb(db)
+    const { MISSING_PHOTOS_HTML_V5 } = await import('./crm-email-seed')
+    const note = 'Inventory audit email — wide desktop layout (fluid up to 820px), larger listing photos, “flagged for missing photos”'
+    const existing = await templates.findOne({ name: 'Missing Photos' })
+    // (a fresh install was created on this design already)
+    if (existing && !normalizeTemplate(existing).versions.some((v: any) => v.note === note || v.html === MISSING_PHOTOS_HTML_V5)) {
+      await updateTemplate(db, existing._id.toString(), {
+        newVersion: { format: 'html', html: MISSING_PHOTOS_HTML_V5, label: `V${Math.max(0, ...normalizeTemplate(existing).versions.map((v: any) => Number(v.version) || 0)) + 1}`, note, retireOthers: true },
+      }, null)
+    }
+    await counters.updateOne({ _id: 'crmEmailSeedV5' as any }, { $set: { done: true, finishedAt: new Date().toISOString() } })
+  }
+  catch (e: any) {
+    await counters.deleteOne({ _id: 'crmEmailSeedV5' as any }).catch(() => {})
+    throw e
+  }
 }
 /**
  * V4 of "Missing Photos": the inventory audit email in the look of the hand-sent "Westbrook Honda |

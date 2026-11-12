@@ -222,23 +222,24 @@ export const listingTitle = (t: string) => String(t || '').replace(/\s+/g, ' ').
 
 /** One listing as the dealer's own site shows it: its photo (or the empty space where one should be), title, price and what is wrong. */
 function galleryCard(e: any, assetBase: string) {
-  const BOX_W = 138, BOX_H = 98
+  // The picture area of a card at desktop width (three across in the 820px column); it shrinks with the card.
+  const BOX_W = 196, BOX_H = 140
   const p = e.title ? { title: e.title, verdict: e.verdict || 'missing' } : parseLabel(e.label)
   const src = e.imageFileId ? `${CRM_FILE_TOKEN}${e.imageFileId}` : e.imageSample ? `${assetBase}/email/samples/${e.imageSample}` : /^https:\/\//i.test(String(e.imageUrl || '')) ? String(e.imageUrl) : ''
   // Fit the picture inside the box without stretching it (its real size is known from the audit).
   const w0 = num(e.imageW) || 4, h0 = num(e.imageH) || 3
   const k = Math.min(BOX_W / w0, BOX_H / h0)
   const w = Math.max(1, Math.round(w0 * k)), h = Math.max(1, Math.round(h0 * k))
-  const title = cut(listingTitle(p.title) || 'Vehicle listing', 44)
+  const title = cut(listingTitle(p.title) || 'Vehicle listing', 52)
   const picture = src && p.verdict !== 'missing'
     ? `<img src="${esc(src)}" width="${w}" height="${h}" alt="${esc(`Photo shown on the listing: ${title}`)}" style="display:block;margin:0 auto;width:${w}px;max-width:100%;height:auto;border:0;outline:none;">`
     : `<div style="${GALLERY_FONT}font-size:10px;line-height:14px;font-weight:700;letter-spacing:1px;color:#7b8780;">NO PHOTO<br>ON THE LISTING</div>`
   return `<div class="gcard" style="display:inline-block;width:33.33%;min-width:132px;vertical-align:top;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:5px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;border:1px solid #dfe6e1;">
-            <tr><td height="110" align="center" valign="middle" style="height:110px;padding:6px;background:${src && p.verdict !== 'missing' ? '#ffffff' : '#f1f4f2'};text-align:center;"><a href="${esc(e.url)}" style="text-decoration:none;">${picture}</a></td></tr>
-            <tr><td style="padding:8px 9px 0;border-top:1px solid #edf0ee;"><div style="${GALLERY_FONT}height:32px;overflow:hidden;font-size:12px;line-height:16px;font-weight:700;color:#111111;"><a href="${esc(e.url)}" style="color:#111111;text-decoration:none;">${esc(title)}</a></div></td></tr>
-            <tr><td style="padding:5px 9px 9px;"><div style="${GALLERY_FONT}height:16px;overflow:hidden;font-size:11px;line-height:16px;color:#56645c;">${e.price ? `<span style="color:#111111;font-weight:700;">${esc(e.price)}</span>` : (e.stock ? `Stock #${esc(cut(e.stock, 12))}` : '&nbsp;')}</div>
+            <tr><td class="gpic" height="152" align="center" valign="middle" style="height:152px;padding:6px;background:${src && p.verdict !== 'missing' ? '#ffffff' : '#f1f4f2'};text-align:center;"><a href="${esc(e.url)}" style="text-decoration:none;">${picture}</a></td></tr>
+            <tr><td style="padding:8px 9px 0;border-top:1px solid #edf0ee;"><div style="${GALLERY_FONT}height:34px;overflow:hidden;font-size:13px;line-height:17px;font-weight:700;color:#111111;"><a href="${esc(e.url)}" style="color:#111111;text-decoration:none;">${esc(title)}</a></div></td></tr>
+            <tr><td style="padding:5px 9px 9px;"><div style="${GALLERY_FONT}height:17px;overflow:hidden;font-size:12px;line-height:17px;color:#56645c;">${e.price ? `<span style="color:#111111;font-weight:700;">${esc(e.price)}</span>` : (e.stock ? `Stock #${esc(cut(e.stock, 12))}` : '&nbsp;')}</div>
               <div style="${GALLERY_FONT}margin-top:5px;font-size:9px;line-height:12px;font-weight:700;letter-spacing:.9px;color:#8a4b00;"><span style="display:inline-block;padding:2px 6px;background:#fdf0d5;">${GALLERY_TAG[p.verdict] || GALLERY_TAG.missing}</span></div></td></tr>
           </table>
         </td></tr></table>
