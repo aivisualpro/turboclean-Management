@@ -24,6 +24,8 @@ export interface GridColumnDef<K extends string = string> {
   required?: boolean
 }
 
+export interface GridSort<K extends string = string> { key: K, dir: 'asc' | 'desc' }
+
 export interface GridLayoutState {
   v: 1
   /** Every column the layout knows, in display order (frozen columns first). */
@@ -32,6 +34,8 @@ export interface GridLayoutState {
   pinned: string[]
   /** Only the widths that differ from the column's default. */
   widths: Record<string, number>
+  /** The column the person last sorted by; null = the table's own default sort. */
+  sort: GridSort | null
   /** ms since epoch of the last change; 0 = never customised. The newest copy wins when syncing. */
   updatedAt: number
 }
@@ -59,6 +63,7 @@ export function defaultGridLayout(defs: readonly GridColumnDef[]): GridLayoutSta
     hidden: defs.filter(d => d.hidden && !d.required).map(d => d.key),
     pinned,
     widths: {},
+    sort: null,
     updatedAt: 0,
   }
 }
@@ -105,17 +110,25 @@ export function normalizeGridLayout(raw: unknown, defs: readonly GridColumnDef[]
     }
   }
   const pinnedList = order.filter(k => pinned.has(k))
+  // A remembered sort only counts while that column still exists and can be sorted.
+  const s = r.sort
+  const sort = s && typeof s === 'object' && byKey.get(s.key)?.sortable && (s.dir === 'asc' || s.dir === 'desc') ? { key: s.key, dir: s.dir } : null
   return {
     v: 1,
     order: pinnedFirst(order, pinnedList),
     hidden: order.filter(k => hidden.has(k)),
     pinned: pinnedList,
     widths,
+    sort,
     updatedAt: typeof r.updatedAt === 'number' && Number.isFinite(r.updatedAt) && r.updatedAt > 0 ? Math.floor(r.updatedAt) : 0,
   }
 }
 
-/** Same columns, order, visibility, frozen set and widths (the timestamp is ignored). */
+export function sameGridSort(a: GridSort | null | undefined, b: GridSort | null | undefined) {
+  return (!a && !b) || (!!a && !!b && a.key === b.key && a.dir === b.dir)
+}
+
+/** Same columns, order, visibility, frozen set and widths (the sort and the timestamp are ignored). */
 export function sameGridLayout(a: GridLayoutState, b: GridLayoutState) {
   const list = (x: string[], y: string[]) => x.length === y.length && x.every((k, i) => k === y[i])
   const set = (x: string[], y: string[]) => x.length === y.length && x.every(k => y.includes(k))

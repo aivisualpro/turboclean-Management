@@ -160,6 +160,7 @@ function exportCsv() {
                 </tbody>
               </table>
               <div v-if="a.poorPhotoSets !== null || a.poorPhotoSetsNotes" class="text-xs"><span class="text-muted-foreground">Poor photo sets:</span> <span class="font-medium">{{ a.poorPhotoSets ?? '—' }}</span><span v-if="a.poorPhotoSetsNotes" class="text-muted-foreground"> — {{ a.poorPhotoSetsNotes }}</span></div>
+              <div v-if="(a as any).photoBreakdown?.blurry" class="text-xs"><span class="inline-block size-2 rounded-full bg-amber-500 mr-1.5 align-middle" aria-hidden="true" /><span class="text-muted-foreground">Blurry photos:</span> <span class="font-medium tabular-nums">{{ (a as any).photoBreakdown.blurry }}</span><span class="text-muted-foreground"> — real photos that are out of focus; listed in the report, not counted as missing</span></div>
               <div v-if="a.inventoryUrl" class="text-xs flex items-center gap-1.5 min-w-0"><Link2 class="size-3.5 text-muted-foreground shrink-0" /><a :href="a.inventoryUrl" target="_blank" rel="noopener" class="text-primary hover:underline truncate">{{ a.inventoryUrl }}</a><ExternalLink class="size-3 opacity-50 shrink-0" /></div>
             </div>
             <div class="space-y-4">

@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import type { FinalVerdict, ImageGroup, ImageRule, PhotoVerdict, ScanResults, ScannedVehicle } from '~/composables/useInventoryScanner'
 import { VERDICT_META } from '~/composables/useInventoryScanner'
-import { ImageOff, Search, ExternalLink, Check, Brain, Layers, Trash2, Plus, Sparkles, ChevronDown, Info, ShieldCheck, Link2, Ban, AlertTriangle } from 'lucide-vue-next'
+import { ImageOff, Search, ExternalLink, Check, Brain, Layers, Trash2, Plus, Sparkles, ChevronDown, Info, ShieldCheck, Link2, Ban, AlertTriangle, X, MoreHorizontal, RotateCcw } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
-/** Review screen: KPIs, every vehicle with its photo verdict + reasons, repeated-image groups, saved rules. */
+/**
+ * Review screen: KPIs, every vehicle with its photo verdict + reasons, repeated-image groups, saved rules.
+ * Vehicles can be ticked (one, a few with Shift, or every one in the view) and marked in one go:
+ * Real photo · No photo · Stock image · Blurry photo.
+ */
 const props = defineProps<{
   results: ScanResults
   review: (body: any) => Promise<void>
@@ -16,9 +20,18 @@ const props = defineProps<{
 const r = computed(() => props.results)
 const s = computed(() => r.value.summary)
 const coverage = computed<{ checked: number, advertised: number | null, blocked: { url: string, page: number }[] } | null>(() => (r.value as any).coverage || null)
-const FINALS: FinalVerdict[] = ['real', 'placeholder', 'stock', 'missing']
+const FINALS: FinalVerdict[] = ['real', 'placeholder', 'stock', 'missing', 'blurry']
 /** What people choose from: a placeholder image means the car has no photo, so they are one choice. */
-const CHOICES: FinalVerdict[] = ['real', 'placeholder', 'stock']
+const CHOICES: FinalVerdict[] = ['real', 'placeholder', 'stock', 'blurry']
+const blurryCount = computed(() => s.value.by.blurry || 0)
+/** The AI photo check did not run on this crawl (switched off / no key): say so — the verdicts are the built-in checks only. */
+const aiOff = computed(() => {
+  const pc = r.value.photoCheck
+  if (!pc || pc.provider || !pc.off) return ''
+  return pc.off === 'switched-off' ? 'It is switched off on the server (the setting SCANNER_AI is “off”). Remove that setting in Vercel → Settings → Environment Variables and redeploy.'
+    : pc.off === 'no-key' ? 'The server has no AI key. Add ANTHROPIC_API_KEY (Claude) or GOOGLE_GEMINI_API_KEY in Vercel → Settings → Environment Variables and redeploy.'
+      : 'The AI service could not be reached during this crawl.'
+})
 const noPhoto = (f: FinalVerdict) => f === 'placeholder' || f === 'missing'
 const noPhotoCount = computed(() => s.value.by.placeholder + s.value.by.missing)
 
@@ -26,7 +39,7 @@ const noPhotoCount = computed(() => s.value.by.placeholder + s.value.by.missing)
 const segments = computed(() => {
   const total = s.value.total || 1
   let acc = 0
-  return (['missing', 'placeholder', 'stock', 'real'] as FinalVerdict[]).map((k) => {
+  return (['missing', 'placeholder', 'stock', 'blurry', 'real'] as FinalVerdict[]).map((k) => {
     const frac = (s.value.by[k] || 0) / total
     const seg = { k, frac, start: acc }
     acc += frac
@@ -52,6 +65,7 @@ const tiles = computed(() => [
   { k: 'real' as Filter, label: 'Real photo', n: s.value.by.real, dot: VERDICT_META.real.dot, hex: VERDICT_META.real.hex, sub: '' },
   { k: 'nophoto' as Filter, label: 'No photo', n: noPhotoCount.value, dot: VERDICT_META.missing.dot, hex: VERDICT_META.missing.hex, sub: `${s.value.by.placeholder} placeholder image${s.value.by.placeholder === 1 ? '' : 's'} · ${s.value.by.missing} with no image` },
   { k: 'stock' as Filter, label: 'Stock image', n: s.value.by.stock, dot: VERDICT_META.stock.dot, hex: VERDICT_META.stock.hex, sub: r.value.countStockAsMissing ? 'counted as no photo' : 'counted as photos' },
+  { k: 'blurry' as Filter, label: 'Blurry photo', n: blurryCount.value, dot: VERDICT_META.blurry.dot, hex: VERDICT_META.blurry.hex, sub: 'real, but out of focus · not counted as missing' },
 ])
 /** Advertisement / promo tile — shown under "Ads", never counted. */
 const isAdCard = (v: ScannedVehicle) => v.listing ? v.listing === 'ad' : !!v.adReason
@@ -85,6 +99,7 @@ const FILTERS = computed(() => [
   { k: 'real' as Filter, label: 'Real', n: s.value.by.real },
   { k: 'nophoto' as Filter, label: 'No photo', n: noPhotoCount.value },
   { k: 'stock' as Filter, label: 'Stock', n: s.value.by.stock },
+  { k: 'blurry' as Filter, label: 'Blurry', n: blurryCount.value },
   { k: 'review' as Filter, label: 'Needs review', n: s.value.review },
   ...(adCount.value ? [{ k: 'ads' as Filter, label: 'Ads (not counted)', n: adCount.value }] : []),
 ])
@@ -99,6 +114,69 @@ async function setVerdict(v: ScannedVehicle, verdict: FinalVerdict | null) {
   busy.value = true
   try { await props.review({ vehicles: [{ key: v.key, verdict }] }) } catch (e: any) { toast.error(e?.data?.statusMessage || 'Could not update') } finally { busy.value = false }
 }
+
+// ── Select several (or all) and mark them in one go ──
+const picked = ref<Set<string>>(new Set())
+const pickedList = computed(() => r.value.vehicles.filter(v => picked.value.has(v.key)))
+const pickedCount = computed(() => pickedList.value.length)
+const allPicked = computed(() => filtered.value.length > 0 && filtered.value.every(v => picked.value.has(v.key)))
+const somePicked = computed(() => filtered.value.some(v => picked.value.has(v.key)))
+const pickedHasChange = computed(() => pickedList.value.some(v => v.override))
+const pickedAds = computed(() => pickedList.value.filter(isAdCard).length)
+let lastPicked: string | null = null
+/** Tick / untick one vehicle; with Shift, everything between it and the last one ticked. */
+function togglePick(v: ScannedVehicle, e?: MouseEvent | KeyboardEvent) {
+  const next = new Set(picked.value)
+  const list = filtered.value
+  const a = e?.shiftKey && lastPicked ? list.findIndex(x => x.key === lastPicked) : -1
+  const b = list.findIndex(x => x.key === v.key)
+  if (a >= 0 && b >= 0 && a !== b) { for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(list[i]!.key) }
+  else if (next.has(v.key)) next.delete(v.key)
+  else next.add(v.key)
+  lastPicked = v.key
+  picked.value = next
+}
+/** Every vehicle in the current view (filter, page and search) — not only the ones scrolled into sight. */
+function pickAll(on: boolean) {
+  const next = new Set(picked.value)
+  for (const v of filtered.value) { if (on) next.add(v.key); else next.delete(v.key) }
+  picked.value = next
+}
+function clearPicked() { picked.value = new Set(); lastPicked = null }
+watch(() => r.value.scanId, clearPicked)
+const plural = (n: number) => `${n} vehicle${n === 1 ? '' : 's'}`
+async function markPicked(verdict: FinalVerdict | null) {
+  const list = pickedList.value
+  if (!list.length || busy.value) return
+  const before = list.map(v => ({ key: v.key, verdict: v.override }))
+  busy.value = true
+  try {
+    await props.review({ vehicles: list.map(v => ({ key: v.key, verdict })) })
+    clearPicked()
+    toast.success(verdict ? `${plural(list.length)} marked as “${VERDICT_META[verdict].label}”` : `${plural(list.length)} back to the scanner’s call`, {
+      description: verdict ? 'The numbers are updated. The scanner remembers these pictures on future crawls.' : undefined,
+      duration: 12_000,
+      action: { label: 'Undo', onClick: () => undoMark(before) },
+    })
+  } catch (e: any) { toast.error('Nothing was changed', { description: e?.data?.statusMessage || 'Try again.' }) } finally { busy.value = false }
+}
+async function undoMark(before: { key: string, verdict: FinalVerdict | null }[]) {
+  busy.value = true
+  try { await props.review({ vehicles: before }); toast(`Undone — ${plural(before.length)} back to how ${before.length === 1 ? 'it was' : 'they were'}`) }
+  catch (e: any) { toast.error('Could not undo', { description: e?.data?.statusMessage || 'Try again.' }) } finally { busy.value = false }
+}
+async function markPickedListing(ad: boolean) {
+  const list = pickedList.value
+  if (!list.length || busy.value) return
+  const before = list.map(v => ({ key: v.key, ad: v.listing === 'ad' ? true : v.listing === 'vehicle' ? false : null }))
+  busy.value = true
+  try {
+    await props.review({ listings: list.map(v => ({ key: v.key, ad })) })
+    clearPicked()
+    toast.success(ad ? `${plural(list.length)} left out — not counted` : `${plural(list.length)} counted again`, { duration: 12_000, action: { label: 'Undo', onClick: async () => { try { await props.review({ listings: before }); toast('Undone') } catch { toast.error('Could not undo') } } } })
+  } catch (e: any) { toast.error('Nothing was changed', { description: e?.data?.statusMessage || 'Try again.' }) } finally { busy.value = false }
+}
+
 async function acceptAllReview() {
   const list = r.value.vehicles.filter(v => v.verdict === 'review' && !v.override)
   if (!list.length) return
@@ -172,7 +250,8 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
 </script>
 
 <template>
-  <div class="flex flex-col h-full min-h-0">
+  <!-- Desktop: fixed frame, the vehicle list scrolls. Phone / tablet: the whole screen scrolls as one page. -->
+  <div class="flex flex-col h-full min-h-0 overflow-y-auto lg:overflow-hidden">
     <!-- KPI band -->
     <section class="shrink-0 grid grid-cols-1 xl:grid-cols-[minmax(0,330px)_minmax(0,1fr)_minmax(0,280px)] gap-2 p-2 border-b bg-muted/20">
       <div class="rounded-xl border bg-card p-3 flex items-center gap-4">
@@ -193,7 +272,7 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
           <p v-else-if="r.advertised" class="text-[11px] text-muted-foreground mt-1">Site lists {{ r.advertised }} · checked {{ s.total }} on {{ r.pages.length }} page{{ r.pages.length === 1 ? '' : 's' }}</p>
         </div>
       </div>
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-2">
         <button v-for="t in tiles" :key="t.k" type="button" class="rounded-xl border bg-card p-3 text-left hover:bg-muted/40 transition-colors" :class="filter === t.k && 'ring-2 ring-primary'" @click="filter = t.k">
           <div class="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground"><span class="size-2 rounded-full" :class="t.dot" /> {{ t.label }}</div>
           <p class="text-2xl font-bold tabular-nums mt-1">{{ t.n }}</p>
@@ -205,6 +284,7 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
         <p class="text-[11px] uppercase tracking-wider text-muted-foreground">What gets saved</p>
         <div class="flex justify-between"><span>Used</span><span class="tabular-nums"><b>{{ s.counts.usedMissingPhotos }}</b> / {{ s.counts.usedTotal }} · {{ s.usedPct ?? 0 }}%</span></div>
         <div class="flex justify-between"><span>New</span><span class="tabular-nums"><b>{{ s.counts.newMissingPhotos }}</b> / {{ s.counts.newTotal }} · {{ s.newPct ?? 0 }}%</span></div>
+        <div class="flex justify-between"><span>Blurry photos</span><span class="tabular-nums text-muted-foreground"><b class="text-foreground">{{ blurryCount }}</b> · listed separately</span></div>
         <label class="flex items-center justify-between gap-2 pt-1 border-t text-xs"><span>Count stock images as no photo</span><Switch :model-value="r.countStockAsMissing" :disabled="busy" @update:model-value="toggleStock" /></label>
       </div>
     </section>
@@ -214,13 +294,22 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
       <AlertTriangle class="size-5 text-rose-600 dark:text-rose-400 shrink-0 mt-px" />
       <p class="leading-snug"><span class="font-semibold">These numbers are not reliable.</span> {{ results.unreliable }}</p>
     </div>
+    <!-- The AI did not look at these photos: the verdicts are the built-in checks only -->
+    <div v-if="aiOff" role="status" class="shrink-0 border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs flex items-start gap-2">
+      <Sparkles class="size-4 text-amber-600 dark:text-amber-400 shrink-0 mt-px" />
+      <p class="leading-snug"><span class="font-semibold">The AI photo check did not run on this crawl</span> — photos were judged by the built-in checks only (file names, repeated pictures, sharpness), so expect more to correct by hand. {{ aiOff }}</p>
+    </div>
     <!-- Scope: the saved scan pages this crawl read — and nothing else -->
     <CrmScannerScopeReport v-if="scope.length" :rows="scope" class="shrink-0 border-b bg-card" />
 
-    <div class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <div class="lg:flex-1 lg:min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px]">
       <!-- Vehicles -->
       <section class="min-h-0 flex flex-col">
         <div class="shrink-0 flex flex-wrap items-center gap-2 p-2 border-b">
+          <label class="inline-flex h-8 items-center gap-2 rounded-lg border bg-card px-2.5 text-xs font-medium select-none transition-colors" :class="filtered.length ? 'cursor-pointer hover:bg-muted/50' : 'opacity-50 pointer-events-none'" title="Tick every vehicle in this view to mark them in one go. Tip: tick one, then Shift-click another to tick everything in between.">
+            <Checkbox :model-value="allPicked ? true : (somePicked ? 'indeterminate' : false)" :disabled="!filtered.length" aria-label="Select every vehicle in this view" @update:model-value="pickAll(!allPicked)" />
+            <span class="tabular-nums">{{ allPicked ? `All ${filtered.length} selected` : `Select all ${filtered.length}` }}</span>
+          </label>
           <div role="tablist" class="inline-flex flex-wrap rounded-lg border bg-muted/40 p-0.5">
             <button v-for="f in FILTERS" :key="f.k" type="button" role="tab" :aria-selected="filter === f.k" class="rounded-md px-2.5 py-1 text-xs font-medium inline-flex items-center gap-1.5 transition-colors" :class="filter === f.k ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'" @click="filter = f.k">
               {{ f.label }} <span class="tabular-nums opacity-70">{{ f.n }}</span>
@@ -229,7 +318,7 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
           <Button v-if="s.review" size="sm" variant="outline" class="h-7 text-xs gap-1" :disabled="busy" @click="acceptAllReview"><Check class="size-3.5" /> Accept {{ s.review }} suggestions</Button>
           <div class="ml-auto flex items-center gap-2">
             <Select v-model="cond"><SelectTrigger class="h-8 w-[110px] text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">New + used</SelectItem><SelectItem value="used">Used</SelectItem><SelectItem value="new">New</SelectItem></SelectContent></Select>
-            <div class="relative"><Search class="size-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><Input v-model="q" placeholder="Search title, VIN, stock…" class="h-8 w-56 pl-8 text-xs" /></div>
+            <div class="relative"><Search class="size-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><Input v-model="q" placeholder="Search title, VIN, stock…" class="h-8 w-44 sm:w-56 pl-8 text-xs" aria-label="Search the vehicles" /></div>
           </div>
         </div>
         <div v-if="crawlPages.length > 1" class="shrink-0 flex gap-2 overflow-x-auto p-2 border-b bg-muted/20">
@@ -243,14 +332,21 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
             <p class="text-[11px] text-muted-foreground tabular-nums mt-0.5"><b class="text-foreground">{{ p.withoutReal }}</b> of {{ p.total }} without a real photo</p>
           </button>
         </div>
-        <div class="flex-1 min-h-0 overflow-y-auto p-2">
+        <div class="lg:flex-1 lg:min-h-0 lg:overflow-y-auto p-2">
           <div v-if="!filtered.length" class="py-20 text-center text-sm text-muted-foreground">Nothing in this view.</div>
           <div class="grid grid-cols-[repeat(auto-fill,minmax(210px,1fr))] gap-2">
-            <article v-for="v in filtered.slice(0, shown)" :key="v.key" class="group rounded-xl border bg-card overflow-hidden flex flex-col [content-visibility:auto] [contain-intrinsic-size:300px]" :class="isWithout(v) && 'ring-1 ' + VERDICT_META[v.final].ring">
-              <div class="relative aspect-[4/3] bg-muted/50 overflow-hidden">
+            <article v-for="v in filtered.slice(0, shown)" :key="v.key" class="group rounded-xl border bg-card overflow-hidden flex flex-col [content-visibility:auto] [contain-intrinsic-size:300px] transition-shadow" :class="picked.has(v.key) ? 'ring-2 ring-primary border-primary' : (isWithout(v) || v.final === 'blurry') && !isAdCard(v) ? 'ring-1 ' + VERDICT_META[v.final].ring : ''">
+              <div class="relative aspect-[4/3] bg-muted/50 overflow-hidden" :class="pickedCount && 'cursor-pointer'" @click="pickedCount ? togglePick(v, $event) : undefined">
                 <img v-if="photoSrc(v)" :src="photoSrc(v)" :alt="v.title" class="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="onBroken(photoSrc(v))">
                 <div v-else class="size-full flex flex-col items-center justify-center gap-1 text-muted-foreground"><ImageOff class="size-7" /><span class="text-[11px]">{{ v.image?.url ? 'Could not load' : 'No photo' }}</span></div>
-                <span class="absolute top-2 left-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 backdrop-blur bg-background/80" :class="VERDICT_META[pillFor(v)].pill">{{ v.override ? `${VERDICT_META[v.override].short} · set by you` : VERDICT_META[pillFor(v)].short }}{{ !v.override && v.verdict === 'review' ? ` → ${VERDICT_META[v.suggested].short}?` : '' }}</span>
+                <span v-if="picked.has(v.key)" class="absolute inset-0 bg-primary/10 pointer-events-none" aria-hidden="true" />
+                <button
+                  type="button" role="checkbox" :aria-checked="picked.has(v.key)" :aria-label="`Select ${v.title || 'this vehicle'}`"
+                  class="absolute top-2 left-2 z-[1] inline-flex size-6 items-center justify-center rounded-md border-2 shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  :class="picked.has(v.key) ? 'bg-primary border-primary text-primary-foreground' : 'bg-background/95 border-foreground/40 text-transparent hover:border-primary hover:text-primary/50'"
+                  @click.stop="togglePick(v, $event)" @keydown.space.prevent="togglePick(v, $event)"
+                ><Check class="size-4" stroke-width="3" /></button>
+                <span class="absolute top-2 left-10 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 backdrop-blur bg-background/80" :class="VERDICT_META[pillFor(v)].pill">{{ v.override ? `${VERDICT_META[v.override].short} · set by you` : VERDICT_META[pillFor(v)].short }}{{ !v.override && v.verdict === 'review' ? ` → ${VERDICT_META[v.suggested].short}?` : '' }}</span>
                 <span v-if="!v.override" class="absolute top-2 right-2 rounded-full bg-black/55 text-white px-1.5 py-0.5 text-[10px] tabular-nums" title="How sure the scanner is">{{ conf(v) }}</span>
                 <span v-if="isAdCard(v)" class="absolute inset-x-2 top-9 rounded-md bg-zinc-900/85 text-white px-2 py-1 text-[10px] font-semibold text-center">AD — NOT COUNTED{{ v.listing === 'ad' ? ' · set by you' : '' }}</span>
                 <span v-if="img(v)?.text" class="absolute bottom-2 left-2 right-2 truncate rounded bg-black/60 text-white px-1.5 py-0.5 text-[10px]" title="Text read on the image">“{{ img(v)!.text }}”</span>
@@ -288,7 +384,7 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
                   <PopoverContent class="w-80 text-xs space-y-2">
                     <p class="font-semibold text-sm">Why “{{ VERDICT_META[pillFor(v)].label }}”</p>
                     <ul class="space-y-1 list-disc pl-4"><li v-for="x in v.reasons" :key="x">{{ x }}</li></ul>
-                    <p v-if="img(v)" class="text-muted-foreground break-all">Image: {{ host(img(v)!.url) }}<span v-if="img(v)!.w"> · {{ img(v)!.w }}×{{ img(v)!.h }}</span></p>
+                    <p v-if="img(v)" class="text-muted-foreground break-all">Image: {{ host(img(v)!.url) }}<span v-if="img(v)!.w"> · {{ img(v)!.w }}×{{ img(v)!.h }}</span><span v-if="img(v)!.sharp != null"> · sharpness {{ img(v)!.sharp }} of 100</span></p>
                     <p class="text-muted-foreground">Page {{ v.page }} · confidence {{ conf(v) }}</p>
                   </PopoverContent>
                 </Popover>
@@ -298,10 +394,30 @@ const pillFor = (v: ScannedVehicle): PhotoVerdict => v.override ? v.override : v
           </div>
           <div v-if="filtered.length > shown" class="py-3 text-center"><Button variant="outline" size="sm" @click="shown += 240">Show {{ Math.min(240, filtered.length - shown) }} more of {{ filtered.length - shown }}</Button></div>
         </div>
+        <!-- Selected vehicles: mark them all in one go -->
+        <Transition enter-active-class="transition duration-200 ease-out" enter-from-class="translate-y-2 opacity-0" leave-active-class="transition duration-150 ease-in" leave-to-class="translate-y-2 opacity-0">
+          <div v-if="pickedCount" role="region" aria-label="Selected vehicles" class="sticky bottom-0 z-10 lg:static shrink-0 border-t-2 border-primary bg-card p-2 flex flex-wrap items-center gap-2 shadow-[0_-10px_24px_-14px_rgba(0,0,0,0.35)]">
+            <span class="inline-flex items-center gap-2 text-sm font-semibold"><span class="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-primary px-1.5 text-xs tabular-nums text-primary-foreground">{{ pickedCount }}</span> selected</span>
+            <button v-if="!allPicked && filtered.length > 1" type="button" class="text-xs font-medium text-primary underline-offset-2 hover:underline" @click="pickAll(true)">Select all {{ filtered.length }} in this view</button>
+            <span class="hidden sm:block h-5 w-px bg-border" aria-hidden="true" />
+            <span class="text-xs text-muted-foreground">Mark as</span>
+            <Button v-for="k in CHOICES" :key="k" size="sm" variant="outline" class="h-8 gap-1.5 text-xs" :disabled="busy" @click="markPicked(k)"><span class="size-2 rounded-full" :class="VERDICT_META[k].dot" /> {{ VERDICT_META[k].label }}</Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child><Button size="icon" variant="outline" class="size-8" :disabled="busy" aria-label="More actions for the selected vehicles"><MoreHorizontal class="size-4" /></Button></DropdownMenuTrigger>
+              <DropdownMenuContent align="start" side="top" class="w-64">
+                <DropdownMenuItem :disabled="!pickedHasChange" @click="markPicked(null)"><RotateCcw class="size-4" /> Back to the scanner’s call</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem v-if="pickedAds < pickedCount" @click="markPickedListing(true)"><Ban class="size-4" /> Not vehicles (ads / promos) — leave out</DropdownMenuItem>
+                <DropdownMenuItem v-if="pickedAds" @click="markPickedListing(false)"><Check class="size-4" /> They are vehicles — count them</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button size="sm" variant="ghost" class="ml-auto h-8 gap-1.5 text-xs" :disabled="busy" @click="clearPicked"><X class="size-3.5" /> Clear</Button>
+          </div>
+        </Transition>
       </section>
 
       <!-- Repeated images + rules -->
-      <aside class="min-h-0 overflow-y-auto border-t lg:border-t-0 lg:border-l p-2 space-y-2 bg-muted/10">
+      <aside class="lg:min-h-0 lg:overflow-y-auto border-t lg:border-t-0 lg:border-l p-2 space-y-2 bg-muted/10">
         <div class="rounded-xl border bg-card overflow-hidden">
           <header class="px-3 py-2 border-b flex items-center gap-2"><Layers class="size-4 text-muted-foreground" /><h4 class="text-sm font-semibold">Repeated images</h4><span class="ml-auto text-[11px] text-muted-foreground">{{ r.clusters.length }}</span></header>
           <p class="px-3 pt-2 text-[11px] text-muted-foreground">A real photo belongs to one car. When the same picture shows up on several different cars it means “No photo” (a placeholder) or a stock image.</p>

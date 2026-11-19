@@ -131,6 +131,10 @@ async function loadFacts() {
 onMounted(loadFacts)
 const sortKey = ref<ColKey>('updated')
 const sortDir = ref<'asc' | 'desc'>('desc')
+// The sort is remembered with the column layout (per person): it is still there after visiting
+// another page, after a reload and on another computer. Until someone sorts, it is "Updated, newest first".
+watch(grid.sort, (s) => { if (s) { sortKey.value = s.key; sortDir.value = s.dir } }, { immediate: true })
+watch([sortKey, sortDir], ([key, dir]) => grid.setSort(key, dir))
 
 const states = computed(() => [...new Set(dealerships.value.map(d => d.state).filter(Boolean))].sort())
 const uniq = (xs: (string | undefined | null)[]) => [...new Set(xs.filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b))

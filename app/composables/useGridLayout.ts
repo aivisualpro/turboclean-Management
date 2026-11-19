@@ -1,7 +1,7 @@
 import type { ComputedRef, Ref } from 'vue'
 import { useElementSize } from '@vueuse/core'
-import type { GridColumnDef, GridLayoutState } from '~/lib/gridLayout'
-import { clampGridWidth, defaultGridLayout, moveGridColumn, normalizeGridLayout, sameGridLayout } from '~/lib/gridLayout'
+import type { GridColumnDef, GridLayoutState, GridSort } from '~/lib/gridLayout'
+import { clampGridWidth, defaultGridLayout, moveGridColumn, normalizeGridLayout, sameGridLayout, sameGridSort } from '~/lib/gridLayout'
 
 /**
  * Column layout for a data table: reorder, resize, show / hide and freeze columns — saved per person.
@@ -55,9 +55,12 @@ export interface GridLayout<K extends string = string> {
   sizes: ComputedRef<Record<K, number>>
   /** Sticky `left` in px of each frozen, visible column. */
   offsets: ComputedRef<Partial<Record<K, number>>>
+  /** The remembered sort (null until the person sorts) — saved and synced with the layout. */
+  sort: ComputedRef<GridSort<K> | null>
+  setSort: (key: K, dir: 'asc' | 'desc') => void
   hiddenCount: ComputedRef<number>
   pinnedCount: ComputedRef<number>
-  /** The person has changed something from the default layout. */
+  /** The person has changed the columns from the default layout (sorting does not count). */
   isCustomized: ComputedRef<boolean>
   saveState: Ref<GridSaveState>
   /** Key of the column being dragged / resized right now ('' when none). */
@@ -139,6 +142,8 @@ export function useGridLayout<K extends string>(id: string, defs: readonly GridC
     return JSON.stringify(out)
   })
   const offsets = computed(() => JSON.parse(offsetsKey.value) as Partial<Record<K, number>>)
+  const sortKey = computed(() => JSON.stringify(state.value.sort ?? null))
+  const sort = computed(() => JSON.parse(sortKey.value) as GridSort<K> | null)
   const hiddenCount = computed(() => allColumns.value.length - columns.value.length)
   const pinnedCount = computed(() => columns.value.filter(c => c.pinned).length)
   const isCustomized = computed(() => !sameGridLayout(state.value, defaultGridLayout(defs)))
@@ -194,7 +199,7 @@ export function useGridLayout<K extends string>(id: string, defs: readonly GridC
   /** Every change goes through here. */
   function commit(next: GridLayoutState) {
     const clean = normalizeGridLayout({ ...next, updatedAt: 1 }, defs)
-    if (sameGridLayout(clean, state.value)) return
+    if (sameGridLayout(clean, state.value) && sameGridSort(clean.sort, state.value.sort)) return
     state.value = { ...clean, updatedAt: Date.now() }
     persistLocal()
     if (opts.sync === false) saveState.value = 'local'
@@ -292,10 +297,15 @@ export function useGridLayout<K extends string>(id: string, defs: readonly GridC
     delete widths[key]
     commit({ ...state.value, widths })
   }
+  /** Columns back to the default; what the table is sorted by is left alone. */
   function reset() {
     const before = state.value
-    commit(defaultGridLayout(defs))
+    commit({ ...defaultGridLayout(defs), sort: before.sort })
     return before
+  }
+  function setSort(key: K, dir: 'asc' | 'desc') {
+    if (!byKey.get(key)?.sortable) return
+    commit({ ...state.value, sort: { key, dir } })
   }
   function restore(prev: GridLayoutState) { commit(prev) }
 
@@ -543,9 +553,15 @@ export function useGridLayout<K extends string>(id: string, defs: readonly GridC
     el?.addEventListener('scroll', onScroll, { passive: true })
   }, { flush: 'post' })
 
+  function adoptLocal() {
+    try { const raw = localStorage.getItem(storageKey); if (raw) adopt(JSON.parse(raw)) } catch {}
+  }
+  // Arriving from another page of the app: the saved layout is used from the very first render.
+  // On a full page load the first render has to match the server's, so it waits for mount.
+  if (import.meta.client && !useNuxtApp().isHydrating) adoptLocal()
   onMounted(() => {
     mounted = true
-    try { const raw = localStorage.getItem(storageKey); if (raw) adopt(JSON.parse(raw)) } catch {}
+    adoptLocal()
     opts.scroller.value?.addEventListener('scroll', onScroll, { passive: true })
     window.addEventListener('storage', onStorage)
     pullRemote()
@@ -559,7 +575,7 @@ export function useGridLayout<K extends string>(id: string, defs: readonly GridC
   })
 
   return {
-    id, columns, allColumns, sizes, offsets, hiddenCount, pinnedCount, isCustomized, saveState, draggingKey, resizingKey, tableStyle, leadWidth,
+    id, columns, allColumns, sizes, offsets, sort, setSort, hiddenCount, pinnedCount, isCustomized, saveState, draggingKey, resizingKey, tableStyle, leadWidth,
     setVisible, showAll, setPinned, canPin, move, moveBy, canMoveBy, setWidth, resetWidth, autoFit, autoFitAll, reset, restore,
     startResize, startHeaderDrag, hintOverflow,
   }

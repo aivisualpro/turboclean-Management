@@ -8,7 +8,10 @@
  */
 import type { ScopeRow } from '~/lib/scanScope'
 
-export type PhotoVerdict = 'real' | 'placeholder' | 'stock' | 'missing' | 'review'
+/** `blurry` = a real photo of the car that is out of focus / low-quality: shown on its own, never counted as "without a real photo". */
+export type PhotoVerdict = 'real' | 'placeholder' | 'stock' | 'missing' | 'blurry' | 'review'
+/** Is the AI photo check running on the server — and if not, why and how to turn it on. */
+export interface PhotoCheckStatus { on: boolean, provider: string | null, label: string, reason: string, fix: string }
 export type FinalVerdict = Exclude<PhotoVerdict, 'review'>
 export interface ScannerProgress { phase: 'collecting' | 'analyzing' | 'done' | 'stopped' | 'error', page: number, vehicles: number, advertised: number | null, analyzed: number, toAnalyze: number, message: string, startedAt: string | null, finishedAt: string | null, pagesVisited: string[]
   /** The crawl plan: every saved scan page of this crawl and how it is going (nothing else is read). */
@@ -49,13 +52,15 @@ export interface ScannedVehicle {
   clusterId: string | null
   override: FinalVerdict | null
 }
-export interface ScannedImage { id: string, url: string, ok: boolean, error: string | null, w: number | null, h: number | null, hash: string | null, hash2?: string | null, text: string, ocr: boolean }
+export interface ScannedImage { id: string, url: string, ok: boolean, error: string | null, w: number | null, h: number | null, hash: string | null, hash2?: string | null, text: string, ocr: boolean, /** Sharpness 0 (a smear) – 100 (crisp); null when not measured. */ sharp?: number | null }
 export interface ImageGroup { id: string, imageIds: string[], hash: string, hash2?: string, vehicles: number, models: number, modelNames: string[], thumb: string, url: string, verdict: PhotoVerdict, reason: string, override: FinalVerdict | null }
 export interface ScanResults {
   scanId: string
   /** Why these numbers cannot be trusted (the site's cards were not read properly) — saving is refused. */
   unreliable?: string | null
-  summary: { total: number, by: Record<FinalVerdict, number>, withoutReal: number, withoutRealPct: number | null, review: number, counts: { newTotal: number, usedTotal: number, newMissingPhotos: number, usedMissingPhotos: number }, newPct: number | null, usedPct: number | null }
+  /** The AI photo check of this crawl: who looked — or why nobody did (`off`: 'switched-off' | 'no-key' | 'error'). */
+  photoCheck?: { provider: string | null, checked: number, cached: number, failed: number, off: string } | null
+  summary: { total: number, by: Record<FinalVerdict, number>, withoutReal: number, withoutRealPct: number | null, /** Real photos that are blurry (not part of withoutReal). */ blurry?: number, blurryPct?: number | null, review: number, counts: { newTotal: number, usedTotal: number, newMissingPhotos: number, usedMissingPhotos: number }, newPct: number | null, usedPct: number | null }
   countStockAsMissing: boolean
   advertised: number | null
   pages: string[]
@@ -76,6 +81,8 @@ export const VERDICT_META: Record<PhotoVerdict, { label: string, short: string, 
   placeholder: { label: 'No photo', short: 'No photo', dot: 'bg-rose-500', pill: 'bg-rose-500/15 text-rose-700 dark:text-rose-300 ring-rose-500/30', ring: 'ring-rose-500/50', hex: '#f43f5e' },
   stock: { label: 'Stock image', short: 'Stock', dot: 'bg-violet-500', pill: 'bg-violet-500/15 text-violet-700 dark:text-violet-300 ring-violet-500/30', ring: 'ring-violet-500/50', hex: '#8b5cf6' },
   missing: { label: 'No photo', short: 'No photo', dot: 'bg-rose-500', pill: 'bg-rose-500/15 text-rose-700 dark:text-rose-300 ring-rose-500/30', ring: 'ring-rose-500/50', hex: '#f43f5e' },
+  // A real photo, but out of focus / smeared / low-resolution — its own count, not "without a real photo".
+  blurry: { label: 'Blurry photo', short: 'Blurry', dot: 'bg-amber-500', pill: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/30', ring: 'ring-amber-500/50', hex: '#f59e0b' },
   review: { label: 'Needs review', short: 'Review', dot: 'bg-sky-500', pill: 'bg-sky-500/15 text-sky-700 dark:text-sky-300 ring-sky-500/30', ring: 'ring-sky-500/50', hex: '#0ea5e9' },
 }
 
@@ -143,7 +150,7 @@ export function useInventoryScanner() {
   let poll: ReturnType<typeof setInterval> | null = null
   let disposed = false
 
-  const status = () => $fetch<{ ok: boolean, kind: string, binary: string | null }>('/api/scanner/status')
+  const status = () => $fetch<{ ok: boolean, kind: string, binary: string | null, photoCheck?: PhotoCheckStatus | null }>('/api/scanner/status')
 
   let previewAbort: AbortController | null = null
   async function loadPreview(dealershipId: string, url?: string) {

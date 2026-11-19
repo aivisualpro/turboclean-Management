@@ -18,7 +18,7 @@ const FIELD_HELP: Record<string, string> = {
   usedTotal: 'used vehicles listed', usedMissingPhotos: 'used vehicles without a real photo', usedMissingPhotoPct: 'used % without real photo, e.g. "20.5%"', usedWithPhotos: 'used vehicles with real photos',
   newTotal: 'new vehicles listed', newMissingPhotos: 'new vehicles without real photo', newMissingPhotoPct: 'new % without photo',
   totalVehicles: 'all vehicles', totalMissingPhotos: 'all vehicles without real photo', missingPhotoPct: 'all % without photo',
-  placeholderImages: 'listings showing a "photos coming soon" placeholder', noImageCount: 'listings with no image at all', stockImages: 'listings using stock images',
+  placeholderImages: 'listings showing a "photos coming soon" placeholder', noImageCount: 'listings with no image at all', stockImages: 'listings using stock images', blurryPhotos: 'listings whose real photo is blurry (not counted as missing)',
   inventoryUrl: 'URL of the inventory page that was reviewed', replyMailto: 'mailto: link that replies to this email (use for CTA buttons)',
   auditScreenshot: 'HTML BLOCK: inventory page screenshot (only if an audit has one) — prefer {{auditEvidence}}',
   auditGallery: 'HTML BLOCK: "EVIDENCE / DEALERSHIP WEBSITE REVIEW" box — up to six flagged listings pictured the way the dealer\'s website shows them (photo, title, price, issue tag, each linked) inside a browser-style frame, with an "Audit finding" caption (renders nothing without data). The strongest proof — use it once, alone in its row.',

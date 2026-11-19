@@ -32,6 +32,8 @@ const tab = ref<'site' | 'results'>('site')
 const phase = ref<'checking' | 'unavailable' | 'ready' | 'failed'>('checking')
 const failMsg = ref('')
 const engine = ref<string>('')
+/** Is the AI photo check running on this server? (off → photos are judged by the built-in checks only) */
+const photoCheck = ref<{ on: boolean, label: string, reason: string, fix: string } | null>(null)
 const address = ref('')
 const editingAddress = ref(false)
 const addressInput = ref<HTMLInputElement | null>(null)
@@ -175,6 +177,7 @@ async function start() {
   try {
     const [st] = await Promise.all([sc.status(), loadPages()])
     engine.value = st.kind
+    photoCheck.value = st.photoCheck || null
     if (!st.ok) { phase.value = 'unavailable'; return }
     phase.value = 'ready'
     sc.loadLatest(props.dealership.id).catch(() => {})
@@ -382,6 +385,8 @@ const crawlLabel = computed(() => chosen.value.length ? `Crawl ${chosen.value.le
           <div class="ml-auto flex items-center gap-2">
             <span v-if="phase === 'ready'" class="hidden md:inline-flex items-center gap-1.5 rounded-full px-2 h-6 text-[11px] font-medium" :class="TONE.ok.soft" title="The crawler reads the saved scan pages and their result pages. It never starts from the home page and never follows a link out of a list."><ShieldCheck class="size-3.5" /> Scan pages only</span>
             <span v-if="phase === 'ready'" class="hidden lg:inline-flex items-center gap-1.5 text-[11px] text-muted-foreground"><Cloud class="size-3.5" /> {{ engineLabel }} · 1440×900</span>
+            <span v-if="phase === 'ready' && photoCheck && photoCheck.on" class="hidden xl:inline-flex items-center gap-1.5 text-[11px] text-muted-foreground" title="Every photo is looked at by AI as well as measured"><Sparkles class="size-3.5 text-violet-500" /> AI photo check · {{ photoCheck.label }}</span>
+            <span v-else-if="phase === 'ready' && photoCheck" class="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300" :title="`${photoCheck.reason} ${photoCheck.fix}`"><AlertTriangle class="size-3.5" /> AI photo check is off</span>
             <Button variant="ghost" size="icon" class="size-8" aria-label="Close the crawler" @click="closeDialog"><X class="size-4" /></Button>
           </div>
         </header>

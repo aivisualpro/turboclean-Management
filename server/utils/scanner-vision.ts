@@ -20,7 +20,7 @@ import type { Db } from 'mongodb'
 import type { ImageInfo, ScanVehicle } from './scanner-images'
 
 export const VISION_CACHE = 'turboCleanScannerVisionCache'
-export interface VisionVerdict { v: 'real' | 'placeholder' | 'stock', c: number, why: string, text: string, model: string, ad?: boolean, adWhy?: string, cached?: boolean }
+export interface VisionVerdict { v: 'real' | 'placeholder' | 'stock', c: number, why: string, text: string, model: string, ad?: boolean, adWhy?: string, cached?: boolean, /** A real photo that is out of focus / smeared. */ blur?: boolean }
 
 const SYSTEM = `You audit vehicle listings on US car-dealer websites for a reconditioning / photo company. Each item is one card from the dealer's inventory grid: the main image plus what the card says. For each item decide two things.
 
@@ -31,18 +31,33 @@ const SYSTEM = `You audit vehicle listings on US car-dealer websites for a recon
 - "placeholder": NOT a photo of the car — "photos coming soon" / "image not available" / "more photos soon" graphics, grey or white car silhouettes or outline drawings (even with a brand logo or the model name), dealer logo or storefront only, blank / solid colour, a generic illustration.
 - "stock": manufacturer or stock-library imagery — a studio render or press photo of the model on a plain white / grey / gradient background, CGI, a colour-swatch render, the car with no real surroundings (often a different colour or trim than the listing).
 
+3. "blur" — only for "real": true when the photograph itself is clearly out of focus, motion-blurred, smeared, or a tiny picture blown up, so the vehicle's details cannot be made out. false for a normally sharp photo. A soft background, reflections, rain, a night shot, a dealer banner or ordinary image compression are NOT blur.
+
 Be decisive and precise. "c" = confidence 0–1 in "v". "t" = text readable on the image (max 60 chars, "" if none). "why" ≤ 8 words. "adWhy" ≤ 8 words, only when ad is true.`
 
 type Provider = 'anthropic' | 'gemini'
+const switchedOff = () => String(process.env.SCANNER_AI || '').toLowerCase() === 'off'
 async function pickProvider(): Promise<Provider | null> {
   const ai = await import('./automation-ai')
   const forced = String(process.env.SCANNER_VISION_PROVIDER || '').toLowerCase()
-  if (String(process.env.SCANNER_AI || '').toLowerCase() === 'off') return null
+  if (switchedOff()) return null
   if ((forced === 'anthropic' || forced === 'claude') && ai.claudeVisionConfigured()) return 'anthropic'
   if (forced === 'gemini' && ai.visionConfigured()) return 'gemini'
   if (ai.claudeVisionConfigured()) return 'anthropic'
   if (ai.visionConfigured()) return 'gemini'
   return null
+}
+
+/**
+ * Is the AI photo check running on this server — and if not, why (shown in the scanner, so a switched-off
+ * check is never a silent reason for weaker verdicts)? No secret is read out: only which setting is missing.
+ */
+export async function photoCheckStatus(): Promise<{ on: boolean, provider: Provider | null, label: string, reason: string, fix: string }> {
+  const ai = await import('./automation-ai')
+  const provider = await pickProvider()
+  if (provider) return { on: true, provider, label: provider === 'anthropic' ? `Claude (${ai.claudeVisionModels()[0]})` : `Gemini (${ai.visionModel()})`, reason: '', fix: '' }
+  if (switchedOff()) return { on: false, provider: null, label: 'Off', reason: 'The AI photo check is switched off on this server (the setting SCANNER_AI is "off").', fix: 'Remove SCANNER_AI from the server environment (Vercel → Settings → Environment Variables), then redeploy.' }
+  return { on: false, provider: null, label: 'Off', reason: 'The AI photo check has no AI key on this server.', fix: 'Add ANTHROPIC_API_KEY (Claude) or GOOGLE_GEMINI_API_KEY to the server environment (Vercel → Settings → Environment Variables), then redeploy.' }
 }
 
 const cacheKey = (i: ImageInfo) => (i.hash2 ? `${i.hash}:${i.hash2}` : '') || ''
@@ -62,7 +77,7 @@ async function readCache(db: Db | null, imgs: ImageInfo[], provider: Provider | 
     for (const r of rows as any[]) {
       const k = String(r._id).split('|').slice(1).join('|')
       if (out.has(k) || !['real', 'placeholder', 'stock'].includes(r.v)) continue
-      out.set(k, { v: r.v, c: Number(r.c) || 0.8, why: r.why || '', text: r.text || '', model: r.model || '', ad: typeof r.ad === 'boolean' ? r.ad : undefined, adWhy: r.adWhy || '', cached: true })
+      out.set(k, { v: r.v, c: Number(r.c) || 0.8, why: r.why || '', text: r.text || '', model: r.model || '', ad: typeof r.ad === 'boolean' ? r.ad : undefined, adWhy: r.adWhy || '', blur: typeof r.blur === 'boolean' ? r.blur : undefined, cached: true })
     }
   } catch {}
   return out
@@ -72,6 +87,7 @@ async function writeCache(db: Db | null, img: ImageInfo, v: VisionVerdict, p: Pr
   if (!db || !k) return
   const set: any = { v: v.v, c: v.c, why: v.why, text: v.text, model: v.model, url: img.url, at: new Date().toISOString() }
   if (typeof v.ad === 'boolean') { set.ad = v.ad; set.adWhy = v.adWhy || '' }
+  if (typeof v.blur === 'boolean') set.blur = v.blur
   await db.collection(VISION_CACHE).updateOne({ _id: docId(k, p) as any }, { $set: set }, { upsert: true }).catch(() => {})
 }
 
@@ -90,15 +106,16 @@ export async function visionCheck(db: Db | null, images: ImageInfo[], vehicles: 
   const ai = await import('./automation-ai')
   const provider = await pickProvider()
   const todo = images.filter(i => i.ok && !i.ai && ((i as any).thumb || cacheKey(i)))
-  if (!todo.length) return { checked: 0, cached: 0, failed: 0 }
+  const state = (extra: { checked: number, cached: number, failed: number }) => ({ ...extra, provider, off: provider ? '' : (switchedOff() ? 'switched-off' : 'no-key') })
+  if (!todo.length) return state({ checked: 0, cached: 0, failed: 0 })
   const cache = await readCache(db, todo, provider)
   let cached = 0
   for (const i of todo) { const hit = cache.get(cacheKey(i)); if (hit) { i.ai = hit; cached++ } }
   const ask = todo.filter(i => !i.ai && (i as any).thumb)
   if (!ask.length || !provider) {
-    if (ask.length) o.log('AI photo check is off (no ANTHROPIC_API_KEY or GOOGLE_GEMINI_API_KEY) — using the built-in checks')
+    if (ask.length) o.log(switchedOff() ? 'AI photo check is switched off on this server (SCANNER_AI=off) — photos are judged by the built-in checks only' : 'AI photo check is off (no ANTHROPIC_API_KEY or GOOGLE_GEMINI_API_KEY on this server) — photos are judged by the built-in checks only')
     else if (cached) o.log(`AI photo check: all ${cached} photos already known — no AI call needed`)
-    return { checked: 0, cached, failed: 0 }
+    return state({ checked: 0, cached, failed: ask.length && !provider ? ask.length : 0 })
   }
   const byImage = new Map<string, ScanVehicle>()
   for (const v of vehicles) if (v.imageId && !byImage.has(v.imageId)) byImage.set(v.imageId, v)
@@ -117,7 +134,7 @@ export async function visionCheck(db: Db | null, images: ImageInfo[], vehicles: 
       try {
         const req = {
           system: SYSTEM,
-          prompt: `There are ${batch.length} items, labelled "Item 1" to "Item ${batch.length}", each followed by its image. Answer ONLY with JSON: {"items":[{"i":1,"ad":false,"adWhy":"","v":"real|placeholder|stock","c":0.95,"t":"","why":""}, …]} — one entry per item, in order.`,
+          prompt: `There are ${batch.length} items, labelled "Item 1" to "Item ${batch.length}", each followed by its image. Answer ONLY with JSON: {"items":[{"i":1,"ad":false,"adWhy":"","v":"real|placeholder|stock","blur":false,"c":0.95,"t":"","why":""}, …]} — one entry per item, in order.`,
           images: batch.map((im, k) => ({ label: `Item ${k + 1} — ${cardLine(byImage.get(im.id))}`, mime: 'image/jpeg', b64: (im as any).thumb as string })),
           maxTokens: provider === 'anthropic' ? 6000 + 150 * batch.length : 150 * batch.length + 400,
           timeoutMs: Math.min(provider === 'anthropic' ? 120_000 : 45_000, left - 2_000),
@@ -130,7 +147,7 @@ export async function visionCheck(db: Db | null, images: ImageInfo[], vehicles: 
           const im = batch[(Number(it?.i) || 0) - 1]
           const v = String(it?.v || '').toLowerCase()
           if (!im || !['real', 'placeholder', 'stock'].includes(v)) continue
-          const verdict: VisionVerdict = { v: v as any, c: Math.max(0, Math.min(1, Number(it?.c) || 0.7)), why: String(it?.why || '').slice(0, 80), text: String(it?.t || '').slice(0, 80), model: r.model, ad: it?.ad === true, adWhy: String(it?.adWhy || '').slice(0, 80) }
+          const verdict: VisionVerdict = { v: v as any, c: Math.max(0, Math.min(1, Number(it?.c) || 0.7)), why: String(it?.why || '').slice(0, 80), text: String(it?.t || '').slice(0, 80), model: r.model, ad: it?.ad === true, adWhy: String(it?.adWhy || '').slice(0, 80), blur: v === 'real' ? it?.blur === true : undefined }
           im.ai = verdict
           await writeCache(db, im, verdict, provider)
         }
@@ -145,12 +162,14 @@ export async function visionCheck(db: Db | null, images: ImageInfo[], vehicles: 
   const ok = ask.length - failed
   const ads = ask.filter(i => i.ai?.ad).length
   o.log(`AI photo check: ${ok} of ${ask.length} judged by ${model || name}${ads ? ` · ${ads} advertisement${ads === 1 ? '' : 's'} found in the grid` : ''}${failed ? ` · ${failed} kept the built-in verdict${firstError ? ` (${firstError})` : ''}` : ''}`)
-  return { checked: ok, cached, failed }
+  return state({ checked: ok, cached, failed })
 }
 
 /** A person corrected a photo (or said "this is / isn't an ad"): cached as the answer for that picture on every future crawl. */
-export async function teachVision(db: Db, img: ImageInfo, verdict: 'real' | 'placeholder' | 'stock' | 'missing' | null, ad?: boolean) {
+export async function teachVision(db: Db, img: ImageInfo, verdict: 'real' | 'placeholder' | 'stock' | 'missing' | 'blurry' | null, ad?: boolean) {
   const prev = img.ai
-  const v = verdict ? (verdict === 'missing' ? 'placeholder' : verdict) : (prev?.v || 'real')
-  await writeCache(db, img, { v, c: 1, why: 'Corrected by you', text: prev?.text || '', model: 'you', ad: typeof ad === 'boolean' ? ad : prev?.ad, adWhy: ad ? 'Marked as an ad by you' : '' }, 'you')
+  // "Blurry" is a real photo that is blurry; "Real" says it is sharp enough.
+  const v = verdict ? (verdict === 'missing' ? 'placeholder' : verdict === 'blurry' ? 'real' : verdict) : (prev?.v || 'real')
+  const blur = verdict === 'blurry' ? true : verdict === 'real' ? false : (verdict ? undefined : prev?.blur)
+  await writeCache(db, img, { v, c: 1, why: 'Corrected by you', text: prev?.text || '', model: 'you', ad: typeof ad === 'boolean' ? ad : prev?.ad, adWhy: ad ? 'Marked as an ad by you' : '', blur }, 'you')
 }

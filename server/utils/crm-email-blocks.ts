@@ -53,7 +53,7 @@ export function usedPhotoBar(audit: any) {
 </table>`
 }
 
-/** Chips: how the gap breaks down (placeholder images / no image / stock images). */
+/** Chips: how the gap breaks down (placeholder images / no image / stock images) — and, on its own line, real photos that are blurry. */
 export function auditBreakdown(audit: any) {
   const b = audit?.photoBreakdown
   if (!b) return ''
@@ -61,11 +61,14 @@ export function auditBreakdown(audit: any) {
   if (num(b.placeholder)) items.push({ n: num(b.placeholder), label: `show a &ldquo;photos coming soon&rdquo; placeholder`, dot: '#e5484d' })
   if (num(b.missing)) items.push({ n: num(b.missing), label: 'have no image at all', dot: '#e5484d' })
   if (num(b.stock)) items.push({ n: num(b.stock), label: b.countStockAsMissing === false ? 'use stock / catalog images' : 'use stock images instead of the actual car', dot: '#7c5cff' })
-  if (!items.length) return ''
+  // Blurry photos are other listings (real photos, not missing ones) — said on their own line.
+  const blurry = num(b.blurry)
+  if (!items.length && !blurry) return ''
+  const also = blurry ? `<tr><td width="18" valign="top" style="padding:5px 0 0;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:#f59e0b;"></span></td><td style="padding:2px 0;${FONT}font-size:14px;line-height:21px;color:#344054;"><strong style="color:#101828;">${fmt(blurry)}</strong> ${items.length ? 'more ' : ''}listing${blurry === 1 ? ' has' : 's have'} a real photo that is blurry${items.length ? ' (not counted above)' : ''}</td></tr>` : ''
   const rows = items.map(i => `<tr><td width="18" valign="top" style="padding:5px 0 0;"><span style="display:inline-block;width:8px;height:8px;border-radius:4px;background:${i.dot};"></span></td><td style="padding:2px 0;${FONT}font-size:14px;line-height:21px;color:#344054;"><strong style="color:#101828;">${fmt(i.n)}</strong> ${i.label}</td></tr>`).join('')
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0;background:#f9fafb;border:1px solid #eaecf0;border-radius:10px;">
-  <tr><td style="padding:16px 18px 6px;${FONT}font-size:11px;font-weight:700;letter-spacing:1.6px;color:#667085;">WHAT WE FOUND ON THOSE LISTINGS</td></tr>
-  <tr><td style="padding:2px 18px 14px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0">${rows}</table></td></tr>
+  <tr><td style="padding:16px 18px 6px;${FONT}font-size:11px;font-weight:700;letter-spacing:1.6px;color:#667085;">${items.length ? 'WHAT WE FOUND ON THOSE LISTINGS' : 'PHOTO QUALITY'}</td></tr>
+  <tr><td style="padding:2px 18px 14px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0">${rows}${also}</table></td></tr>
 </table>`
 }
 
@@ -308,7 +311,7 @@ export const SAMPLE_AUDIT = {
   inventoryUrl: 'https://www.bleakleykia.com/used-inventory',
   newTotal: 334, usedTotal: 171, newMissingPhotos: 12, usedMissingPhotos: 35,
   totalVehicles: 505, totalMissingPhotos: 47, missingPhotoPct: 9.3, newMissingPhotoPct: 3.6, usedMissingPhotoPct: 20.5,
-  photoBreakdown: { real: 458, placeholder: 21, missing: 9, stock: 17, countStockAsMissing: true },
+  photoBreakdown: { real: 452, placeholder: 21, missing: 9, stock: 17, blurry: 6, countStockAsMissing: true },
   pages: [
     { url: 'https://www.bleakleykia.com/used-inventory', label: 'Pre-owned inventory', kind: 'used', total: 139, withoutReal: 29, withoutRealPct: 20.9 },
     { url: 'https://www.bleakleykia.com/certified-inventory', label: 'Certified pre-owned', kind: 'certified', total: 32, withoutReal: 6, withoutRealPct: 18.8 },

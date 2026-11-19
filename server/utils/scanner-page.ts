@@ -110,9 +110,20 @@ const EXTRACT_SRC = `(function (cfg) {
     var m = (el.textContent || '').toUpperCase().match(VIN_RE)
     return m ? m[0] : ''
   }
+  // Badges, logos and icons inside a card (a CARFAX badge, a "certified" seal, a dealer logo, an SVG) are
+  // not the vehicle's picture. Words are matched whole in the description and class ("Iconic Silver" is a colour).
+  var DECOR_SRC = /logo|icon|badge|carfax|autocheck|sprite|spinner|loader|dealer-?rater|rating|award|\\.svg(?:[?#]|$)/i
+  var DECOR_WORD = /(?:^|[^a-z])(?:logos?|icons?|badges?|carfax|autocheck|sprite|awards?|ratings?|seal)(?:[^a-z]|$)/i
+  function decor(im) {
+    var src = im.getAttribute('data-src') || im.getAttribute('data-lazy-src') || im.getAttribute('data-original') || im.currentSrc || im.getAttribute('src') || ''
+    if (/^data:/i.test(src)) src = ''
+    if (DECOR_SRC.test(src.split('?')[0].slice(-160))) return true
+    return DECOR_WORD.test(im.alt || '') || DECOR_WORD.test(typeof im.className === 'string' ? im.className : '')
+  }
+  function photoSized(im) { var r = im.getBoundingClientRect(); return (r.width >= 80 && r.height >= 50) || (im.naturalWidth >= 120 && im.naturalHeight >= 80) }
   function hasPicture(el) {
     var ims = el.querySelectorAll('img')
-    for (var i = 0; i < ims.length; i++) { var r = ims[i].getBoundingClientRect(); if ((r.width >= 80 && r.height >= 50) || (ims[i].naturalWidth >= 120 && ims[i].naturalHeight >= 80)) return true }
+    for (var i = 0; i < ims.length; i++) if (!decor(ims[i]) && photoSized(ims[i])) return true
     return !!el.querySelector('picture, [style*="background-image"], [data-bg]')
   }
   function whole(el) { return hasPicture(el) && YEAR_RE.test(textOf(el)) }
@@ -181,6 +192,8 @@ const EXTRACT_SRC = `(function (cfg) {
     if (learned.length) { cards = learned; strategy = 'learned' }
   }
   cards = cards.filter(function (c) { return getComputedStyle(c).display !== 'none' })
+  // A banner the site drops into the grid ("inline-banner", "promo-tile") is not a listing.
+  cards = cards.filter(function (c) { return !(/(?:^|[\\s_-])(?:inline-banner|srp-banner|promo-(?:tile|card|banner)|banner-(?:tile|card)|ad-(?:tile|card|slot))(?:$|[\\s_-])/i.test(typeof c.className === 'string' ? c.className : '') && !vinOf(c)) })
 
   function bestFromSrcset(ss) {
     if (!ss) return ''
@@ -204,6 +217,11 @@ const EXTRACT_SRC = `(function (cfg) {
       var el = card.hasAttribute(attrs[i]) ? card : card.querySelector('[' + attrs[i] + ']')
       if (el) { var v = (el.getAttribute(attrs[i]) || '').toLowerCase(); if (/cert|cpo/.test(v)) return 'certified'; if (/used|pre/.test(v)) return 'used'; if (/new/.test(v)) return 'new' }
     }
+    // The card's own class often says it ("used-vehicle", "cpo-vehicle", "new-vehicle").
+    var cc = (typeof card.className === 'string' ? card.className : '') + ' ' + (card.parentElement && typeof card.parentElement.className === 'string' ? card.parentElement.className : '')
+    if (/(?:^|[\\s_-])(?:cpo|certified)[-_]vehicle(?:$|[\\s_-])/i.test(cc)) return 'certified'
+    if (/(?:^|[\\s_-])(?:used|pre-?owned)[-_]vehicle(?:$|[\\s_-])/i.test(cc)) return 'used'
+    if (/(?:^|[\\s_-])new[-_]vehicle(?:$|[\\s_-])/i.test(cc)) return 'new'
     var head = t.slice(0, 160)
     if (/\\bcertified\\b|\\bcpo\\b/i.test(head)) return 'certified'
     if (/\\bpre-?owned\\b|\\bused(?![a-z])/i.test(head)) return 'used'
@@ -236,7 +254,12 @@ const EXTRACT_SRC = `(function (cfg) {
       if (!title) { var alts = Array.prototype.slice.call(card.querySelectorAll('img[alt]')).map(function (im) { return (im.alt || '').trim() }).filter(function (a) { return YEAR_RE.test(a) }); if (alts.length) title = alts[0] }
       if (!title) title = t.slice(0, 80)
     }
+    // Words in front of the vehicle's name that belong to a control or a ribbon ("Compare", "Save", "Just arrived").
+    var lead = title.search(/(?:\\b(?:new|used|certified(?:\\s+pre-?owned)?|pre-?owned|cpo)\\s+)?(?:19[89]\\d|20[0-3]\\d)(?!\\d)/i)
+    if (lead > 0 && lead <= 28 && !/\\d/.test(title.slice(0, lead))) title = title.slice(lead)
     title = title.replace(/^(new|used|certified|pre-owned)(?=\\d)/i, '$1 ')
+    // "Used 2015 2015 MINI Cooper" — some sites print the year twice.
+    title = title.replace(/\\b((?:19|20)\\d\\d)\\s+\\1\\b/, '$1')
     title = title.slice(0, 140)
     var ymm = title.match(/(19[89]\\d|20[0-3]\\d)\\s*([A-Za-z][\\w\\-]+)\\s+([\\w\\-]+)/)
     var dEl = card.hasAttribute('data-make') ? card : card.querySelector('[data-make]')
@@ -249,12 +272,19 @@ const EXTRACT_SRC = `(function (cfg) {
     var sm = t.match(/stock\\s*(?:#|no\\.?|number)?\\s*:?\\s*([A-Z0-9\\-]{3,15})/i)
     var pm = t.match(PRICE_RE)
     // Main photo: the largest rendered image in the card; fall back to any image / background image.
-    var imgs = Array.prototype.slice.call(card.querySelectorAll('img')).filter(function (im) { return !/logo|icon|badge|carfax|autocheck|sprite|spinner|loader|dealer-rater|rating|award/i.test((im.getAttribute('src') || '') + ' ' + (im.alt || '') + ' ' + (im.className || '')) })
+    var every = Array.prototype.slice.call(card.querySelectorAll('img'))
+    var imgs = every.filter(function (im) { return !decor(im) })
     var main = null, area = -1
     var chosen = cfg && cfg.image ? q(card, cfg.image) : null
     if (chosen && chosen.tagName !== 'IMG') chosen = chosen.querySelector('img') || chosen
     if (chosen && chosen.tagName === 'IMG') main = chosen
     else imgs.forEach(function (im) { var r = rect(im); var a = r.w * r.h; if (a > area) { area = a; main = im } })
+    // Safety net: a card never reads as "no photo" (or shows a thumbnail-sized extra) because of a word in a
+    // file name — when nothing photo-sized is left, the largest real picture in the card still counts.
+    if (!(chosen && chosen.tagName === 'IMG') && area < 120 * 80) {
+      var bigArea = area
+      every.forEach(function (im) { var r = rect(im); var src0 = im.currentSrc || im.getAttribute('src') || ''; if (r.w >= 150 && r.h >= 100 && r.w * r.h > bigArea && !/carfax|autocheck|\\.svg(?:[?#]|$)|^data:image\\/svg/i.test(src0)) { bigArea = r.w * r.h; main = im } })
+    }
     var image = null
     if (main) {
       var src = imgSrc(main)
@@ -273,7 +303,7 @@ const EXTRACT_SRC = `(function (cfg) {
       condition: condition(card, t, href) || pageCond, url: href,
       image: image, imageCount: Object.keys(srcs).length, photoCountText: pc ? pc[0] : '',
       noPhotoText: NO_PHOTO_TEXT.test(t) ? (t.match(NO_PHOTO_TEXT) || [''])[0] : '',
-      text: t.replace(/\s+/g, ' ').slice(0, 240),
+      text: t.replace(/\\s+/g, ' ').slice(0, 240),
       box: { x: Math.round(r.left + scrollX), y: Math.round(r.top + scrollY), w: Math.round(r.width), h: Math.round(r.height) },
     }
   })
@@ -281,7 +311,7 @@ const EXTRACT_SRC = `(function (cfg) {
   // Advertised total ("Showing 1–24 of 312 vehicles", "312 Vehicles Found")
   var body = (document.body ? document.body.innerText : '').slice(0, 30000)
   var total = null
-  var pats = [/showing\\s+all\\s+(\\d[\\d,]{0,6})/i, /\\d[\\d,]*\\s*(?:-|–|to)\\s*\\d[\\d,]*\\s+of\\s+(\\d[\\d,]{0,6})/i, /(\\d[\\d,]{0,6})\\s+(?:vehicles|results|matches|cars|listings|units)\\s+(?:found|available|match|in stock)/i, /(\\d[\\d,]{0,6})\\s+(?:vehicles|results|matches|listings)\\b/i]
+  var pats = [/showing\\s+all\\s+(\\d[\\d,]{0,6})/i, /\\d[\\d,]*\\s*(?:-|–|to)\\s*\\d[\\d,]*\\s+of\\s+(\\d[\\d,]{0,6})/i, /(\\d[\\d,]{0,6})\\s+(?:(?:matching|pre-?owned|used|new|certified|total|available|in-stock)\\s+){0,2}(?:vehicles|results|matches|cars|listings|units)\\s+(?:found|available|match|in stock)/i, /(\\d[\\d,]{0,6})\\s+(?:vehicles|results|matches|listings)\\b/i]
   for (var p = 0; p < pats.length && total === null; p++) { var mm = body.match(pats[p]); if (mm) { var n = parseInt(mm[1].replace(/,/g, ''), 10); if (n > 0 && n < 20000) total = n } }
   return { url: location.href, title: document.title, cards: out, total: total, strategy: strategy, scrollHeight: document.documentElement.scrollHeight }
 })`
@@ -464,7 +494,7 @@ export const HOTSPOTS_JS = (maxHeight: number) => `(() => {
 /**
  * Runs in a blank analysis tab: decodes downloaded images and measures them.
  * dHash (64-bit perceptual hash, for spotting the same picture on many cars), white/grey share,
- * colourfulness, edge density, white border (studio renders) and optional OCR (Shape Detection API).
+ * colourfulness, edge density, white border (studio renders), sharpness (blurry photos) and optional OCR.
  * Nothing is kept: the review screen shows the dealer's own image URL.
  */
 export const ANALYZE_FN_JS = `async (items) => {
@@ -472,6 +502,47 @@ export const ANALYZE_FN_JS = `async (items) => {
   var detector = null
   try { if (hasOcr) detector = new TextDetector() } catch (e) { detector = null }
   function b64ToBytes(b64) { var bin = atob(b64); var u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u }
+  // Sharpness, independent of contrast and size. "blur": how little a small extra blur changes the picture (a sharp
+  // photo loses most of its fine detail, a blurry one barely changes); "detail": fine detail left in the busiest parts.
+  function sharpnessOf(bmp) {
+  var sw = Math.min(512, bmp.width), sh = Math.max(1, Math.round(bmp.height * sw / bmp.width))
+  if (sw < 96 || sh < 72) return null
+  var c = new OffscreenCanvas(sw, sh); var x = c.getContext('2d', { willReadFrequently: true })
+  x.drawImage(bmp, 0, 0, sw, sh)
+  var d = x.getImageData(0, 0, sw, sh).data, n = sw * sh, f = new Float32Array(n)
+  for (var i = 0, p = 0; p < n; i += 4, p++) f[p] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]
+  var K = 4 // box blur radius (9 px)
+  function measure(horizontal) {
+    var sumF = 0, sumV = 0, len = horizontal ? sw : sh, lines = horizontal ? sh : sw, step = horizontal ? 1 : sw
+    var b = new Float32Array(len)
+    for (var l = 0; l < lines; l++) {
+      var o = horizontal ? l * sw : l
+      var acc = 0
+      for (var k = -K; k <= K; k++) acc += f[o + Math.min(len - 1, Math.max(0, k)) * step]
+      for (var q = 0; q < len; q++) {
+        b[q] = acc / (2 * K + 1)
+        acc += f[o + Math.min(len - 1, q + K + 1) * step] - f[o + Math.max(0, q - K) * step]
+      }
+      for (var q2 = 1; q2 < len; q2++) {
+        var df = Math.abs(f[o + q2 * step] - f[o + (q2 - 1) * step]), db = Math.abs(b[q2] - b[q2 - 1])
+        sumF += df; var v = df - db; if (v > 0) sumV += v
+      }
+    }
+    return sumF > 0 ? (sumF - sumV) / sumF : 1
+  }
+  var blur = Math.max(measure(true), measure(false))
+  var tiles = [], tw = Math.floor(sw / 8), th = Math.floor(sh / 6)
+  for (var ty = 0; ty < 6; ty++) for (var tx = 0; tx < 8; tx++) {
+    var s = 0, s2 = 0, m = 0
+    for (var yy = ty * th + 1; yy < (ty + 1) * th - 1; yy++) for (var xx = tx * tw + 1; xx < (tx + 1) * tw - 1; xx++) {
+      var k2 = yy * sw + xx, lap = 4 * f[k2] - f[k2 - 1] - f[k2 + 1] - f[k2 - sw] - f[k2 + sw]
+      s += lap; s2 += lap * lap; m++
+    }
+    tiles.push(m ? s2 / m - (s / m) * (s / m) : 0)
+  }
+  tiles.sort(function (a, b) { return a - b })
+  return { blur: Math.round(blur * 1000) / 1000, detail: Math.round(tiles[Math.floor(tiles.length * 0.9)] * 10) / 10 }
+  }
   var out = []
   for (var n = 0; n < items.length; n++) {
     var it = items[n]
@@ -541,7 +612,9 @@ export const ANALYZE_FN_JS = `async (items) => {
       }
       var text = ''
       if (detector) { try { var found = await detector.detect(bmp); text = found.map(function (f) { return f.rawValue }).join(' ').slice(0, 300) } catch (e) {} }
-      out.push({ id: it.id, ok: true, w: bmp.width, h: bmp.height, hash: hash, hash2: hash2, thumb: thumb || undefined, whiteRatio: white / (W * H), grayRatio: gray / (W * H), colorfulness: Math.round(colorfulness * 10) / 10, edgeDensity: edges / ((W - 2) * (H - 2)), borderWhite: border ? borderWhite / border : 0, uniqueColors: Object.keys(q).length, text: text, ocr: !!detector })
+      var sharp = null
+      try { sharp = sharpnessOf(bmp) } catch (e) { sharp = null }
+      out.push({ id: it.id, ok: true, w: bmp.width, h: bmp.height, blur: sharp ? sharp.blur : undefined, detail: sharp ? sharp.detail : undefined, hash: hash, hash2: hash2, thumb: thumb || undefined, whiteRatio: white / (W * H), grayRatio: gray / (W * H), colorfulness: Math.round(colorfulness * 10) / 10, edgeDensity: edges / ((W - 2) * (H - 2)), borderWhite: border ? borderWhite / border : 0, uniqueColors: Object.keys(q).length, text: text, ocr: !!detector })
       bmp.close && bmp.close()
     } catch (e) { out.push({ id: it.id, ok: false, error: String(e && e.message || e) }) }
   }

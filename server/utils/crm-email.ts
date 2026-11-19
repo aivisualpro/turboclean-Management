@@ -134,7 +134,7 @@ export const MERGE_FIELDS = [
   'auditDate', 'auditDateUpper', 'usedTotal', 'usedMissingPhotos', 'usedMissingPhotoPct', 'newTotal', 'newMissingPhotos', 'newMissingPhotoPct',
   'totalVehicles', 'totalMissingPhotos', 'missingPhotoPct', 'inventoryUrl', 'auditScreenshot', 'replyMailto',
   // Inventory Scanner detail + ready-made HTML blocks (see crm-email-blocks.ts)
-  'usedWithPhotos', 'placeholderImages', 'noImageCount', 'stockImages',
+  'usedWithPhotos', 'placeholderImages', 'noImageCount', 'stockImages', 'blurryPhotos',
   'auditEvidence', 'auditGallery', 'usedMissingHeadline', 'usedMissingTitle', 'auditBreakdown', 'usedPhotoBar', 'newInventoryNote', 'inventoryByPage', 'inventoryPageCount', 'inventoryPageList',
   // Then vs now (vs the audit closest to ~3 months earlier) + public report link
   'prevAuditDate', 'prevUsedTotal', 'prevUsedMissingPhotos', 'prevUsedMissingPhotoPct', 'prevTotalMissingPhotos', 'usedMissingChange', 'usedMissingPctChange', 'auditPeriod', 'trendWord', 'auditTrend', 'auditHistoryChart', 'reportUrl',
@@ -180,6 +180,8 @@ export function mergeVars(dealership: any, contact: any, sender: Partial<SenderP
     placeholderImages: n(audit?.photoBreakdown?.placeholder),
     noImageCount: n(audit?.photoBreakdown?.missing),
     stockImages: n(audit?.photoBreakdown?.stock),
+    // Real photos that are blurry (their own finding — not part of the missing-photo numbers).
+    blurryPhotos: n(audit?.photoBreakdown?.blurry),
     auditEvidence: audit ? auditEvidence({ ...audit, auditDateUpper: d ? `${MONTHS[d.getUTCMonth()]!.toUpperCase()} ${String(d.getUTCDate()).padStart(2, '0')}, ${d.getUTCFullYear()}` : '' }, { screenshot: audit?.screenshotFileId ? '__AUDIT_SCREENSHOT__' : '' }) : '',
     // Evidence gallery: the flagged listings pictured as the dealer's site shows them (pictures are embedded when the email is sent).
     auditGallery: audit ? auditGallery(audit, { screenshot: audit?.screenshotFileId ? '__AUDIT_SCREENSHOT__' : '', assetBase: PUBLIC_URL(), reportUrl: extra.reportUrl || '', auditDate: d ? `${MONTHS_LONG[d.getUTCMonth()]} ${String(d.getUTCDate()).padStart(2, '0')}` : '' }) : '',

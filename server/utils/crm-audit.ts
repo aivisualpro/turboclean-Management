@@ -71,14 +71,22 @@ export function buildAuditDoc(body: any, dealershipId: string, actor: any) {
   // Photo verdict breakdown from the Inventory Scanner (real / placeholder / no image / stock).
   const pb = body.photoBreakdown && typeof body.photoBreakdown === 'object' ? body.photoBreakdown : null
   const photoBreakdown = pb
-    ? { real: int(pb.real) ?? 0, placeholder: int(pb.placeholder) ?? 0, missing: int(pb.missing) ?? 0, stock: int(pb.stock) ?? 0, countStockAsMissing: pb.countStockAsMissing !== false }
+    ? { real: int(pb.real) ?? 0, placeholder: int(pb.placeholder) ?? 0, missing: int(pb.missing) ?? 0, stock: int(pb.stock) ?? 0, blurry: int(pb.blurry) ?? 0, countStockAsMissing: pb.countStockAsMissing !== false }
     : null
+  // Real photos that are blurry — a finding of its own (never part of "missing photos").
+  const blurryExamples = Array.isArray(body.blurryExamples)
+    ? body.blurryExamples.map((e: any) => ({
+        url: str(e?.url, 1000), title: str(e?.title, 160), stock: str(e?.stock, 40), price: str(e?.price, 40), condition: str(e?.condition, 20),
+        ...(e?.listUrl ? { listUrl: str(e.listUrl, 1000) } : {}),
+        ...(/^https:\/\//i.test(String(e?.imageUrl || '')) ? { imageUrl: str(e.imageUrl, 1000) } : {}),
+      })).filter((e: any) => e.url).slice(0, 24)
+    : []
   // Per crawl page (inventory list) — reports and emails group the findings by these.
   const pages = Array.isArray(body.pages)
     ? body.pages.map((p: any) => ({
         url: str(p?.url, 1000), label: str(p?.label, 80), kind: str(p?.kind, 20),
         total: int(p?.total) ?? 0, withoutReal: int(p?.withoutReal) ?? 0, withoutRealPct: typeof p?.withoutRealPct === 'number' ? p.withoutRealPct : null,
-        real: int(p?.real) ?? 0, placeholder: int(p?.placeholder) ?? 0, missing: int(p?.missing) ?? 0, stock: int(p?.stock) ?? 0,
+        real: int(p?.real) ?? 0, placeholder: int(p?.placeholder) ?? 0, missing: int(p?.missing) ?? 0, stock: int(p?.stock) ?? 0, blurry: int(p?.blurry) ?? 0,
       })).filter((p: any) => p.url).slice(0, 30)
     : []
 
@@ -107,6 +115,7 @@ export function buildAuditDoc(body: any, dealershipId: string, actor: any) {
     notes: str(body.notes, 6000),
     examples,
     photoBreakdown,
+    blurryExamples,
     pages,
     coverage,
     scope,

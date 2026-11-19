@@ -1,5 +1,5 @@
 /**
- * Data-grid column layouts — how each person arranged a table's columns (order, hidden, frozen, widths).
+ * Data-grid column layouts — how each person arranged a table's columns (order, hidden, frozen, widths, sort).
  *
  * One document per person per table: { userId, gridId, layout, updatedAt }. The browser keeps its own
  * copy and decides what the layout means for today's columns (see app/lib/gridLayout.ts); the server
@@ -15,7 +15,7 @@ const GRID_ID_RE = /^[a-z0-9][a-z0-9-]{1,62}$/
 const GRID_COLUMN_RE = /^[A-Z][\w-]{0,63}$/i
 const GRID_MAX_COLUMNS = 200
 
-export interface StoredGridLayout { v: 1, order: string[], hidden: string[], pinned: string[], widths: Record<string, number>, updatedAt: number }
+export interface StoredGridLayout { v: 1, order: string[], hidden: string[], pinned: string[], widths: Record<string, number>, sort: { key: string, dir: 'asc' | 'desc' } | null, updatedAt: number }
 
 /** The table's id from the URL — lowercase letters, digits and dashes only. */
 export function gridLayoutId(raw: unknown): string {
@@ -37,12 +37,14 @@ export function sanitizeGridLayout(raw: any, now = Date.now()): StoredGridLayout
     }
   }
   const at = Number(raw.updatedAt)
+  const s = raw.sort
   return {
     v: 1,
     order,
     hidden: keys(raw.hidden).filter(k => known.has(k)),
     pinned: keys(raw.pinned).filter(k => known.has(k)),
     widths,
+    sort: s && typeof s === 'object' && typeof s.key === 'string' && known.has(s.key) && (s.dir === 'asc' || s.dir === 'desc') ? { key: s.key, dir: s.dir } : null,
     // A computer whose clock runs ahead must not win every future comparison.
     updatedAt: Number.isFinite(at) && at > 0 ? Math.min(Math.floor(at), now) : now,
   }

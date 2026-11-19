@@ -26,10 +26,11 @@ import type { BrowserHandle, CdpConnection } from './scanner-cdp'
 import { ANALYZE_FN_JS, EXTRACT_JS, FIND_NEXT_JS, HOTSPOTS_JS, NAV_LINKS_JS, SCANNER_BOOTSTRAP_JS, SCROLL_STEP_JS, extractWith } from './scanner-page'
 import type { CardLayout } from './scanner-page'
 import { forgetLayout, learnLayout, readingProblem, savedLayout, unreliableResult } from './scanner-layout'
-import { classify, countable, downloadImage, finalVerdict, isAd, listRules, RULES_COLLECTION, summarize, VERDICT_LABEL } from './scanner-images'
+import { classify, countable, downloadImage, FINAL_VERDICTS, finalVerdict, isAd, listRules, RULES_COLLECTION, sharpnessScore, summarize, VERDICT_LABEL } from './scanner-images'
 import type { ImageCluster, ImageInfo, PhotoVerdict, ScanVehicle } from './scanner-images'
 import { checkScanPage, healthFromScope, inList, landing, matchScanPage, scopeKey, scopeOf, scopePath } from './scanner-scope'
 import type { ScopeEntry } from './scanner-scope'
+import { createVehicleIndex, foldTwinVehicles } from './scanner-identity'
 
 export const SCANS_COLLECTION = 'turboCleanScannerScans'
 export const ENGINE_VERSION = '2.0'
@@ -56,6 +57,8 @@ export interface ScanProgress { phase: ScanPhase, page: number, vehicles: number
   blocked?: { url: string, href: string, page: number, at: string }[]
   /** Lists whose "next page" never moved although the site lists more vehicles. */
   stuck?: { url: string, page: number }[]
+  /** The AI photo check of this crawl: who looked, how many photos — or why it did not run. */
+  photoCheck?: { provider: string | null, checked: number, cached: number, failed: number, off: string } | null
   /** The crawl plan: every saved scan page this crawl covers and what happened to it. Nothing outside it is read. */
   scope?: ScopeEntry[] }
 export type ScanStatus = 'running' | 'done' | 'stopped' | 'failed' | 'saved' | 'interrupted'
@@ -288,7 +291,7 @@ async function isBlockedPage(t: Tab) {
   return /^access denied$|attention required|just a moment|request blocked|pardon our interruption|are you a robot|verify you are human/i.test(r.title.trim()) || (/access denied/i.test(r.text) && /reference #|you don.t have permission/i.test(r.text))
 }
 /** A fingerprint of what the result list shows (address + first vehicle links) — tells whether "next" really moved. */
-const PAGE_SIG_JS = `(() => { var hs = []; var as = document.querySelectorAll('a[href]'); for (var i = 0; i < as.length && hs.length < 12; i++) { var h = as[i].href; if (/vin|vehicle|inventory\\/[^?#]*\\d|detail|vdp|stock|\\/(used|new|certified)[-/][^?#]*\\d{4}/i.test(h) && hs.indexOf(h) < 0) hs.push(h) } return location.href + '|' + hs.join('|') })()`
+const PAGE_SIG_JS = `(() => { var hs = []; var vs = document.querySelectorAll('[data-vin]'); for (var j = 0; j < vs.length && hs.length < 12; j++) { var v = vs[j].getAttribute('data-vin'); if (v && hs.indexOf(v) < 0) hs.push(v) } var as = document.querySelectorAll('a[href]'); for (var i = 0; i < as.length && hs.length < 24; i++) { var h = as[i].href; if (/vin|vehicle|inventory\\/[^?#]*\\d|detail|vdp|stock|\\/(used|new|certified)[-/][^?#]*\\d{4}/i.test(h) && hs.indexOf(h) < 0 && !as[i].closest('nav, header, footer, [role="navigation"], [class*="menu"], [class*="navbar"], [id*="menu"]')) hs.push(h) } return location.href + '|' + hs.join('|') })()`
 async function pageSig(t: Tab) { return evaluate<string>(t, PAGE_SIG_JS, 5_000).catch(() => '') }
 /** After a click: wait (up to ~8 s) until the list really changed — single-page sites swap the cards without a page load. */
 async function waitForChange(t: Tab, before: string) {
@@ -329,14 +332,27 @@ async function freshVisit(t: Tab, url: string, log: (s: string) => void) {
   } catch (e: any) { if (isBrowserGone(e)) throw e; return false }
 }
 
+/** The same page address? (the order of ?a=1&b=2, a trailing slash and #anchors do not matter) */
+function sameAddress(a: string, b: string) {
+  const norm = (u: string) => { try { const x = new URL(u); return `${x.origin}${x.pathname.replace(/\/+$/, '')}?${[...x.searchParams.entries()].map(([k, v]) => `${k}=${v}`).sort().join('&')}` } catch { return String(u || '').split('#')[0] } }
+  return norm(a) === norm(b)
+}
 async function followNextLink(t: Tab, href: string, lastGood: string, log: (s: string) => void): Promise<boolean | 'same'> {
   const attempt = async (how: 'click' | 'assign'): Promise<boolean | 'same'> => {
     const before = await pageSig(t)
     const urlBefore = t.url
+    const limited = () => t.status === 429 || t.status === 503 || t.status === 509
+    /** "Too many requests" on the way to the next page: wait politely and load it again (goto does the waiting). */
+    const reload = async (): Promise<boolean> => {
+      try { await goto(t, href, 25_000, log, urlBefore) }
+      catch (e: any) { if (isBrowserGone(e)) throw e; return false }
+      return !(await isBlockedPage(t))
+    }
     t.status = null
     const clicked = how === 'click' ? await trustedClick(t) : false
     if (!clicked) await evaluate(t, `location.assign(${JSON.stringify(href)})`, 5_000).catch(() => {})
     await settleAfterInPageNav(t, urlBefore)
+    if (limited()) return reload()
     if (await isBlockedPage(t)) return false
     if (await waitForChange(t, before)) return true
     // The click did nothing (an overlay, a dead link) — open the address from the page itself.
@@ -344,9 +360,15 @@ async function followNextLink(t: Tab, href: string, lastGood: string, log: (s: s
       t.status = null
       await evaluate(t, `location.assign(${JSON.stringify(href)})`, 5_000).catch(() => {})
       await settleAfterInPageNav(t, t.url)
+      if (limited()) return reload()
       if (await isBlockedPage(t)) return false
       if (await waitForChange(t, before)) return true
     }
+    // The address did change but the cards look the same so far: a slow list, or the site answered
+    // "too many requests" to its own background call. Load the page properly once — what is on it
+    // then decides (a page with nothing new ends the list), instead of giving up on the list here.
+    const here = (await evaluate<string>(t, 'location.href', 5_000).catch(() => '')) || t.url
+    if (sameAddress(here, href) && !sameAddress(urlBefore, href)) return reload()
     return 'same'
   }
   const first = await attempt('click')
@@ -499,13 +521,15 @@ export function resultsOf(doc: ScanDoc) {
   const images: Record<string, any> = {}
   for (const i of doc.images) {
     if (!used.has(i.id)) continue
-    images[i.id] = { id: i.id, url: i.url, ok: i.ok, error: i.error || null, w: i.w || null, h: i.h || null, hash: i.hash || null, hash2: i.hash2 || null, text: i.text || '', ocr: !!i.ocr }
+    images[i.id] = { id: i.id, url: i.url, ok: i.ok, error: i.error || null, w: i.w || null, h: i.h || null, hash: i.hash || null, hash2: i.hash2 || null, text: i.text || '', ocr: !!i.ocr, sharp: sharpnessScore(i) }
   }
   const cmap = new Map(doc.clusters.map(c => [c.id, c]))
   return {
     scanId: String(doc._id), summary, countStockAsMissing: doc.countStockAsMissing, advertised: advertisedTotal(doc), pages: doc.progress.pagesVisited,
     // The reading cannot be right (see scanner-layout.ts): shown as a warning, saving is refused.
     unreliable: unreliableResult(doc.vehicles, summary),
+    // Did the AI look at the photos of this crawl? (off = verdicts come from the built-in checks only)
+    photoCheck: doc.progress.photoCheck || null,
     // Coverage: how much of what the site lists we could actually check (blocked pages are retried from their checkpoint).
     coverage: { checked: countable(doc.vehicles).length, advertised: advertisedTotal(doc), blocked: (doc.progress.blocked || []).map(b => ({ url: b.url, page: b.page })) },
     vehicles: doc.vehicles.map(v => ({ ...v, listUrl: listKey(v, doc), final: finalVerdict(v, cmap) })), clusters: doc.clusters, images,
@@ -543,6 +567,7 @@ async function finalizeIfInterrupted(db: Db, doc: ScanDoc) {
   }
   doc.images = doc.images || []
   doc.clusters = doc.clusters || []
+  doc.vehicles = foldTwinVehicles(doc.vehicles).vehicles
   // Give every vehicle an image entry (no download) so URL / text rules can run.
   const byUrl = new Map(doc.images.map(i => [i.url, i]))
   for (const v of doc.vehicles) {
@@ -584,13 +609,6 @@ export async function requestStop(db: Db, id: string, reason: 'stop' | 'pause' =
 
 // ───────────────────────── The scan ─────────────────────────
 type Emit = (event: string, data: any) => void
-
-function vehicleKey(c: any) {
-  if (c.vin) return `vin:${c.vin}`
-  if (c.url) return `url:${String(c.url).split('#')[0]}`
-  if (c.stock) return `stock:${c.stock}`
-  return `t:${c.title}|${c.price}|${c.image?.url || ''}`
-}
 
 /**
  * The crawl plan for a dealership: its saved scan pages (all of them, or the ones asked for).
@@ -764,9 +782,11 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
 
     if (doc.batchId) batchNote(db, doc, 'running').catch(() => {})
     // ── Collect ──
-    const seen = new Map(doc.vehicles.map(v => [v.key, v]))
+    // A continued scan made before vehicles were matched by their page: fold the VIN-less twins first.
+    { const f = foldTwinVehicles(doc.vehicles); if (f.folded) { doc.vehicles = f.vehicles; log(`${f.folded} vehicle${f.folded === 1 ? ' was' : 's were'} listed twice from an earlier run — counted once now`) } }
+    // One record per vehicle, however its card reads at the moment (see scanner-identity.ts).
+    const known = createVehicleIndex(doc.vehicles)
     let advertised: number | null = doc.progress.advertised
-    const better = (a: any, b: any) => (!a?.url && b?.url) || (a?.url && b?.url && a.url !== b.url && (a.nw || 0) === 0 && (b.nw || 0) > 0)
     const startCount = doc.vehicles.length
     const urls = doc.urls?.length ? doc.urls : [doc.startUrl]
     let pageNo = 0
@@ -787,6 +807,10 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     doc.progress.doneUrls ||= []
     const entry = scopeEntry(startUrl)
     const listCount = () => doc.vehicles.reduce((n, v) => n + (v.listUrl === startUrl ? 1 : 0), 0)
+    /** Every vehicle read on this list — also the ones another list already had (a certified car is in the pre-owned list too). */
+    const readHere = new Set<ScanVehicle>()
+    /** How far this list was read, for "the site lists more than we got". */
+    const readCount = () => Math.max(listCount(), readHere.size)
     /** Result pages of this list live under this address (the scan page, or where the site forwarded it). */
     let listBase = startUrl
     let emptyHere = false
@@ -889,6 +913,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       let res: any = null
       let added = 0
       let pageCards = 0
+      const addedHere: ScanVehicle[] = []
       const collect = async (final = false) => {
         let r = await evaluate<any>(tab, extractWith(layout), 45_000).catch(() => null)
         if (!r) return
@@ -911,17 +936,20 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
         res = r
         pageCards = Math.max(pageCards, r.cards?.length || 0)
         if (r.total) { advertised = Math.max(advertised || 0, r.total); (doc.progress.advertisedByUrl ||= {})[startUrl] = advertised }
+        known.noteReading(r.cards || [])
         for (const c of r.cards || []) {
-          const key = vehicleKey(c)
-          const had = seen.get(key)
-          if (had) { if (better(had.image, c.image)) had.image = c.image; if (!had.noPhotoText && c.noPhotoText) had.noPhotoText = c.noPhotoText; continue }
+          // Seen before (on an earlier reading of this page, or another result page)? Keep what this reading adds.
+          const had = known.find(c, startUrl)
+          if (had) { known.merge(had, c); readHere.add(had); continue }
           const v: ScanVehicle = {
-            key, title: c.title || '', year: c.year ?? null, make: c.make || '', model: c.model || '', vin: c.vin || '', stock: c.stock || '', price: c.price || '',
+            key: known.keyFor(c), title: c.title || '', year: c.year ?? null, make: c.make || '', model: c.model || '', vin: c.vin || '', stock: c.stock || '', price: c.price || '',
             condition: (['new', 'used', 'certified'].includes(c.condition) ? c.condition : '') as any, url: c.url || '', image: c.image || null, imageId: null,
             imageCount: c.imageCount || 0, photoCountText: c.photoCountText || '', noPhotoText: c.noPhotoText || '', cardText: String(c.text || '').slice(0, 240), page, sourceUrl: r.url, listUrl: startUrl,
             verdict: 'review', suggested: 'real', confidence: 0, reasons: [], clusterId: null, override: null,
           }
-          seen.set(key, v)
+          known.add(v)
+          readHere.add(v)
+          addedHere.push(v)
           doc.vehicles.push(v)
           added++
         }
@@ -954,18 +982,50 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
       log(`${urls.length > 1 ? 'Result page' : 'Page'} ${page}: ${pageCards} cards on screen, ${added} new — ${res?.strategy === 'known' ? 'recognised layout' : res?.strategy === 'learned' ? 'layout read by AI' : 'detected by structure'}`)
       mark(entry, { vehicles: listCount(), resultPages: Math.max(entry.resultPages, page), advertised: doc.progress.advertisedByUrl?.[startUrl] ?? entry.advertised })
       if (pageCards === 0 && p === 1) { log('No vehicle cards on this page — moving on'); emptyHere = !resumeAt; break }
+      // A pre-owned list does not turn into new cars on a later result page (and the other way round):
+      // when it does, the site's "next" left the list's filter. Those cards are not part of this list.
+      if (p > 1 && addedHere.length >= 4) {
+        const kind = pageKind(startUrl, [])
+        const off = (v: ScanVehicle) => kind === 'new' ? (v.condition === 'used' || v.condition === 'certified') : (kind === 'used' || kind === 'certified') ? v.condition === 'new' : false
+        const earlier = doc.vehicles.filter(v => v.listUrl === startUrl && !addedHere.includes(v))
+        if ((kind === 'new' || kind === 'used' || kind === 'certified') && addedHere.filter(off).length / addedHere.length >= 0.7 && earlier.length >= 4 && earlier.filter(off).length / earlier.length <= 0.2) {
+          const gone = new Set(addedHere)
+          doc.vehicles = doc.vehicles.filter(v => !gone.has(v))
+          for (const v of addedHere) { known.remove(v); readHere.delete(v) }
+          log(`Result page ${page} shows ${kind === 'new' ? 'pre-owned' : 'new'} vehicles — the site's "next" left this ${kind === 'new' ? 'new' : 'pre-owned'} list. Those ${addedHere.length} cards are not counted.`)
+          mark(entry, { vehicles: listCount(), resultPages: Math.max(1, page - 1) })
+          setProgress({ vehicles: doc.vehicles.length })
+          doc.progress.resumeAt = null
+          // The rest of this list could not be reached that way: say so instead of calling it complete.
+          const adv = doc.progress.advertisedByUrl?.[startUrl]
+          if (adv && readCount() < adv - Math.max(1, Math.round(adv * 0.02))) stuckPage = page
+          break
+        }
+      }
       if (!doc.allPages || doc.vehicles.length >= MAX_VEHICLES) break
       if (Date.now() >= collectUntil) { log('Time limit for collecting reached — checking the photos found so far'); timeUp = true; stop = stop || u < urls.length - 1; break }
       // Nothing new twice in a row = going in circles (also right after a restart, where one repeat is normal).
       zeroStreak = added === 0 && p > 1 ? zeroStreak + 1 : 0
-      if (added === 0 && p > 1 && (!revisit || zeroStreak >= 2)) break
+      if (added === 0 && p > 1 && (!revisit || zeroStreak >= 2)) {
+        // Nothing new although the site lists clearly more: the list was not read to its end — say so.
+        const adv = doc.progress.advertisedByUrl?.[startUrl]
+        if (adv && readCount() < adv - Math.max(1, Math.round(adv * 0.02))) stuckPage = page
+        break
+      }
       if (advertised && doc.vehicles.length - countBefore >= advertised) break
 
       const next = await evaluate<any>(tab, FIND_NEXT_JS).catch(() => null)
       if (tab.conn.closed) throw new Error('Browser connection is closed')
-      if (!next) break
+      if (!next) {
+        // No way forward although the site lists clearly more than was read: the list is incomplete — say so.
+        const adv = doc.progress.advertisedByUrl?.[startUrl]
+        if (adv && readCount() < adv - Math.max(1, Math.round(adv * 0.02))) stuckPage = page + 1
+        break
+      }
+      // Turn the pages at a visitor's pace — sites answer "too many requests" to a reader that never pauses.
+      await sleep(600 + Math.round(Math.random() * 900))
       /** More vehicles are advertised than we have: leaving now means this list is only partly read. */
-      const shortOfAdvertised = () => { const adv = doc.progress.advertisedByUrl?.[startUrl]; return !!adv && listCount() < adv }
+      const shortOfAdvertised = () => { const adv = doc.progress.advertisedByUrl?.[startUrl]; return !!adv && readCount() < adv }
       if (next.kind === 'href') {
         // Scope guard: a "next" link is only followed while it stays inside this list.
         if (!inList(listBase, String(next.href))) {
@@ -984,8 +1044,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
         const through = await followNextLink(tab, String(next.href), lastGood, log).catch((e: any) => { if (isBrowserGone(e)) throw e; log(`Could not open the next page (${e?.message})`); return false })
         if (through === 'same') {
           log('The site did not move to the next page — end of this list')
-          const adv = doc.progress.advertisedByUrl?.[startUrl]
-          if (adv && doc.vehicles.length - countBefore < adv) stuckPage = page + 1
+          if (shortOfAdvertised()) stuckPage = page + 1
           break
         }
         if (!through) { blockedHere = { url: startUrl, href: ckBase, page: page + 1, at: new Date().toISOString() }; break }
@@ -1262,9 +1321,10 @@ async function analyzePhotos(t: Tab, doc: ScanDoc, o: { setProgress: (p: Partial
   // AI photo check (Gemini): every photo, cached by fingerprint — instant for pictures seen before.
   try {
     const { visionCheck } = await import('./scanner-vision')
-    await visionCheck(o.db || null, [...images.values()], doc.vehicles, { log: o.log, deadline: Math.min(o.deadline, Date.now() + 90_000), onProgress: (d, n) => o.setProgress({ message: `AI photo check… ${d} of ${n}` }) })
+    const r = await visionCheck(o.db || null, [...images.values()], doc.vehicles, { log: o.log, deadline: Math.min(o.deadline, Date.now() + 90_000), onProgress: (d, n) => o.setProgress({ message: `AI photo check… ${d} of ${n}` }) })
+    doc.progress.photoCheck = { provider: r.provider || null, checked: r.checked, cached: r.cached, failed: r.failed, off: r.off || '' }
   }
-  catch (e: any) { o.log(`AI photo check skipped (${String(e?.message || e).slice(0, 100)})`) }
+  catch (e: any) { o.log(`AI photo check skipped (${String(e?.message || e).slice(0, 100)})`); doc.progress.photoCheck = { provider: null, checked: 0, cached: 0, failed: 0, off: 'error' } }
   // The small copies made for the AI check are kept in memory a little longer: once the verdicts are in,
   // the ones of flagged listings become the evidence pictures (keepEvidencePictures); the rest is dropped.
   const thumbs: Map<string, string> = ((doc as any).__thumbs ||= new Map())
@@ -1342,7 +1402,8 @@ async function reclassify(db: Db | null, doc: ScanDoc, log?: (s: string) => void
   catch (e: any) { log?.(`Saved image rules unavailable (${e?.message}) — using built-in checks only`) }
   const keep = new Map(doc.clusters.map(c => [c.hash, c.override]))
   const images = new Map(doc.images.map(i => [i.id, i]))
-  const { clusters, ruleHits } = classify(doc.vehicles, images, rules)
+  const { clusters, ruleHits, softSite } = classify(doc.vehicles, images, rules)
+  if (softSite) log?.(`${softSite} photos measure as soft — this list shows small, low-detail pictures throughout, so blur is not reported car by car`)
   for (const c of clusters) { const o = keep.get(c.hash); if (o) c.override = o }
   doc.clusters = clusters
   if (ruleHits.size && db) {
@@ -1356,7 +1417,7 @@ async function reclassify(db: Db | null, doc: ScanDoc, log?: (s: string) => void
 export async function applyReview(db: Db, id: string, body: any) {
   const doc = await getScan(db, id)
   if (!hasResults(doc)) throw createError({ statusCode: 409, statusMessage: 'Wait for the scan to finish' })
-  const ok = (v: any): Exclude<PhotoVerdict, 'review'> | null => ['real', 'placeholder', 'stock', 'missing'].includes(v) ? v : null
+  const ok = (v: any): Exclude<PhotoVerdict, 'review'> | null => (FINAL_VERDICTS as readonly string[]).includes(v) ? v : null
   if (Array.isArray(body?.vehicles)) {
     const set = new Map<string, any>(body.vehicles.map((x: any) => [String(x.key), x.verdict]))
     for (const v of doc.vehicles) if (set.has(v.key)) v.override = ok(set.get(v.key))
@@ -1365,17 +1426,20 @@ export async function applyReview(db: Db, id: string, body: any) {
     for (const x of body.clusters) { const c = doc.clusters.find(c => c.id === x.id); if (c) c.override = ok(x.verdict) }
   }
   // Corrections teach the AI cache too: the same picture on any future crawl gets this answer straight away.
+  // (a few at a time — "select all → mark" can be hundreds of pictures)
   try {
     const { teachVision } = await import('./scanner-vision')
     const imgs = new Map(doc.images.map(i => [i.id, i]))
-    for (const x of Array.isArray(body?.vehicles) ? body.vehicles : []) {
-      const v = doc.vehicles.find(v => v.key === String(x.key)); const im = v?.imageId ? imgs.get(v.imageId) : null
-      const f = ok(x.verdict); if (im && f) await teachVision(db, im, f)
-    }
+    const byKey = new Map(doc.vehicles.map(v => [v.key, v]))
+    const jobs: (() => Promise<void>)[] = []
+    const taught = new Set<string>()
+    const teach = (im: ImageInfo | null | undefined, f: Exclude<PhotoVerdict, 'review'> | null) => { if (im && f && !taught.has(im.id)) { taught.add(im.id); jobs.push(() => teachVision(db, im, f)) } }
+    for (const x of Array.isArray(body?.vehicles) ? body.vehicles : []) { const v = byKey.get(String(x.key)); teach(v?.imageId ? imgs.get(v.imageId) : null, ok(x.verdict)) }
     for (const x of Array.isArray(body?.clusters) ? body.clusters : []) {
       const c = doc.clusters.find(c => c.id === x.id); const f = ok(x.verdict)
-      if (c && f) for (const id of c.imageIds) { const im = imgs.get(id); if (im) await teachVision(db, im, f) }
+      if (c && f) for (const id of c.imageIds) teach(imgs.get(id), f)
     }
+    for (let i = 0; i < jobs.length; i += 16) await Promise.all(jobs.slice(i, i + 16).map(j => j().catch(() => {})))
   } catch {}
   // "This is an ad" / "This is a vehicle" — a person's call, remembered for that picture on every future crawl.
   if (Array.isArray(body?.listings)) {
@@ -1435,7 +1499,7 @@ export function pageBreakdown(doc: ScanDoc, d: any, cmap: Map<string, any>) {
   return [...groups.entries()]
     .sort((a, b) => (order.indexOf(a[0]) + 1 || 99) - (order.indexOf(b[0]) + 1 || 99))
     .map(([url, vs]) => {
-      const by = { real: 0, placeholder: 0, stock: 0, missing: 0 }
+      const by = { real: 0, placeholder: 0, stock: 0, missing: 0, blurry: 0 }
       for (const v of vs) by[finalVerdict(v, cmap)]++
       const withoutReal = by.missing + by.placeholder + (doc.countStockAsMissing ? by.stock : 0)
       const kind = pageKind(url, vs)
@@ -1456,8 +1520,10 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
   const pages = doc.progress.pagesVisited
   const parts = [
     `Inventory Scanner: ${sum.total} vehicles on ${pages.length} page${pages.length === 1 ? '' : 's'}${doc.progress.advertised ? ` (site advertises ${doc.progress.advertised})` : ''}.`,
-    `${sum.by.real} real photos · ${sum.by.missing + sum.by.placeholder} no photo (${sum.by.placeholder} showing a placeholder image such as “photos unavailable”, ${sum.by.missing} with no image) · ${sum.by.stock} stock images${doc.countStockAsMissing ? ' (counted as no photo)' : ' (counted as photos)'}.`,
+    `${sum.by.real + sum.by.blurry} real photos · ${sum.by.missing + sum.by.placeholder} no photo (${sum.by.placeholder} showing a placeholder image such as “photos unavailable”, ${sum.by.missing} with no image) · ${sum.by.stock} stock images${doc.countStockAsMissing ? ' (counted as no photo)' : ' (counted as photos)'}.`,
   ]
+  if (sum.by.blurry) parts.push(`Photo quality: ${sum.by.blurry} of the real photos ${sum.by.blurry === 1 ? 'is' : 'are'} blurry (out of focus / low resolution) — listed separately, not counted as missing.`)
+  if (doc.progress.photoCheck && !doc.progress.photoCheck.provider && doc.progress.photoCheck.off) parts.push('Photos were judged by the built-in checks only (the AI photo check was not running).')
   const adv = advertisedTotal(doc)
   const blockedN = (doc.progress.blocked || []).length
   if (adv && adv > sum.total) parts.push(`Coverage: checked ${sum.total} of the ${adv} vehicles the site lists${blockedN ? ` — the site's bot protection refused ${blockedN} result page${blockedN === 1 ? '' : 's'}` : ''}. Percentages are of the vehicles checked.`)
@@ -1491,10 +1557,15 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
     coverage: { checked: sum.total, advertised: adv, blockedPages: blockedN },
     scope: scope.map(e => ({ url: e.url, label: e.label, status: e.status, vehicles: e.vehicles, resultPages: e.resultPages, advertised: e.advertised, note: e.note })),
     examples: picked.map((v) => { const f = finalVerdict(v, cmap); return { url: v.url, label: `${v.title}${v.stock ? ` #${v.stock}` : ''} — ${VERDICT_LABEL[f]}`, title: v.title, stock: v.stock, price: v.price, condition: v.condition, verdict: f, listUrl: listKey(v, doc), ...pictureOf(v) } }),
-    photoBreakdown: { real: sum.by.real, placeholder: sum.by.placeholder, missing: sum.by.missing, stock: sum.by.stock, countStockAsMissing: doc.countStockAsMissing },
+    photoBreakdown: { real: sum.by.real, placeholder: sum.by.placeholder, missing: sum.by.missing, stock: sum.by.stock, blurry: sum.by.blurry, countStockAsMissing: doc.countStockAsMissing },
+    // Blurry photos are their own finding (never part of "missing photos"): the first ones, pre-owned first.
+    blurryExamples: countable(doc.vehicles).filter(v => finalVerdict(v, cmap) === 'blurry' && v.url)
+      .sort((a, b) => Number(a.condition === 'new') - Number(b.condition === 'new')).slice(0, 24)
+      .map(v => ({ url: v.url, title: v.title, stock: v.stock, price: v.price, condition: v.condition, listUrl: listKey(v, doc), ...(/^https:\/\//i.test(v.image?.url || '') ? { imageUrl: v.image!.url } : {}) })),
     merchandisingIssues: [
       ...(sum.by.missing + sum.by.placeholder ? ['Vehicles listed with no photos (placeholder / “photos unavailable”)'] : []),
       ...(sum.by.stock ? ['Stock images instead of real photos'] : []),
+      ...(sum.by.blurry ? ['Blurry / low-quality main photos'] : []),
     ],
     notes: parts.join('\n'),
     screenshotFileId: null,

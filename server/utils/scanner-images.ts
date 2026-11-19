@@ -7,6 +7,8 @@
  *   stock        manufacturer or stock-library images (EVOX, Chrome Data, izmo…), or one photo reused
  *                across several different vehicles of the same model
  *   missing      no photo at all, or the photo link is broken
+ *   blurry       a real photo of the car, but out of focus / smeared / a tiny picture blown up — shown on
+ *                its own (own count and tag); it is NOT part of "without a real photo"
  *   review       signals disagree — the scanner's best guess is kept in `suggested`
  *
  * Evidence (each with a plain-English reason shown in the UI):
@@ -15,15 +17,18 @@
  *  - what the image says: on-image text read with the browser's Shape Detection API (OCR)
  *  - file name / image host (coming-soon.jpg, evox, chromedata…), alt text, card wording
  *  - how it looks: mostly blank & colourless, or a car on a pure white studio background
+ *  - how sharp it is: measured on the picture itself (works without AI), confirmed by the AI when it is on
  *  - your saved rules: "always treat this image as …" (learned across every dealership)
  */
 import type { Db } from 'mongodb'
 import { ObjectId } from 'mongodb'
 import type { SessionActor } from './crm'
 
-export type PhotoVerdict = 'real' | 'placeholder' | 'stock' | 'missing' | 'review'
+export type PhotoVerdict = 'real' | 'placeholder' | 'stock' | 'missing' | 'blurry' | 'review'
+/** What a person (or a rule) may set. */
+export const FINAL_VERDICTS = ['real', 'placeholder', 'stock', 'missing', 'blurry'] as const
 /** A placeholder image ("Vehicle photos unavailable", "coming soon") means the car has no photo — same label. */
-export const VERDICT_LABEL: Record<PhotoVerdict, string> = { real: 'Real photo', placeholder: 'No photo', stock: 'Stock image', missing: 'No photo', review: 'Needs review' }
+export const VERDICT_LABEL: Record<PhotoVerdict, string> = { real: 'Real photo', placeholder: 'No photo', stock: 'Stock image', missing: 'No photo', blurry: 'Blurry photo', review: 'Needs review' }
 
 export interface CardImage { url: string, alt: string, nw: number, nh: number, complete: boolean, rw: number, rh: number, kind: 'img' | 'background' }
 export interface ImageInfo {
@@ -42,10 +47,13 @@ export interface ImageInfo {
   edgeDensity?: number
   borderWhite?: number
   uniqueColors?: number
+  /** Sharpness, measured on the picture: `blur` 0–1 (how little a small extra blur changes it), `detail` = fine detail in its busiest parts. */
+  blur?: number
+  detail?: number
   text?: string
   ocr?: boolean
   /** Gemini's look at the photo (cached by fingerprint). */
-  ai?: { v: 'real' | 'placeholder' | 'stock', c: number, why: string, text: string, model: string, ad?: boolean, adWhy?: string, cached?: boolean }
+  ai?: { v: 'real' | 'placeholder' | 'stock', c: number, why: string, text: string, model: string, ad?: boolean, adWhy?: string, cached?: boolean, /** The photo itself is out of focus / smeared. */ blur?: boolean }
   bytes?: number
 }
 export interface ScanVehicle {
@@ -214,6 +222,40 @@ export function buildClusters(vehicles: ScanVehicle[], images: Map<string, Image
   return clusters.sort((a, b) => b.vehicles - a.vehicles)
 }
 
+/**
+ * Is the picture blurry? Measured, not guessed (calibrated on sharp photos and the same photos blurred):
+ *   'blurry'  clearly out of focus / smeared / a small picture blown up
+ *   'soft'    noticeably soft — only called blurry when the AI looking at it agrees
+ *   'sharp'   fine          ·  null = not measured (too small to judge, or not downloaded)
+ */
+export function blurLevel(i?: ImageInfo | null): 'blurry' | 'soft' | 'sharp' | null {
+  if (!i?.ok || typeof i.blur !== 'number' || typeof i.detail !== 'number') return null
+  if ((i.w || 0) < 200 || (i.h || 0) < 140) return null
+  if ((i.blur >= 0.56 && i.detail < 110) || (i.blur >= 0.5 && i.detail < 25)) return 'blurry'
+  if (i.blur >= 0.5 && i.detail < 160) return 'soft'
+  return 'sharp'
+}
+/** Sharpness as a number people can read: 0 (a smear) … 100 (crisp). Null when not measured. */
+export function sharpnessScore(i?: ImageInfo | null): number | null {
+  if (!i?.ok || typeof i.blur !== 'number' || typeof i.detail !== 'number') return null
+  const a = Math.max(0, Math.min(1, (0.75 - i.blur) / 0.5))
+  const b = Math.max(0, Math.min(1, Math.log10(Math.max(1, i.detail) / 8) / Math.log10(1500 / 8)))
+  return Math.round(100 * Math.min(a, b))
+}
+/** A real photo: is it blurry? The measurement decides; the AI confirms the in-between cases; a person's earlier call wins. */
+function blurCall(info: ImageInfo | undefined): { blurry: boolean, confidence: number, reason: string, measuredOnly: boolean } | null {
+  if (!info?.ok) return null
+  const ai = info.ai
+  const level = blurLevel(info)
+  const score = sharpnessScore(info)
+  const tail = score === null ? '' : ` (sharpness ${score} of 100)`
+  if (ai?.model === 'you' && typeof ai.blur === 'boolean') return ai.blur ? { blurry: true, confidence: 1, reason: 'Marked as blurry by you on an earlier crawl', measuredOnly: false } : null
+  if (level === 'blurry') return { blurry: true, confidence: ai?.blur === true ? 0.93 : ai?.blur === false ? 0.7 : 0.82, reason: `The photo is out of focus or smeared${tail}${ai?.blur === true ? ' — the AI check agrees' : ''}`, measuredOnly: ai?.blur !== true }
+  if (level === 'soft' && ai?.blur === true) return { blurry: true, confidence: 0.8, reason: `The photo is soft and the AI check calls it blurry${tail}`, measuredOnly: false }
+  if (level === null && ai?.blur === true && ai.c >= 0.85) return { blurry: true, confidence: 0.75, reason: 'AI check: the photo is blurry', measuredOnly: false }
+  return null
+}
+
 /** Noisy-OR: independent pieces of evidence add up without exceeding 1. */
 const combine = (xs: number[]) => 1 - xs.reduce((p, x) => p * (1 - x), 1)
 
@@ -222,6 +264,8 @@ export function classify(vehicles: ScanVehicle[], images: Map<string, ImageInfo>
   const clusterOf = new Map<string, ImageCluster>()
   for (const c of clusters) for (const id of c.imageIds) clusterOf.set(id, c)
   const ruleHits = new Map<string, number>()
+  /** Called blurry by the measurement alone (no AI, no person) — re-checked as a group below. */
+  const measured: ScanVehicle[] = []
 
   for (const v of vehicles) {
     const P: [number, string][] = []
@@ -235,7 +279,15 @@ export function classify(vehicles: ScanVehicle[], images: Map<string, ImageInfo>
     // Advertisement / promo tile in the grid? The AI's call (it sees picture + card) first, else the built-in check.
     const aiAd = info?.ok && typeof info.ai?.ad === 'boolean' ? info.ai : null
     v.adReason = aiAd ? (aiAd.ad && !(v.vin && v.stock) ? `AI check: advertisement, not a vehicle${aiAd.adWhy ? ` — ${short(aiAd.adWhy, 60)}` : ''}` : null) : adSignal(v)
-    const decide = (verdict: Exclude<PhotoVerdict, 'review'>, confidence: number, reasons: string[]) => { v.verdict = verdict; v.suggested = verdict; v.confidence = confidence; v.reasons = reasons }
+    const decide = (verdict: Exclude<PhotoVerdict, 'review'>, confidence: number, reasons: string[]) => {
+      v.verdict = verdict; v.suggested = verdict; v.confidence = confidence; v.reasons = reasons
+      // A real photo can still be a bad one: out of focus, smeared, a thumbnail blown up.
+      if (verdict !== 'real') return
+      const b = blurCall(info)
+      if (!b?.blurry) { if (blurLevel(info) === 'soft') v.reasons = [...reasons, 'A little soft, but the car can be made out']; return }
+      v.verdict = 'blurry'; v.suggested = 'blurry'; v.confidence = b.confidence; v.reasons = [b.reason, ...reasons]
+      if (b.measuredOnly) measured.push(v)
+    }
 
     if (!img || !img.url) { decide('missing', 1, [v.noPhotoText ? `No photo — the card says “${short(v.noPhotoText)}”` : 'No photo on the vehicle card']); continue }
     if (img.complete && img.kind === 'img' && img.nw === 0 && info && !info.ok) { decide('missing', 0.97, [`The photo link is broken (${info.error || 'did not load'})`]); continue }
@@ -298,6 +350,15 @@ export function classify(vehicles: ScanVehicle[], images: Map<string, ImageInfo>
     else { v.verdict = 'review'; v.suggested = score >= 0.5 ? top : 'real'; v.confidence = Math.round(score * 100) / 100; v.reasons = reasons }
   }
 
+  // When most of a site's photos measure as blurry it is not this car's photo that is bad: the list
+  // itself shows small, soft pictures. That is not reported car by car (a person can still mark them).
+  let softSite = 0
+  const photos = vehicles.filter(v => v.verdict === 'real' || v.verdict === 'blurry').length
+  if (measured.length >= 8 && measured.length > photos * 0.5) {
+    softSite = measured.length
+    for (const v of measured) { v.verdict = 'real'; v.suggested = 'real'; v.confidence = 0.7; v.reasons = ['A real photo — every picture in this list is small / soft, so blur is not judged car by car', ...v.reasons.slice(1)] }
+  }
+
   // Cluster verdict = what its vehicles mostly got.
   for (const c of clusters) {
     const vs = vehicles.filter(v => v.clusterId === c.id)
@@ -307,7 +368,7 @@ export function classify(vehicles: ScanVehicle[], images: Map<string, ImageInfo>
     c.verdict = (top?.[0] || 'review') as PhotoVerdict
     c.reason = vs[0]?.reasons.find(r => /same (picture|photo)/i.test(r)) || vs[0]?.reasons[0] || ''
   }
-  return { clusters, ruleHits }
+  return { clusters, ruleHits, softSite }
 }
 
 /** The verdict that counts: a person's override, else the scanner's decision (best guess for "review"). */
@@ -318,7 +379,7 @@ export function summarize(all: ScanVehicle[], clusters: ImageCluster[], opts: { 
   const cmap = new Map(clusters.map(c => [c.id, c]))
   const vehicles = countable(all)
   const ads = all.length - vehicles.length
-  const by = { real: 0, placeholder: 0, stock: 0, missing: 0 }
+  const by = { real: 0, placeholder: 0, stock: 0, missing: 0, blurry: 0 }
   const isNew = (v: ScanVehicle) => v.condition === 'new'
   const counts = { newTotal: 0, usedTotal: 0, newMissingPhotos: 0, usedMissingPhotos: 0 }
   for (const v of vehicles) {
@@ -332,6 +393,9 @@ export function summarize(all: ScanVehicle[], clusters: ImageCluster[], opts: { 
   const withoutReal = by.missing + by.placeholder + (opts.countStockAsMissing ? by.stock : 0)
   return {
     total, by, withoutReal, ads,
+    /** Real photos that are blurry — reported on their own, never part of `withoutReal`. */
+    blurry: by.blurry,
+    blurryPct: total ? Math.round((by.blurry / total) * 1000) / 10 : null,
     withoutRealPct: total ? Math.round((withoutReal / total) * 1000) / 10 : null,
     review: vehicles.filter(v => v.verdict === 'review' && !v.override && !(v.clusterId && cmap.get(v.clusterId)?.override)).length,
     counts,
