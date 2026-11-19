@@ -2,12 +2,12 @@
 import type { CrmDealership } from '~/composables/useCrmDealerships'
 import { dueState, formatDuration, verificationState } from '~/composables/useCrmDealerships'
 import type { Condition, DealershipFacts } from '~/composables/useCrmFilters'
+import type { GridColumnDef } from '~/lib/gridLayout'
 import { matchAll } from '~/composables/useCrmFilters'
 import { INTERACTION_TYPE_MAP } from '~/constants/crm'
 import { INTERACTION_ICONS } from '~/constants/crm-icons'
 import {
-  Plus, Search, Store, ShieldAlert, Download, RefreshCw, ChevronUp, ChevronDown,
-  ChevronsUpDown, X, Filter, UserCircle2,
+  Plus, Search, Store, ShieldAlert, Download, RefreshCw, X, Filter, UserCircle2,
   CheckSquare, Tag, UserCheck, Loader2, ExternalLink, Briefcase, Trophy, SlidersHorizontal, Upload, Binoculars,
   ScanSearch, Radar, Layers, Mail, CheckCircle2, CircleDashed, Route, Grid3x3, Trash2, ArchiveRestore, ShieldCheck, AlertTriangle, CopyX,
 } from 'lucide-vue-next'
@@ -39,37 +39,62 @@ onMounted(() => { if (!dealerships.value.length && (loadError.value || !lastFetc
 // ─── Column model — one value per column ───
 type ColKey = 'dealershipId' | 'name' | 'dealerGroup' | 'route' | 'brands' | 'stage' | 'inStage' | 'leadSource' | 'city' | 'state' | 'zip' | 'phone' | 'website' | 'scanPages'
   | 'territory' | 'lastTouch' | 'nextAction' | 'primaryContact' | 'primaryTitle' | 'primaryEmail' | 'contacts' | 'owner' | 'lastAudit' | 'missingPhotos' | 'inventory' | 'added' | 'updated'
-interface Col { key: ColKey, label: string, sortable?: boolean, default: boolean, align?: 'right' }
-const COLUMNS: Col[] = [
-  { key: 'name', label: 'Dealership', sortable: true, default: true },
-  { key: 'dealerGroup', label: 'Dealer group', sortable: true, default: true },
-  { key: 'route', label: 'Route', sortable: true, default: true },
-  { key: 'brands', label: 'Brands', default: true },
-  { key: 'stage', label: 'Stage', sortable: true, default: true },
-  { key: 'inStage', label: 'In stage', sortable: true, default: true, align: 'right' },
-  { key: 'leadSource', label: 'Lead source', sortable: true, default: true },
-  { key: 'city', label: 'City', sortable: true, default: true },
-  { key: 'state', label: 'State', sortable: true, default: true },
-  { key: 'zip', label: 'ZIP', sortable: true, default: false },
-  { key: 'phone', label: 'Phone', default: true },
-  { key: 'website', label: 'Website', default: false },
-  { key: 'scanPages', label: 'Scan pages', sortable: true, default: true, align: 'right' },
-  { key: 'territory', label: 'Territory', sortable: true, default: false },
-  { key: 'lastTouch', label: 'Last touch', sortable: true, default: true },
-  { key: 'nextAction', label: 'Next action', sortable: true, default: true },
-  { key: 'primaryContact', label: 'Primary contact', sortable: true, default: true },
-  { key: 'primaryTitle', label: 'Contact title', default: true },
-  { key: 'primaryEmail', label: 'Contact email', default: false },
-  { key: 'contacts', label: 'Contacts', sortable: true, default: true, align: 'right' },
-  { key: 'owner', label: 'Owner', sortable: true, default: true },
-  { key: 'missingPhotos', label: 'Missing photos', sortable: true, default: true, align: 'right' },
-  { key: 'inventory', label: 'Inventory', sortable: true, default: false, align: 'right' },
-  { key: 'lastAudit', label: 'Last audit', sortable: true, default: true },
-  { key: 'added', label: 'Added', sortable: true, default: false },
-  { key: 'updated', label: 'Updated', sortable: true, default: true },
+/** `width` is the starting width; everyone can then drag, hide, reorder and freeze columns for themselves. */
+const COLUMNS: GridColumnDef<ColKey>[] = [
+  { key: 'name', label: 'Dealership', sortable: true, width: 240, minWidth: 140, required: true, pinned: true },
+  { key: 'dealerGroup', label: 'Dealer group', sortable: true, width: 170 },
+  { key: 'route', label: 'Route', sortable: true, width: 96, minWidth: 76 },
+  { key: 'brands', label: 'Brands', width: 170 },
+  { key: 'stage', label: 'Stage', sortable: true, width: 190, minWidth: 96 },
+  { key: 'inStage', label: 'In stage', sortable: true, width: 116, minWidth: 72, align: 'right' },
+  { key: 'leadSource', label: 'Lead source', sortable: true, width: 150 },
+  { key: 'city', label: 'City', sortable: true, width: 132 },
+  { key: 'state', label: 'State', sortable: true, width: 80 },
+  { key: 'zip', label: 'ZIP', sortable: true, width: 80 },
+  { key: 'phone', label: 'Phone', width: 136, minWidth: 80 },
+  { key: 'website', label: 'Website', width: 210 },
+  { key: 'scanPages', label: 'Scan pages', sortable: true, width: 132, minWidth: 96, align: 'right' },
+  { key: 'territory', label: 'Territory', sortable: true, width: 130 },
+  { key: 'lastTouch', label: 'Last touch', sortable: true, width: 220 },
+  { key: 'nextAction', label: 'Next action', sortable: true, width: 260 },
+  { key: 'primaryContact', label: 'Primary contact', sortable: true, width: 200 },
+  { key: 'primaryTitle', label: 'Contact title', width: 170 },
+  { key: 'primaryEmail', label: 'Contact email', width: 220 },
+  { key: 'contacts', label: 'Contacts', sortable: true, width: 116, minWidth: 72, align: 'right' },
+  { key: 'owner', label: 'Owner', sortable: true, width: 150 },
+  { key: 'missingPhotos', label: 'Missing photos', sortable: true, width: 164, minWidth: 80, align: 'right' },
+  { key: 'inventory', label: 'Inventory', sortable: true, width: 124, minWidth: 72, align: 'right' },
+  { key: 'lastAudit', label: 'Last audit', sortable: true, width: 156 },
+  { key: 'added', label: 'Added', sortable: true, width: 124 },
+  { key: 'updated', label: 'Updated', sortable: true, width: 148 },
 ]
-// Every column is always shown (no column picker on this page).
-const shownColumns = COLUMNS
+// Each person arranges the table for themselves: drag a header to move it, drag its edge to resize,
+// "Columns" to show / hide / freeze. Saved in the browser and in their account (see useGridLayout).
+const scroller = ref<HTMLElement | null>(null)
+const gridTable = ref<HTMLElement | null>(null)
+const SELECT_COL_WIDTH = 36
+const grid = useGridLayout<ColKey>('crm-dealerships', COLUMNS, {
+  table: gridTable,
+  scroller,
+  leadWidth: SELECT_COL_WIDTH,
+  onPinRefused: c => toast.info(`No room to freeze “${c.label}”`, { description: 'Frozen columns can take up to 60% of the table. Narrow or unfreeze one first.' }),
+})
+const shownColumns = grid.columns
+const columnsOpen = ref(false)
+/** Attributes every body cell of a column shares (frozen position, last-column edge). */
+const cellBind = computed(() => {
+  const out = {} as Record<ColKey, Record<string, unknown>>
+  const offsets = grid.offsets.value
+  for (const c of shownColumns.value) {
+    const left = offsets[c.key]
+    out[c.key] = {
+      'data-col': c.key,
+      'class': { 'is-pinned': c.pinned, 'is-pin-edge': c.pinEdge, 'is-last': c.last },
+      'style': left === undefined ? undefined : { left: `${left}px` },
+    }
+  }
+  return out
+})
 const density = ref<'comfortable' | 'compact'>('compact')
 const rowPad = computed(() => density.value === 'compact' ? 'py-1' : 'py-3')
 
@@ -269,6 +294,12 @@ function toggleSort(k: ColKey) {
   if (sortKey.value === k) sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
   else { sortKey.value = k; sortDir.value = ['updated', 'added', 'contacts', 'inStage', 'lastTouch'].includes(k) ? 'desc' : 'asc' }
 }
+/** Header click toggles; the column menu asks for a direction. */
+function sortBy(k: ColKey, dir?: 'asc' | 'desc') {
+  if (!dir) return toggleSort(k)
+  sortKey.value = k
+  sortDir.value = dir
+}
 /** Filters inside the header "Filters" button (quick views are separate tabs). */
 const filterCount = computed(() => activeChips.value.length + conditions.value.length)
 const activeFilterCount = computed(() => filterCount.value + (quick.value !== 'all' ? 1 : 0))
@@ -283,7 +314,6 @@ function clearFilters() { resetPanelFilters(); quick.value = 'all'; search.value
 // Load more on scroll — rows are added in batches as the bottom of the list comes into view.
 const BATCH = 50
 const shownCount = ref(BATCH)
-const scroller = ref<HTMLElement | null>(null)
 watch([q, stage, leadSource, state, assignee, quick, conditions, brand, group, city, territory, nextActionF, lastTouchF, auditF, contactsF, addedF, sortKey, sortDir], () => {
   shownCount.value = BATCH
   scroller.value?.scrollTo({ top: 0 })
@@ -505,6 +535,7 @@ const isTyping = (e: KeyboardEvent) => ['INPUT', 'TEXTAREA', 'SELECT'].includes(
 onKeyStroke('/', (e) => { if (!isTyping(e)) { e.preventDefault(); (searchEl.value?.$el ?? searchEl.value)?.focus?.() } })
 onKeyStroke('n', (e) => { if (!isTyping(e) && canAdd.value && !showForm.value) { e.preventDefault(); showForm.value = true } })
 onKeyStroke('d', (e) => { if (!isTyping(e) && canAdd.value && !showForm.value && !showDiscover.value) { e.preventDefault(); showDiscover.value = true } })
+onKeyStroke('c', (e) => { if (!isTyping(e) && !gridMode.value && !showForm.value && !showDiscover.value && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); columnsOpen.value = !columnsOpen.value } })
 onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
 </script>
 
@@ -598,6 +629,7 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
             </div>
           </PopoverContent>
         </Popover>
+        <GridColumnManager v-if="!gridMode" v-model:open="columnsOpen" :grid="grid" />
         <Button
           v-if="canEdit" :variant="gridMode ? 'default' : 'outline'" size="sm" class="h-8 gap-1.5" :class="!gridMode && 'border-emerald-500/50 text-emerald-700 hover:bg-emerald-500/10 hover:text-emerald-700 dark:text-emerald-400'"
           title="Quick edit — edit the list like a spreadsheet (E)" @click="toggleGrid"
@@ -759,138 +791,138 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
         <Button v-else-if="canAdd" size="sm" class="mt-5 gap-2" @click="showForm = true"><Plus class="size-4" /> New dealership</Button>
       </div>
 
-      <table v-else class="crm-grid w-full text-[13px] leading-5 border-separate border-spacing-0">
-        <thead class="sticky top-0 z-10">
+      <table v-else ref="gridTable" class="data-grid crm-grid text-[13px] leading-5 border-separate border-spacing-0" :style="grid.tableStyle">
+        <GridColgroup :grid="grid" />
+        <thead>
           <tr class="text-[11px] uppercase tracking-wider">
-            <th class="w-10 px-3 border-b border-border py-1.5 text-left">
+            <th class="is-pinned text-left" style="left: 0">
               <Checkbox :model-value="allOnPageSelected ? true : (someOnPageSelected ? 'indeterminate' : false)" aria-label="Select loaded rows" class="border-white/60 data-[state=checked]:border-white" @update:model-value="togglePage" />
             </th>
-            <th v-for="c in shownColumns" :key="c.key" class="font-medium px-3 py-1.5 whitespace-nowrap border-b border-border" :class="c.align === 'right' ? 'text-right' : 'text-left'">
-              <button v-if="c.sortable" type="button" class="inline-flex items-center gap-1 uppercase tracking-wider hover:text-white transition-colors" :class="sortKey === c.key && 'text-white'" @click="toggleSort(c.key)">
-                {{ c.label }}
-                <ChevronUp v-if="sortKey === c.key && sortDir === 'asc'" class="size-3" />
-                <ChevronDown v-else-if="sortKey === c.key" class="size-3" />
-                <ChevronsUpDown v-else class="size-3 opacity-40" />
-              </button>
-              <span v-else>{{ c.label }}</span>
-            </th>
+            <GridHeaderCell
+              v-for="c in shownColumns" :key="c.key" :col="c" :grid="grid" :sorted="sortKey === c.key ? sortDir : null"
+              @sort="sortBy(c.key, $event)" @manage="columnsOpen = true"
+            />
+            <th class="grid-filler" aria-hidden="true" />
           </tr>
         </thead>
-        <tbody>
+        <tbody @mouseover="grid.hintOverflow">
           <tr
             v-for="d in rows" :key="d.id" tabindex="0"
             class="group cursor-pointer transition-colors outline-none hover:bg-accent/40 focus-visible:bg-accent/40"
-            :class="selected.has(d.id) && 'bg-primary/5 hover:bg-primary/10'"
+            :class="selected.has(d.id) && 'is-selected bg-primary/5 hover:bg-primary/10'"
             @click="open(d)" @keydown.enter="open(d)"
           >
-            <td class="px-3 border-b border-border/60" :class="rowPad" @click.stop>
+            <td class="is-pinned border-b border-border/60" :class="rowPad" style="left: 0" @click.stop>
               <Checkbox :model-value="selected.has(d.id)" :aria-label="`Select ${d.name}`" @update:model-value="toggleRow(d.id)" />
             </td>
             <template v-for="c in shownColumns" :key="c.key">
-              <td v-if="c.key === 'name'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
+              <td v-if="c.key === 'name'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
                 <span class="font-semibold text-foreground group-hover:text-primary transition-colors">{{ d.name }}</span>
               </td>
-              <td v-else-if="c.key === 'dealerGroup'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad"><span v-if="d.dealerGroup">{{ d.dealerGroup }}</span><span v-else class="text-muted-foreground/50">—</span></td>
-              <td v-else-if="c.key === 'brands'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
+              <td v-else-if="c.key === 'dealerGroup'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad"><span v-if="d.dealerGroup">{{ d.dealerGroup }}</span><span v-else class="text-muted-foreground/50">—</span></td>
+              <td v-else-if="c.key === 'brands'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
                 <div v-if="d.brands?.length" class="flex items-center gap-1"><Badge v-for="b in d.brands" :key="b" variant="secondary" class="h-[18px] text-[10px] px-1.5 py-0 font-medium">{{ b }}</Badge></div>
                 <span v-else class="text-muted-foreground/50">—</span>
               </td>
-              <td v-else-if="c.key === 'stage'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
-                <div class="flex items-center gap-1.5">
-                  <Badge variant="outline" class="h-5 gap-1.5 py-0 text-[11px] font-medium" :class="STAGE_STYLE[d.stage]?.badge"><span class="size-1.5 rounded-full" :class="STAGE_STYLE[d.stage]?.dot" />{{ d.stage }}</Badge>
-                  <NuxtLink v-if="d.dealerId" :to="`/dealers/${d.dealerId}/details`" class="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-400 hover:underline underline-offset-2" title="Open in Dealers" @click.stop><Briefcase class="size-3" /> Dealer</NuxtLink>
+              <td v-else-if="c.key === 'stage'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
+                <div class="flex min-w-0 items-center gap-1.5">
+                  <Badge variant="outline" class="h-5 min-w-0 shrink gap-1.5 py-0 text-[11px] font-medium" :class="STAGE_STYLE[d.stage]?.badge"><span class="size-1.5 shrink-0 rounded-full" :class="STAGE_STYLE[d.stage]?.dot" /><span class="truncate">{{ d.stage }}</span></Badge>
+                  <NuxtLink v-if="d.dealerId" :to="`/dealers/${d.dealerId}/details`" class="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-400 hover:underline underline-offset-2" title="Open in Dealers" @click.stop><Briefcase class="size-3" /> Dealer</NuxtLink>
                 </div>
               </td>
-              <td v-else-if="c.key === 'inStage'" class="px-3 border-b border-border/60 whitespace-nowrap text-right tabular-nums text-xs" :class="[rowPad, isStalled(d) ? 'text-orange-600 dark:text-orange-400 font-medium' : 'text-muted-foreground']" :title="`In ${d.stage} since ${format(new Date(d.stageChangedAt || d.createdAt), 'PPpp')}${d.stageChangedBy?.name ? ` · moved by ${d.stageChangedBy.name}` : ''}`">{{ formatDuration(stageAgeMs(d)) }}</td>
-              <td v-else-if="c.key === 'lastTouch'" class="px-3 border-b border-border/60 whitespace-nowrap text-xs" :class="rowPad">
-                <span v-if="d.interactionSummary?.last" class="inline-flex items-center gap-1.5" :title="`${d.interactionSummary.last.typeLabel} · ${format(new Date(d.interactionSummary.last.occurredAt), 'PPp')} · ${d.interactionSummary.last.userName}${d.interactionSummary.last.outcome ? ` — ${d.interactionSummary.last.outcome}` : ''}`">
-                  <component :is="INTERACTION_ICONS[INTERACTION_TYPE_MAP[d.interactionSummary.last.type]?.icon || 'StickyNote']" class="size-3.5 text-muted-foreground" />
-                  <span>{{ d.interactionSummary.last.typeLabel }}</span>
-                  <span class="text-muted-foreground">· {{ formatDistanceToNow(new Date(d.interactionSummary.last.occurredAt), { addSuffix: true }) }}</span>
+              <td v-else-if="c.key === 'inStage'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap text-right tabular-nums text-xs" :class="[rowPad, isStalled(d) ? 'text-orange-600 dark:text-orange-400 font-medium' : 'text-muted-foreground']" :title="`In ${d.stage} since ${format(new Date(d.stageChangedAt || d.createdAt), 'PPpp')}${d.stageChangedBy?.name ? ` · moved by ${d.stageChangedBy.name}` : ''}`">{{ formatDuration(stageAgeMs(d)) }}</td>
+              <td v-else-if="c.key === 'lastTouch'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap text-xs" :class="rowPad">
+                <span v-if="d.interactionSummary?.last" class="flex min-w-0 items-center gap-1.5" :title="`${d.interactionSummary.last.typeLabel} · ${format(new Date(d.interactionSummary.last.occurredAt), 'PPp')} · ${d.interactionSummary.last.userName}${d.interactionSummary.last.outcome ? ` — ${d.interactionSummary.last.outcome}` : ''}`">
+                  <component :is="INTERACTION_ICONS[INTERACTION_TYPE_MAP[d.interactionSummary.last.type]?.icon || 'StickyNote']" class="size-3.5 shrink-0 text-muted-foreground" />
+                  <span class="shrink-0">{{ d.interactionSummary.last.typeLabel }}</span>
+                  <span class="truncate text-muted-foreground">· {{ formatDistanceToNow(new Date(d.interactionSummary.last.occurredAt), { addSuffix: true }) }}</span>
                 </span>
                 <span v-else class="text-muted-foreground/60 italic">Never contacted</span>
               </td>
-              <td v-else-if="c.key === 'nextAction'" class="px-3 border-b border-border/60 text-xs max-w-[260px]" :class="rowPad">
+              <td v-else-if="c.key === 'nextAction'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 text-xs" :class="rowPad">
                 <div v-if="d.interactionSummary?.nextAction" class="flex items-center gap-1.5 min-w-0" :title="d.interactionSummary.nextAction.text">
                   <span class="shrink-0 tabular-nums font-medium" :class="{ overdue: 'text-rose-600 dark:text-rose-400', today: 'text-amber-600 dark:text-amber-400', soon: 'text-sky-600 dark:text-sky-400', later: 'text-muted-foreground', none: 'text-muted-foreground' }[dueState(d.interactionSummary.nextAction.date)]">{{ d.interactionSummary.nextAction.date ? (dueState(d.interactionSummary.nextAction.date) === 'today' ? 'Today' : format(new Date(`${d.interactionSummary.nextAction.date}T00:00:00`), 'MMM d')) : 'No date' }}</span>
                   <span class="truncate text-muted-foreground">{{ d.interactionSummary.nextAction.text }}</span>
                 </div>
                 <span v-else class="text-muted-foreground/50">—</span>
               </td>
-              <td v-else-if="c.key === 'leadSource'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
-                <span class="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><span class="size-1.5 rounded-full" :class="LEAD_SOURCE_STYLE[d.leadSource]?.dot" />{{ d.leadSource }}</span>
+              <td v-else-if="c.key === 'leadSource'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
+                <span class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"><span class="size-1.5 shrink-0 rounded-full" :class="LEAD_SOURCE_STYLE[d.leadSource]?.dot" /><span class="truncate">{{ d.leadSource }}</span></span>
               </td>
-              <td v-else-if="c.key === 'city'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">{{ d.city || '—' }}</td>
-              <td v-else-if="c.key === 'state'" class="px-3 border-b border-border/60 whitespace-nowrap font-mono text-xs" :class="rowPad">{{ d.state || '—' }}</td>
-              <td v-else-if="c.key === 'zip'" class="px-3 border-b border-border/60 whitespace-nowrap tabular-nums" :class="rowPad">{{ d.zip || '—' }}</td>
-              <td v-else-if="c.key === 'phone'" class="px-3 border-b border-border/60 whitespace-nowrap tabular-nums" :class="rowPad">
+              <td v-else-if="c.key === 'city'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">{{ d.city || '—' }}</td>
+              <td v-else-if="c.key === 'state'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap font-mono text-xs" :class="rowPad">{{ d.state || '—' }}</td>
+              <td v-else-if="c.key === 'zip'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap tabular-nums" :class="rowPad">{{ d.zip || '—' }}</td>
+              <td v-else-if="c.key === 'phone'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap tabular-nums" :class="rowPad">
                 <a v-if="d.phone" :href="`tel:${d.phone}`" class="hover:text-primary hover:underline underline-offset-2" @click.stop>{{ d.phone }}</a>
                 <span v-else class="text-muted-foreground/50">—</span>
               </td>
-              <td v-else-if="c.key === 'website'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
-                <a v-if="d.website" :href="d.website" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-primary hover:underline underline-offset-2" @click.stop>{{ d.website.replace(/^https?:\/\//, '') }}<ExternalLink class="size-3 opacity-50" /></a>
+              <td v-else-if="c.key === 'website'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
+                <a v-if="d.website" :href="d.website" target="_blank" rel="noopener" class="inline-flex max-w-full min-w-0 items-center gap-1 align-bottom text-primary hover:underline underline-offset-2" @click.stop><span class="truncate">{{ d.website.replace(/^https?:\/\//, '') }}</span><ExternalLink class="size-3 shrink-0 opacity-50" /></a>
                 <span v-else class="text-muted-foreground/50">—</span>
               </td>
-              <td v-else-if="c.key === 'scanPages'" class="px-3 border-b border-border/60 whitespace-nowrap text-right tabular-nums" :class="rowPad" @click.stop>
+              <td v-else-if="c.key === 'scanPages'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap text-right tabular-nums" :class="rowPad" @click.stop>
                 <button
-                  type="button" class="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium transition-colors"
+                  type="button" class="inline-flex max-w-full min-w-0 items-center gap-1 rounded-md border px-1.5 py-0.5 align-bottom text-[11px] font-medium transition-colors"
                   :class="scanPageIssue(d) ? 'border-rose-500/40 bg-rose-500/5 text-rose-700 hover:bg-rose-500/10 dark:text-rose-300' : d.scanPages?.length ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300' : d.website ? 'border-amber-500/40 bg-amber-500/5 text-amber-700 hover:bg-amber-500/10 dark:text-amber-300' : 'border-dashed border-border/70 text-muted-foreground/60 hover:text-foreground'"
                   :title="scanPageIssue(d) || (d.scanPages?.length ? (d.scanPages.map(p => p.label || p.url).join('\n')) : d.website ? 'No scan pages yet — this dealership is skipped by scans. Click to detect or pick its inventory pages.' : 'No website — add one on the dealership first')"
                   :disabled="!canEdit && !d.scanPages?.length"
                   @click="editPages(d)"
                 >
-                  <Layers class="size-3" />
-                  <template v-if="scanPageIssue(d)">{{ scanPageCount(d) ? `${scanPageCount(d)} page${scanPageCount(d) === 1 ? '' : 's'} · check` : 'Fix pages' }}</template>
-                  <template v-else-if="d.scanPages?.length">{{ d.scanPages.length }} page{{ d.scanPages.length === 1 ? '' : 's' }}</template>
-                  <template v-else-if="d.website">Pick pages</template>
-                  <template v-else>—</template>
+                  <Layers class="size-3 shrink-0" />
+                  <span class="truncate">
+                    <template v-if="scanPageIssue(d)">{{ scanPageCount(d) ? `${scanPageCount(d)} page${scanPageCount(d) === 1 ? '' : 's'} · check` : 'Fix pages' }}</template>
+                    <template v-else-if="d.scanPages?.length">{{ d.scanPages.length }} page{{ d.scanPages.length === 1 ? '' : 's' }}</template>
+                    <template v-else-if="d.website">Pick pages</template>
+                    <template v-else>—</template>
+                  </span>
                 </button>
               </td>
-              <td v-else-if="c.key === 'territory'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">{{ d.territory || '—' }}</td>
-              <td v-else-if="c.key === 'route'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad" @click.stop>
-                <button v-if="d.route" type="button" class="inline-flex items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/5 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 hover:bg-sky-500/10 dark:text-sky-300" :title="`Show only ${d.route}`" @click="routeF = routeF === d.route ? 'all' : d.route!"><Route class="size-3" />{{ d.route }}</button>
+              <td v-else-if="c.key === 'territory'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">{{ d.territory || '—' }}</td>
+              <td v-else-if="c.key === 'route'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad" @click.stop>
+                <button v-if="d.route" type="button" class="inline-flex max-w-full min-w-0 items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/5 px-1.5 py-0.5 align-bottom text-[11px] font-medium text-sky-700 hover:bg-sky-500/10 dark:text-sky-300" :title="`Show only ${d.route}`" @click="routeF = routeF === d.route ? 'all' : d.route!"><Route class="size-3 shrink-0" /><span class="truncate">{{ d.route }}</span></button>
                 <span v-else class="text-muted-foreground/50">—</span>
               </td>
-              <td v-else-if="c.key === 'primaryContact'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
-                <div v-if="d.contactSummary?.primary" class="flex items-center gap-2">
-                  <span class="font-medium">{{ d.contactSummary.primary.fullName }}</span>
-                  <Badge v-if="needsVerification(d)" variant="outline" class="text-[10px] gap-1 bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20" title="Contact details unverified for 90+ days"><ShieldAlert class="size-3" /> Verify</Badge>
+              <td v-else-if="c.key === 'primaryContact'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
+                <div v-if="d.contactSummary?.primary" class="flex min-w-0 items-center gap-2">
+                  <span class="truncate font-medium">{{ d.contactSummary.primary.fullName }}</span>
+                  <Badge v-if="needsVerification(d)" variant="outline" class="shrink-0 text-[10px] gap-1 bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20" title="Contact details unverified for 90+ days"><ShieldAlert class="size-3" /> Verify</Badge>
                 </div>
                 <span v-else class="text-xs italic text-muted-foreground/70">No contacts yet</span>
               </td>
-              <td v-else-if="c.key === 'primaryTitle'" class="px-3 border-b border-border/60 whitespace-nowrap text-muted-foreground" :class="rowPad">{{ d.contactSummary?.primary ? (d.contactSummary.primary.jobTitle || d.contactSummary.primary.role) : '—' }}</td>
-              <td v-else-if="c.key === 'primaryEmail'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
+              <td v-else-if="c.key === 'primaryTitle'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap text-muted-foreground" :class="rowPad">{{ d.contactSummary?.primary ? (d.contactSummary.primary.jobTitle || d.contactSummary.primary.role) : '—' }}</td>
+              <td v-else-if="c.key === 'primaryEmail'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
                 <a v-if="d.contactSummary?.primary?.email" :href="`mailto:${d.contactSummary.primary.email}`" class="hover:text-primary hover:underline underline-offset-2" @click.stop>{{ d.contactSummary.primary.email }}</a>
                 <span v-else class="text-muted-foreground/50">—</span>
               </td>
-              <td v-else-if="c.key === 'contacts'" class="px-3 border-b border-border/60 whitespace-nowrap text-right tabular-nums" :class="rowPad">
+              <td v-else-if="c.key === 'contacts'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap text-right tabular-nums" :class="rowPad">
                 <span class="font-medium">{{ d.contactSummary?.active ?? 0 }}</span>
                 <span v-if="d.contactSummary?.inactive" class="text-[11px] text-muted-foreground ml-1" :title="`${d.contactSummary.inactive} former`">+{{ d.contactSummary.inactive }}</span>
               </td>
-              <td v-else-if="c.key === 'owner'" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
+              <td v-else-if="c.key === 'owner'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
                 <span v-if="d.assignedUserName">{{ d.assignedUserName }}</span>
-                <span v-else class="inline-flex items-center gap-1.5 text-xs text-rose-600 dark:text-rose-400"><UserCircle2 class="size-3.5" /> Unassigned</span>
+                <span v-else class="inline-flex max-w-full min-w-0 items-center gap-1.5 align-bottom text-xs text-rose-600 dark:text-rose-400"><UserCircle2 class="size-3.5 shrink-0" /> <span class="truncate">Unassigned</span></span>
               </td>
-              <td v-else-if="c.key === 'missingPhotos'" class="px-3 border-b border-border/60 whitespace-nowrap text-right tabular-nums" :class="rowPad">
+              <td v-else-if="c.key === 'missingPhotos'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap text-right tabular-nums" :class="rowPad">
                 <template v-if="d.auditSummary?.latest && d.auditSummary.latest.missingPhotoPct !== null">
                   <span class="font-semibold" :class="d.auditSummary.latest.missingPhotoPct >= 25 ? 'text-rose-600 dark:text-rose-400' : d.auditSummary.latest.missingPhotoPct >= 10 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'">{{ d.auditSummary.latest.missingPhotoPct }}%</span>
                   <span v-if="d.auditSummary.previous && d.auditSummary.previous.missingPhotoPct !== null" class="ml-1 text-[10px]" :class="d.auditSummary.latest.missingPhotoPct > d.auditSummary.previous.missingPhotoPct ? 'text-rose-500' : d.auditSummary.latest.missingPhotoPct < d.auditSummary.previous.missingPhotoPct ? 'text-emerald-500' : 'text-muted-foreground'" :title="`Previous ${d.auditSummary.previous.missingPhotoPct}%`">{{ d.auditSummary.latest.missingPhotoPct > d.auditSummary.previous.missingPhotoPct ? '▲' : d.auditSummary.latest.missingPhotoPct < d.auditSummary.previous.missingPhotoPct ? '▼' : '•' }}</span>
                 </template>
                 <span v-else class="text-muted-foreground/50">—</span>
               </td>
-              <td v-else-if="c.key === 'inventory'" class="px-3 border-b border-border/60 whitespace-nowrap text-right tabular-nums" :class="rowPad">
+              <td v-else-if="c.key === 'inventory'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap text-right tabular-nums" :class="rowPad">
                 <span v-if="d.auditSummary?.latest">{{ d.auditSummary.latest.totalVehicles }}</span><span v-else class="text-muted-foreground/50">—</span>
               </td>
-              <td v-else-if="c.key === 'lastAudit'" class="px-3 border-b border-border/60 whitespace-nowrap text-xs" :class="rowPad">
+              <td v-else-if="c.key === 'lastAudit'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap text-xs" :class="rowPad">
                 <template v-if="d.auditSummary?.latest">
                   <span class="text-muted-foreground tabular-nums" :title="format(new Date(d.auditSummary.latest.auditedAt), 'PPP')">{{ formatDistanceToNow(new Date(d.auditSummary.latest.auditedAt), { addSuffix: true }) }}</span>
                   <span class="ml-1 text-[10px] text-muted-foreground/70">· {{ d.auditSummary.count }}×</span>
                 </template>
                 <span v-else class="italic text-muted-foreground/60">Not audited</span>
               </td>
-              <td v-else-if="c.key === 'added'" class="px-3 border-b border-border/60 whitespace-nowrap text-xs text-muted-foreground tabular-nums" :class="rowPad" :title="format(new Date(d.createdAt), 'PPpp')">{{ format(new Date(d.createdAt), 'MMM d, yyyy') }}</td>
-              <td v-else-if="c.key === 'updated'" class="px-3 border-b border-border/60 whitespace-nowrap text-xs text-muted-foreground tabular-nums" :class="rowPad" :title="format(new Date(d.updatedAt), 'PPpp')">{{ formatDistanceToNow(new Date(d.updatedAt), { addSuffix: true }) }}</td>
+              <td v-else-if="c.key === 'added'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap text-xs text-muted-foreground tabular-nums" :class="rowPad" :title="format(new Date(d.createdAt), 'PPpp')">{{ format(new Date(d.createdAt), 'MMM d, yyyy') }}</td>
+              <td v-else-if="c.key === 'updated'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap text-xs text-muted-foreground tabular-nums" :class="rowPad" :title="format(new Date(d.updatedAt), 'PPpp')">{{ formatDistanceToNow(new Date(d.updatedAt), { addSuffix: true }) }}</td>
             </template>
+            <td class="grid-filler" aria-hidden="true" />
           </tr>
         </tbody>
       </table>
@@ -1002,21 +1034,5 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
 .slide-enter-active, .slide-leave-active { transition: opacity .18s ease, transform .18s ease; }
 .slide-enter-from, .slide-leave-to { opacity: 0; transform: translateY(-4px); }
 
-/* Table: the surrounding .crm-grid-box gives the 2px theme border; 1px theme column lines; dark header.
-   The scroller has no padding, so the sticky header sits flush at the top and nothing shows above it. */
-.crm-grid {
-  --grid-line: color-mix(in oklab, var(--primary) 30%, transparent);
-}
-.crm-grid th, .crm-grid td {
-  border-right: 1px solid var(--grid-line);
-  border-bottom: 1px solid var(--grid-line);
-}
-.crm-grid th:last-child, .crm-grid td:last-child { border-right: 0; }
-.crm-grid thead th {
-  background: #18181b;
-  color: #d4d4d8;
-  border-right-color: rgb(255 255 255 / .14);
-  border-bottom: 0;
-}
-:global(.dark) .crm-grid thead th { background: #09090b; }
+/* The table itself is styled by the app-wide table design (tailwind.css) and the data-grid rules in GridHeaderCell. */
 </style>
