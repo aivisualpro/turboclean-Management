@@ -1,8 +1,8 @@
-import { CalendarCheck, Footprints, MessagesSquare, Phone, RefreshCcw, Send, Store } from 'lucide-vue-next'
+import { CalendarCheck, Footprints, MessagesSquare, Phone, RefreshCcw, Send } from 'lucide-vue-next'
 
 /** Activity goals — shared types, labels and look (names start with CrmGoal / crmGoal to avoid auto-import clashes). */
 
-export type CrmGoalMetric = 'contacted' | 'emails' | 'calls' | 'walkIns' | 'followUps' | 'conversations' | 'meetingsHeld'
+export type CrmGoalMetric = 'emails' | 'calls' | 'walkIns' | 'followUps' | 'conversations' | 'meetingsHeld'
 export type CrmGoalDay = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
 export type CrmGoalPlan = Record<CrmGoalDay, Partial<Record<CrmGoalMetric, number>>>
 export interface CrmGoalConfig {
@@ -22,7 +22,6 @@ export interface CrmGoalRow {
 }
 
 export const CRM_GOAL_METRICS: { key: CrmGoalMetric, label: string, icon: any, weight: number, hint: string }[] = [
-  { key: 'contacted', label: 'Contacted', icon: Store, weight: 2, hint: 'Different dealerships reached by email, call, text, walk-in or follow-up.' },
   { key: 'emails', label: 'Emails sent', icon: Send, weight: 1, hint: 'Every email sent.' },
   { key: 'calls', label: 'Calls', icon: Phone, weight: 1, hint: 'Calls, voicemails and texts.' },
   { key: 'walkIns', label: 'Walk-ins', icon: Footprints, weight: 2, hint: 'In-person visits to a dealership.' },

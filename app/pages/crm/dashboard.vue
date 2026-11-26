@@ -70,8 +70,8 @@ const activityTiles = computed<Tile[]>(() => {
   return [
     { key: 'researched', label: 'Researched', value: fmt(a.researched), unit: 'dealerships', icon: Search, sub: firstTimeSplit(a.researched, a.newlyResearched),
       hint: 'Dealerships worked on in this period: research logged, an inventory audit (by hand or an automatic scan), or moved to Researched.\n\nFirst time = never researched before. These are the dealerships the funnel below starts with.\nAgain = researched before and worked on again now.\n\nOnly dealerships still in the CRM count (not archived or merged).' },
-    { key: 'contacted', label: 'Contacted', value: fmt(a.contacted), unit: 'dealerships', icon: Store, sub: firstTimeSplit(a.contacted, a.newlyContacted),
-      hint: 'Dealerships reached by email, call, text, walk-in or follow-up in this period.\n\nFirst time = never contacted before.\nAgain = contacted before and contacted again now.' },
+    { key: 'contacted', label: 'Reached', value: fmt(a.contacted), unit: 'dealerships', icon: Store, sub: firstTimeSplit(a.contacted, a.newlyContacted),
+      hint: 'How many different dealerships you reached in this period, by email, call, text, walk-in or follow-up. Each dealership counts once, however many times you reached it.\n\nNot the same as Calls: Calls counts every call. Call one dealership 3 times = 3 calls, 1 dealership reached.\n\nFirst time = never reached before.\nAgain = reached before and reached again now.' },
     { key: 'emails', label: 'Emails sent', value: fmt(a.emails), icon: Send, hint: 'Every email sent in this period. One dealership can get several.' },
     { key: 'calls', label: 'Calls', value: fmt(a.calls), icon: Phone, sub: `${fmt(a.connectedCalls)} connected`, hint: 'Calls, voicemails and texts logged in this period.\nConnected = you actually spoke to someone.' },
     { key: 'walkIns', label: 'Walk-ins', value: fmt(a.walkIns), icon: Footprints, hint: 'In-person visits logged in this period.' },
@@ -97,8 +97,8 @@ const efficiencyTiles = computed<Tile[]>(() => {
   if (!e) return []
   return [
     { label: 'Hours prospecting', value: fmt(e.hours), icon: Clock, to: '/crm/time', toLabel: 'Time & ROI', hint: 'Time logged on the Time page in this period.' },
-    { label: 'Meetings per 100 contacted', value: fmt(e.meetingsPer100Contacted), icon: CalendarCheck, sub: `${fmt(e.contacted)} dealerships contacted`, hint: 'New meetings ÷ dealerships contacted, × 100.\nExample: 5 = one meeting for every 20 dealerships contacted.' },
-    { label: 'Wins per 100 contacted', value: fmt(e.wonPer100Contacted), icon: Trophy, hint: 'Accounts won ÷ dealerships contacted, × 100.' },
+    { label: 'Meetings per 100 reached', value: fmt(e.meetingsPer100Contacted), icon: CalendarCheck, sub: `${fmt(e.contacted)} dealerships reached`, hint: 'New meetings ÷ dealerships reached, × 100.\nExample: 5 = one meeting for every 20 dealerships reached.' },
+    { label: 'Wins per 100 reached', value: fmt(e.wonPer100Contacted), icon: Trophy, hint: 'Accounts won ÷ dealerships reached, × 100.' },
     { label: 'Hours per meeting', value: fmt(e.hoursPerMeeting), icon: Gauge, hint: 'Hours prospecting ÷ new meetings.' },
     { label: 'Hours per won account', value: fmt(e.hoursPerAccount), icon: Target, hint: 'Hours prospecting ÷ accounts won.' },
     { label: 'Revenue per hour', value: e.annualRevenuePerHour == null ? '—' : money(e.annualRevenuePerHour), icon: DollarSign, tone: 'good', hint: 'Yearly revenue won ÷ hours prospecting.' },

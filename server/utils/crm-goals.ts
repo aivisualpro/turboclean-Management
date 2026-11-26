@@ -13,14 +13,11 @@
  * Stored in `turboCleanCrmGoals`, one document `{ _id: 'activity', versions: [...] }`.
  */
 import type { Db } from 'mongodb'
-import { OUTREACH_TYPES } from './crm-facts'
 
 // ─── Catalog ───
-export const GOAL_METRIC_KEYS = ['contacted', 'emails', 'calls', 'walkIns', 'followUps', 'conversations', 'meetingsHeld'] as const
+export const GOAL_METRIC_KEYS = ['emails', 'calls', 'walkIns', 'followUps', 'conversations', 'meetingsHeld'] as const
 export type GoalMetric = typeof GOAL_METRIC_KEYS[number]
-const CONTACT_TYPES = OUTREACH_TYPES.filter(t => !t.startsWith('meeting') && t !== 'proposal_sent')
-export const GOAL_METRICS: Record<GoalMetric, { label: string, types: string[], distinct?: boolean, weight: number }> = {
-  contacted: { label: 'Contacted', types: CONTACT_TYPES, distinct: true, weight: 2 },
+export const GOAL_METRICS: Record<GoalMetric, { label: string, types: string[], weight: number }> = {
   emails: { label: 'Emails sent', types: ['email_sent'], weight: 1 },
   calls: { label: 'Calls', types: ['phone_call', 'connected_call', 'voicemail', 'text_message'], weight: 1 },
   walkIns: { label: 'Walk-ins', types: ['walk_in'], weight: 2 },
@@ -185,45 +182,30 @@ export async function saveGoalConfig(db: Db, raw: any, today: string, actor: { i
 
 // ─── Actuals by day ───
 export interface GoalDailyActuals {
-  /** day → metric → count (contacted = distinct dealerships that day) */
+  /** day → metric → count */
   team: Map<string, Record<GoalMetric, number>>
   byUser: Map<string, Map<string, Record<GoalMetric, number>>>
-  /** distinct dealerships contacted over a span, per user and for everyone */
-  contactedIn: (from: string, to: string, userId: string | null) => number
 }
 const zero = () => Object.fromEntries(GOAL_METRIC_KEYS.map(k => [k, 0])) as Record<GoalMetric, number>
 
 export async function goalDailyActuals(db: Db, q: { fromTs: string, toTs: string, offsetMs: number, userId?: string | null }): Promise<GoalDailyActuals> {
   const match: any = { voidedAt: null, occurredAt: { $gte: q.fromTs, $lte: q.toTs }, type: { $in: ALL_TYPES } }
   if (q.userId) match['user.id'] = q.userId
-  const [rows, live] = await Promise.all([
-    db.collection('turboCleanCrmInteractions').find(match, { projection: { dealershipId: 1, type: 1, occurredAt: 1, 'user.id': 1 } }).toArray(),
-    db.collection('turboCleanCrmDealerships').find({ archivedAt: null, mergedInto: null }, { projection: { _id: 1 } }).toArray(),
-  ])
-  const liveIds = new Set(live.map(d => String(d._id)))
+  const rows = await db.collection('turboCleanCrmInteractions').find(match, { projection: { type: 1, occurredAt: 1, 'user.id': 1 } }).toArray()
   const localDay = (iso: string) => new Date(Date.parse(iso) + q.offsetMs).toISOString().slice(0, 10)
   const team = new Map<string, Record<GoalMetric, number>>()
   const byUser = new Map<string, Map<string, Record<GoalMetric, number>>>()
-  const seen = new Set<string>() // `${user}|${day}|${dealership}` for distinct-per-day
-  const contacts: { day: string, user: string, id: string }[] = []
   const bump = (map: Map<string, Record<GoalMetric, number>>, day: string, m: GoalMetric) => { let r = map.get(day); if (!r) map.set(day, r = zero()); r[m]++ }
   for (const r of rows) {
-    const day = localDay(r.occurredAt), user = String(r.user?.id || ''), id = String(r.dealershipId)
+    const day = localDay(r.occurredAt), user = String(r.user?.id || '')
     let um = byUser.get(user)
     if (!um) byUser.set(user, um = new Map())
     for (const m of GOAL_METRIC_KEYS) {
       if (!GOAL_METRICS[m].types.includes(r.type)) continue
-      if (GOAL_METRICS[m].distinct) {
-        if (!liveIds.has(id)) continue
-        contacts.push({ day, user, id })
-        if (!seen.has(`*|${day}|${id}`)) { seen.add(`*|${day}|${id}`); bump(team, day, m) }
-        if (!seen.has(`${user}|${day}|${id}`)) { seen.add(`${user}|${day}|${id}`); bump(um, day, m) }
-      } else { bump(team, day, m); bump(um, day, m) }
+      bump(team, day, m); bump(um, day, m)
     }
   }
-  const contactedIn = (from: string, to: string, userId: string | null) =>
-    new Set(contacts.filter(c => c.day >= from && c.day <= to && (!userId || c.user === userId)).map(c => c.id)).size
-  return { team, byUser, contactedIn }
+  return { team, byUser }
 }
 
 // ─── The report shown on the dashboard ───
@@ -327,9 +309,7 @@ export async function goalReport(db: Db, q: {
       for (const u of us) names.set(String(u._id), u.name || u.email)
     } catch {}
     leaderboard = latest.people.map((id) => {
-      const per = (m: GoalMetric) => m === 'contacted'
-        ? daily.contactedIn(q.from, q.to, id)
-        : days.reduce((n, d) => n + (daily.byUser.get(id)?.get(d)?.[m] || 0), 0)
+      const per = (m: GoalMetric) => days.reduce((n, d) => n + (daily.byUser.get(id)?.get(d)?.[m] || 0), 0)
       const r = build(id, per)
       return { userId: id, name: names.get(id) || 'Unknown user', score: r.score, status: r.status, onPace: r.onPace, withGoal: r.withGoal,
         metrics: Object.fromEntries(r.rows.filter(x => x.goal > 0).map(x => [x.metric, { actual: x.actual, goal: x.goal, status: x.status }])) }
