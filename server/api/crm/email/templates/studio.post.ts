@@ -1,6 +1,6 @@
 import { actorFromSession, getCrmDb } from '../../../../utils/crm'
 import { getUserSession } from '../../../../utils/auth'
-import { AI_SETUP_HINT, aiConfigured, aiLabel, streamClaude } from '../../../../utils/automation-ai'
+import { AI_SETUP_HINT, aiConfigured, streamClaude, studioAi } from '../../../../utils/automation-ai'
 import { isCampaignBrief, parseStudio, repairEmailHtml, sanitizeEmailHtml, STUDIO_SYSTEM, studioPrompt, unknownFields } from '../../../../utils/template-studio'
 
 /**
@@ -32,6 +32,8 @@ export default defineEventHandler(async (event) => {
   if (!refining && !String(body.brief || '').trim()) throw createError({ statusCode: 400, statusMessage: 'Describe the email first' })
   const campaign = body.campaign === true || (body.campaign !== false && isCampaignBrief(`${body.brief || ''} ${body.instruction || ''}`))
   const thinking = body.quality === 'best' ? 'high' : 'low'
+  // Claude when ANTHROPIC_API_KEY is set (Gemini = fallback); see studioAi().
+  const ai = studioAi(body.quality === 'best' ? 'best' : 'fast')
 
   const db = await getCrmDb()
   const { MISSING_PHOTOS_HTML_V2 } = await import('../../../../utils/crm-email-seed')
@@ -49,7 +51,7 @@ export default defineEventHandler(async (event) => {
   const t0 = Date.now()
   let phase: 'connecting' | 'thinking' | 'writing' | 'checking' = 'connecting'
   let chars = 0
-  const model = aiLabel()
+  const model = ai.label
   const status = () => emit('status', { phase, elapsed: Date.now() - t0, chars, model })
   status()
   const tick = setInterval(status, 2000)
@@ -64,6 +66,7 @@ export default defineEventHandler(async (event) => {
         system: STUDIO_SYSTEM, cacheSystem: true, brain: 'design', purpose: refining ? 'studio.refine' : 'studio.create',
         prompt: studioPrompt({ ...body, campaign }, MISSING_PHOTOS_HTML_V2),
         maxTokens: 32_000, timeoutMs: STUDIO_TIMEOUT, idleMs: STUDIO_IDLE, signal: ctrl.signal, thinking,
+        prefer: 'anthropic', model: ai.provider === 'anthropic' ? ai.model : undefined,
         onNote: note => emit('note', { text: note }),
         onThought: (t) => {
           if (phase === 'connecting') phase = 'thinking'

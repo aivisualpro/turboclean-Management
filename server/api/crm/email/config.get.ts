@@ -1,5 +1,5 @@
 import { MERGE_FIELDS, MIN_SAMPLE, TEMPLATE_CATEGORIES, sendingAddress } from '../../../utils/crm-email'
-import { aiConfigured, aiLabel, aiModel, aiProvider } from '../../../utils/automation-ai'
+import { aiConfigured, aiLabel, aiModel, aiProvider, studioAi } from '../../../utils/automation-ai'
 
 /** GET /api/crm/email/config — what the composer needs to know about the sending setup. */
 export default defineEventHandler(() => ({
@@ -16,6 +16,11 @@ export default defineEventHandler(() => ({
   aiModel: aiModel(),
   aiProvider: aiProvider(),
   aiLabel: aiLabel(),
+  // Template Studio prefers Claude when ANTHROPIC_API_KEY is set.
+  studioAiLabel: studioAi('fast').label,
+  studioAiProvider: studioAi('fast').provider,
+  studioFastModel: studioAi('fast').model,
+  studioBestModel: studioAi('best').model,
   mergeFields: MERGE_FIELDS,
   templateCategories: TEMPLATE_CATEGORIES,
   minSample: MIN_SAMPLE,

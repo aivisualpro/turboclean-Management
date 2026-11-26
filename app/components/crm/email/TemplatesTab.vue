@@ -42,7 +42,11 @@ const studioHtml = ref('')
 function openStudio(t: EmailTemplate | null = null, v: EmailTemplateVersion | null = null) {
   studioFor.value = t
   studioHtml.value = v?.format === 'html' ? (v.html || '') : ''
+  // The Studio opens inside the page (sidebar + header stay) — close any sheet/dialog that launched it.
+  detailId.value = null
+  showNew.value = false
   showStudio.value = true
+  if (import.meta.client) window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 function studioSaved(t: EmailTemplate) { loadStats(); openDetail(t) }
 
@@ -123,20 +127,22 @@ async function copyHtml(v: EmailTemplateVersion) { try { await navigator.clipboa
 
 <template>
   <div class="space-y-4">
-    <div class="flex flex-wrap items-center gap-3">
+    <CrmEmailTemplateStudio v-model:open="showStudio" :template="studioFor" :start-html="studioHtml" :start-subject="studioFor ? activeSubject(studioFor) : ''" :start-name="studioFor?.name || ''" @saved="studioSaved" />
+
+    <div v-if="!showStudio" class="flex flex-wrap items-center gap-3">
       <p class="text-xs text-muted-foreground max-w-2xl">Body versions and subject lines are tracked separately. Run several at once to A/B test — new emails rotate between active ones, fewest sends first.</p>
       <label class="ml-auto inline-flex items-center gap-2 text-xs text-muted-foreground cursor-pointer"><Switch v-model="showArchived" /> Show archived</label>
       <Button size="sm" variant="outline" class="gap-2" @click="openNew"><Plus class="size-4" /> New template</Button>
       <Button size="sm" class="gap-2 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white shadow-sm shadow-emerald-600/25" @click="openStudio()"><Sparkles class="size-4" /> Design with AI</Button>
     </div>
 
-    <div v-if="!list.length" class="rounded-xl border-2 border-dashed py-12 flex flex-col items-center text-center">
+    <div v-if="!showStudio && !list.length" class="rounded-xl border-2 border-dashed py-12 flex flex-col items-center text-center">
       <FileText class="size-8 text-muted-foreground/50" />
       <p class="mt-2 font-semibold text-sm">No templates yet</p>
       <div class="mt-4 flex gap-2"><Button size="sm" variant="outline" class="gap-2" @click="openNew"><Plus class="size-4" /> New template</Button><Button size="sm" class="gap-2" @click="openStudio()"><Sparkles class="size-4" /> Design with AI</Button></div>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
+    <div v-if="!showStudio" class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
       <button v-for="t in list" :key="t.id" type="button" class="group text-left rounded-xl border bg-card overflow-hidden flex flex-col hover:border-primary/40 hover:shadow-md transition-all" :class="t.archivedAt && 'opacity-60'" @click="openDetail(t)">
         <div class="relative border-b">
           <CrmEmailTemplateThumb :html="thumbHtml(t)" :format="activeVersion(t)?.format || 'text'" />
@@ -352,7 +358,5 @@ async function copyHtml(v: EmailTemplateVersion) { try { await navigator.clipboa
         <DialogFooter><Button variant="ghost" @click="showVersion = false">Cancel</Button><Button :disabled="saving" class="min-w-28" @click="saveVersion"><Loader2 v-if="saving" class="size-4 animate-spin" /><span v-else>Save {{ vForm.label }}</span></Button></DialogFooter>
       </DialogContent>
     </Dialog>
-
-    <CrmEmailTemplateStudio v-model:open="showStudio" :template="studioFor" :start-html="studioHtml" :start-subject="studioFor ? activeSubject(studioFor) : ''" :start-name="studioFor?.name || ''" @saved="studioSaved" />
   </div>
 </template>

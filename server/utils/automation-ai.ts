@@ -63,6 +63,23 @@ export interface AskOptions {
   onThought?: (text: string) => void
   /** Streams: give up on an attempt when no data arrives for this long (retried / falls back). Default 90 s. */
   idleMs?: number
+  /** Streams with prefer 'anthropic': the Claude model to use (default ANTHROPIC_MODEL). */
+  model?: string
+}
+
+/**
+ * Template Studio runs on Claude whenever ANTHROPIC_API_KEY is set (better HTML email design, starts
+ * writing within seconds); Gemini is only its fallback. Fast = STUDIO_MODEL (default: ANTHROPIC_MODEL /
+ * claude-sonnet-5-5), Best = STUDIO_BEST_MODEL (default claude-opus-5-5; falls back to Fast if the
+ * account cannot use it). Without a Claude key the Studio uses the default provider.
+ */
+export function studioAi(quality: 'fast' | 'best' = 'fast') {
+  if (anthropicKey()) {
+    const fast = process.env.STUDIO_MODEL || process.env.ANTHROPIC_MODEL || AI_DEFAULT_MODEL
+    const model = quality === 'best' ? (process.env.STUDIO_BEST_MODEL || 'claude-opus-5-5') : fast
+    return { provider: 'anthropic' as AiProvider, model, fast, label: `Claude · ${model}` }
+  }
+  return { provider: aiProvider(), model: aiModel(), fast: aiModel(), label: aiLabel() }
 }
 
 async function brainBlock(opts: AskOptions): Promise<string> {
@@ -456,24 +473,45 @@ export async function askClaude(opts: AskOptions) {
  * shows the email building live). Resolves with the full text.
  */
 export async function streamClaude(opts: AskOptions & { signal?: AbortSignal, /** Retry / fallback notes ("gemini-… answered 503 — retrying in 4s") */ onNote?: (note: string) => void }, onText: (delta: string, full: string) => void) {
-  const provider = aiProvider()
+  const preferClaude = opts.prefer === 'anthropic' && !!anthropicKey()
+  const provider = preferClaude ? 'anthropic' : aiProvider()
   if (!provider) throw new Error(AI_SETUP_HINT)
-  const model = aiModel()
+  const claudeDefault = process.env.ANTHROPIC_MODEL || AI_DEFAULT_MODEL
+  const model = provider === 'anthropic' ? (opts.model || (preferClaude ? claudeDefault : aiModel())) : aiModel()
   const t = withTimeout(opts.timeoutMs ?? 300_000, opts.signal)
   const t0 = Date.now()
+  let wrote = false
+  const emit = (d: string, full: string) => { wrote = true; onText(d, full) }
+  const log = (entry: Record<string, any>) => logCall({ purpose: opts.purpose || 'stream', brain: opts.brain || null, ...entry })
   try {
-    const r = provider === 'gemini' ? await streamGemini(opts, model, t.signal, onText) : await streamAnthropic(opts, model, t.signal, onText)
-    logCall({ provider, purpose: opts.purpose || 'stream', brain: opts.brain || null, model: r.model, ms: Date.now() - t0, ok: true, ...r.usage })
+    const r = provider === 'gemini' ? await streamGemini(opts, model, t.signal, emit) : await streamAnthropic(opts, model, t.signal, emit)
+    log({ provider, model: r.model, ms: Date.now() - t0, ok: true, ...r.usage })
     return { text: r.text, model: r.model, finish: r.finish }
   }
   catch (e: any) {
-    logCall({ provider, purpose: opts.purpose || 'stream', brain: opts.brain || null, model, ms: Date.now() - t0, ok: false, error: String(e?.message || e).slice(0, 300) })
+    log({ provider, model, ms: Date.now() - t0, ok: false, error: String(e?.message || e).slice(0, 300) })
     if (t.signal.aborted && !opts.signal?.aborted) throw new Error(`The AI took longer than ${Math.round((opts.timeoutMs ?? 300_000) / 60_000)} minutes — try again, or ask for a shorter email`)
-    if (provider === 'gemini' && isOverload(e) && anthropicKey() && !t.signal.aborted) {
-      const m2 = process.env.ANTHROPIC_MODEL || AI_DEFAULT_MODEL
-      opts.onNote?.(`Gemini unavailable — switching to Claude (${m2})`)
-      const r = await streamAnthropic(opts, m2, t.signal, onText)
-      logCall({ provider: 'anthropic', purpose: opts.purpose || 'stream', brain: opts.brain || null, model: r.model, ms: Date.now() - t0, ok: true, ...r.usage })
+    if (t.signal.aborted || wrote) throw e
+    // Claude model not available on this account (e.g. Opus) → the default Claude model.
+    if (provider === 'anthropic' && model !== claudeDefault && /Claude API (400|403|404)|not_found|model/i.test(String(e?.message))) {
+      opts.onNote?.(`${model} is not available on this key — using ${claudeDefault}`)
+      const r = await streamAnthropic(opts, claudeDefault, t.signal, emit)
+      log({ provider: 'anthropic', model: r.model, ms: Date.now() - t0, ok: true, ...r.usage })
+      return { text: r.text, model: r.model, finish: r.finish }
+    }
+    // Gemini overloaded and a Claude key is also configured → Claude.
+    if (provider === 'gemini' && isOverload(e) && anthropicKey()) {
+      opts.onNote?.(`Gemini unavailable — switching to Claude (${claudeDefault})`)
+      const r = await streamAnthropic(opts, claudeDefault, t.signal, emit)
+      log({ provider: 'anthropic', model: r.model, ms: Date.now() - t0, ok: true, ...r.usage })
+      return { text: r.text, model: r.model, finish: r.finish }
+    }
+    // Claude preferred but failing (overloaded 529, outage, stall) and Gemini is set up → Gemini.
+    if (provider === 'anthropic' && geminiKey()) {
+      const gm = process.env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL
+      opts.onNote?.(`Claude unavailable (${String(e?.message || '').slice(0, 60)}) — switching to Gemini`)
+      const r = await streamGemini(opts, gm, t.signal, emit)
+      log({ provider: 'gemini', model: r.model, ms: Date.now() - t0, ok: true, ...r.usage })
       return { text: r.text, model: r.model, finish: r.finish }
     }
     throw e

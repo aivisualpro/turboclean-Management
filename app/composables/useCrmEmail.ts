@@ -94,7 +94,7 @@ export interface EmailConfig {
   fromEmail: string
   /** What is set on the server; differs from `fromEmail` when it cannot be used as a sender (a Gmail address …). */
   configuredFrom?: string, fromReplaced?: boolean, fromReplacedReason?: string
-  fromBrand: string, replyTracking: 'reply-address' | 'sender-match', webhookSigned: boolean, canSend: boolean, minSample: number, aiConfigured?: boolean, aiModel?: string, aiProvider?: 'gemini' | 'anthropic' | null, aiLabel?: string }
+  fromBrand: string, replyTracking: 'reply-address' | 'sender-match', webhookSigned: boolean, canSend: boolean, minSample: number, aiConfigured?: boolean, aiModel?: string, aiProvider?: 'gemini' | 'anthropic' | null, aiLabel?: string, studioAiLabel?: string, studioAiProvider?: 'gemini' | 'anthropic' | null, studioFastModel?: string, studioBestModel?: string }
 
 export interface SendEmailInput {
   contactId?: string | null

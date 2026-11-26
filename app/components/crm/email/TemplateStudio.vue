@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
 import type { EmailTemplate } from '~/composables/useCrmEmail'
 import { EMAIL_TEMPLATE_CATEGORIES } from '~/constants/crm'
-import { Sparkles, X, Wand2, Loader2, Square, Send, Eye, Code2, Undo2, Save, AlertTriangle, Brain, Check, RotateCcw, Zap, Gem, CalendarDays, Timer, Lightbulb, CheckCircle2, Circle, Flame, ArrowRight } from 'lucide-vue-next'
+import { Sparkles, X, ArrowLeft, Wand2, Loader2, Square, Send, Eye, Code2, Undo2, Save, AlertTriangle, Brain, Check, RotateCcw, Zap, Gem, CalendarDays, Timer, Lightbulb, CheckCircle2, Circle, Flame, ArrowRight } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 /**
@@ -14,6 +13,9 @@ import { toast } from 'vue-sonner'
  * the email assembling top-down. Seasonal briefs (Black Friday, holidays…) switch on campaign art
  * direction. A client-side watchdog ends a silent connection after 45 s instead of spinning forever.
  * Every brief and change request also teaches the brain ('design' area).
+ *
+ * It renders inside the Templates tab (not a full-screen overlay), so the app sidebar and header stay
+ * visible. Esc or "Back to templates" closes it.
  */
 const props = defineProps<{ template?: EmailTemplate | null, startHtml?: string, startSubject?: string, startName?: string }>()
 const open = defineModel<boolean>('open', { default: false })
@@ -42,6 +44,8 @@ const liveText = ref('')
 const thoughts = ref('')
 const phase = ref<'connecting' | 'thinking' | 'writing' | 'checking'>('connecting')
 const elapsed = ref(0)
+/** Model actually answering (from the server's status events — shows fallbacks too). */
+const liveModel = ref('')
 const view = ref<'preview' | 'html'>('preview')
 const device = ref<'desktop' | 'mobile'>('desktop')
 let ctrl: AbortController | null = null
@@ -174,7 +178,15 @@ function reset() {
   }
 }
 watch(open, (v) => { if (v) reset(); else stop() }, { immediate: true })
-onBeforeUnmount(() => { stop(); if (clock) clearInterval(clock) })
+function onKey(e: KeyboardEvent) {
+  if (e.key !== 'Escape' || !open.value) return
+  // Let open popovers / selects / dialogs handle their own Esc first.
+  if (document.querySelector('[role="dialog"][data-state="open"], [role="listbox"], [data-reka-popper-content-wrapper]')) return
+  e.preventDefault()
+  close()
+}
+onMounted(() => window.addEventListener('keydown', onKey))
+onBeforeUnmount(() => { stop(); if (clock) clearInterval(clock); window.removeEventListener('keydown', onKey) })
 
 /** Watchdog: the server sends a status event every 2 s — 45 s of silence means the connection is gone. */
 const SILENCE_MS = 45_000
@@ -187,6 +199,7 @@ async function run(body: Record<string, any>, userText: string) {
   liveText.value = ''
   liveHtml.value = ''
   thoughts.value = ''
+  liveModel.value = ''
   phase.value = 'connecting'
   const started = Date.now()
   elapsed.value = 0
@@ -220,7 +233,7 @@ async function run(body: Record<string, any>, userText: string) {
         let d: any; try { d = JSON.parse(data) } catch { continue }
         if (ev === 'delta') { liveText.value += d.text; phase.value = 'writing' }
         else if (ev === 'thought') { thoughts.value += `${thoughts.value ? '\n\n' : ''}${d.text}`; if (phase.value === 'connecting') phase.value = 'thinking' }
-        else if (ev === 'status') { if (d.phase && !(phase.value === 'writing' && d.phase === 'thinking')) phase.value = d.phase }
+        else if (ev === 'status') { if (d.model) liveModel.value = d.model; if (d.phase && !(phase.value === 'writing' && d.phase === 'thinking')) phase.value = d.phase }
         else if (ev === 'done') done = d
         else if (ev === 'failure') failure = d.message
         else if (ev === 'note') aiNote.value = d.text
@@ -314,24 +327,27 @@ function close() {
   open.value = false
 }
 const aiReady = computed(() => config.value?.aiConfigured !== false)
+/** Which AI the Studio uses (Claude when the server has ANTHROPIC_API_KEY, else the default provider). */
+const studioLabel = computed(() => config.value?.studioAiLabel || config.value?.aiLabel || 'AI')
+const onClaude = computed(() => config.value?.studioAiProvider === 'anthropic')
+const shortModel = (m?: string) => (m || '').replace(/^claude-/, '').replace(/-(\d+)-(\d+)$/, ' $1.$2').replace(/^(\w)/, c => c.toUpperCase())
 const libraryTemplates = computed(() => templates.value.filter(t => !t.archivedAt))
 </script>
 
 <template>
-  <DialogRoot v-model:open="open">
-    <DialogPortal>
-      <DialogOverlay class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm data-[state=open]:animate-in data-[state=open]:fade-in-0" />
-      <DialogContent class="fixed inset-2 z-50 flex flex-col overflow-hidden rounded-xl border bg-background shadow-2xl outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95" @escape-key-down="(e: Event) => { e.preventDefault(); close() }" @interact-outside="(e: Event) => e.preventDefault()" @open-auto-focus="(e: Event) => e.preventDefault()">
+  <section v-if="open" aria-label="Template Studio" class="flex flex-col overflow-hidden rounded-xl border bg-background shadow-sm h-[calc(100dvh-11rem)] min-h-[640px] animate-in fade-in-0 slide-in-from-bottom-2 duration-200">
         <!-- Title bar -->
         <header class="shrink-0 h-12 flex items-center gap-3 px-3 border-b bg-card">
+          <Button variant="ghost" size="sm" class="h-8 gap-1.5 -ml-1 text-xs text-muted-foreground hover:text-foreground" @click="close"><ArrowLeft class="size-4" /> <span class="hidden sm:inline">Templates</span></Button>
+          <span class="h-5 w-px bg-border" aria-hidden="true" />
           <span class="size-8 rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-700 text-white flex items-center justify-center shadow-sm shadow-emerald-700/30"><Sparkles class="size-4" /></span>
           <div class="min-w-0 leading-tight">
-            <DialogTitle class="text-sm font-semibold tracking-tight">Template Studio</DialogTitle>
-            <DialogDescription class="text-[11px] text-muted-foreground truncate">{{ template ? `Designing a new version of “${template.name}”` : 'Describe an email — AI designs it in your house style' }}</DialogDescription>
+            <h2 class="text-sm font-semibold tracking-tight">Template Studio</h2>
+            <p class="text-[11px] text-muted-foreground truncate">{{ template ? `Designing a new version of “${template.name}”` : 'Describe an email — AI designs it in your house style' }}</p>
           </div>
-          <span class="hidden md:inline-flex items-center gap-1.5 ml-3 rounded-full border bg-muted/40 px-2 h-6 text-[11px] text-muted-foreground"><Brain class="size-3.5 text-emerald-600" /> Uses your playbook · {{ config?.aiLabel || config?.aiModel || 'AI' }}</span>
+          <span class="hidden md:inline-flex items-center gap-1.5 ml-3 rounded-full border bg-muted/40 px-2 h-6 text-[11px] text-muted-foreground"><Brain class="size-3.5 text-emerald-600" /> Uses your playbook · {{ liveModel || studioLabel }}</span>
           <span v-if="streaming" class="hidden md:inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 px-2 h-6 text-[11px] font-semibold tabular-nums"><Timer class="size-3.5" /> {{ fmtTime(elapsed) }}</span>
-          <Button variant="ghost" size="icon" class="size-8 ml-auto" aria-label="Close" @click="close"><X class="size-4" /></Button>
+          <Button variant="ghost" size="icon" class="size-8 ml-auto" aria-label="Close Template Studio" title="Close (Esc)" @click="close"><X class="size-4" /></Button>
         </header>
 
         <div class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[420px_1fr]">
@@ -387,11 +403,11 @@ const libraryTemplates = computed(() => templates.value.filter(t => !t.archivedA
                 <div class="grid grid-cols-2 gap-2">
                   <button type="button" class="rounded-lg border p-2.5 text-left transition" :class="quality === 'fast' ? 'border-emerald-500/50 bg-emerald-500/5 ring-1 ring-emerald-500/30' : 'bg-background hover:border-primary/30'" @click="quality = 'fast'">
                     <span class="flex items-center gap-1.5 text-xs font-semibold"><Zap class="size-3.5 text-emerald-600" /> Fast</span>
-                    <span class="mt-0.5 block text-[10px] text-muted-foreground">About a minute · great for drafts</span>
+                    <span class="mt-0.5 block text-[10px] text-muted-foreground">{{ onClaude ? `${shortModel(config?.studioFastModel)} · ~1 min` : 'About a minute · great for drafts' }}</span>
                   </button>
                   <button type="button" class="rounded-lg border p-2.5 text-left transition" :class="quality === 'best' ? 'border-violet-500/50 bg-violet-500/5 ring-1 ring-violet-500/30' : 'bg-background hover:border-primary/30'" @click="quality = 'best'">
                     <span class="flex items-center gap-1.5 text-xs font-semibold"><Gem class="size-3.5 text-violet-600" /> Best</span>
-                    <span class="mt-0.5 block text-[10px] text-muted-foreground">Deeper thinking · 2–3 min</span>
+                    <span class="mt-0.5 block text-[10px] text-muted-foreground">{{ onClaude ? `${shortModel(config?.studioBestModel)} · 2–3 min` : 'Deeper thinking · 2–3 min' }}</span>
                   </button>
                 </div>
                 <Button class="w-full h-10 gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm shadow-emerald-700/20" :disabled="!aiReady || !brief.trim()" @click="design"><Wand2 class="size-4" /> Design it <kbd class="ml-1 hidden sm:inline rounded bg-white/15 px-1.5 py-0.5 text-[10px] font-medium">⌘↵</kbd></Button>
@@ -495,7 +511,7 @@ const libraryTemplates = computed(() => templates.value.filter(t => !t.archivedA
                     <li v-for="(p, i) in plan" :key="p" class="flex items-start gap-2 text-xs"><CheckCircle2 v-if="i < plan.length - 1" class="size-3.5 mt-px shrink-0 text-emerald-600" /><Loader2 v-else class="size-3.5 mt-px shrink-0 animate-spin text-emerald-600" /><span>{{ p }}</span></li>
                   </ul>
                   <p v-if="lastThought" class="text-[11px] leading-relaxed text-muted-foreground border-l-2 border-amber-400/60 pl-2.5">{{ lastThought }}</p>
-                  <p v-if="!plan.length && !lastThought" class="text-xs text-muted-foreground">{{ phase === 'connecting' ? `Connecting to ${config?.aiLabel || 'the AI'}…` : 'Reading your brief, the house style and your playbook…' }}</p>
+                  <p v-if="!plan.length && !lastThought" class="text-xs text-muted-foreground">{{ phase === 'connecting' ? `Connecting to ${liveModel || studioLabel}…` : 'Reading your brief, the house style and your playbook…' }}</p>
                   <div v-if="campaign" class="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 text-[11px] text-amber-800 dark:text-amber-200 flex gap-2"><CalendarDays class="size-3.5 shrink-0 mt-px" /> Campaign art direction with this season’s real dates.</div>
                 </aside>
               </div>
@@ -553,7 +569,5 @@ const libraryTemplates = computed(() => templates.value.filter(t => !t.archivedA
             </footer>
           </section>
         </div>
-      </DialogContent>
-    </DialogPortal>
-  </DialogRoot>
+  </section>
 </template>
