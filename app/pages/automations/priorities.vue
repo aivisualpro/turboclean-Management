@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { PriorityRow } from '~/composables/useAutomations'
 import { TIER_STYLE, ago } from '~/composables/useAutomations'
-import { RefreshCw, Loader2, Flame, ArrowRight, Phone, Mail, Search, UserPlus, Send, CalendarCheck, FileText, ClipboardCheck, ListTodo, Moon, Inbox, Info, ChevronDown } from 'lucide-vue-next'
+import { RefreshCw, Loader2, Flame, ArrowRight, Phone, Mail, Search, UserPlus, Send, CalendarCheck, FileText, ClipboardCheck, ListTodo, Moon, Inbox, Info, ChevronDown, Search as SearchIcon } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 /**
@@ -16,6 +16,7 @@ const { loadPriorities } = useAutomations()
 const tier = ref<string>(typeof route.query.tier === 'string' ? route.query.tier : 'all')
 const owner = useLocalStorage<string>('automations-priorities-owner', 'all')
 const search = ref('')
+const TIERS = ['all', 'Hot', 'Warm', 'Cool'] as const
 const rows = ref<PriorityRow[]>([])
 const totals = ref<Record<string, number>>({})
 const learning = ref<any[]>([])
@@ -41,23 +42,31 @@ const pctTone = (p: number | null) => p == null ? 'text-muted-foreground' : p >=
 
 <template>
   <div class="space-y-4">
+    <!-- Filters live in the main header -->
     <ClientOnly>
       <Teleport to="#page-header-actions">
+        <div class="hidden h-8 items-center rounded-lg border bg-muted/40 p-0.5 xl:inline-flex" role="tablist" aria-label="Priority">
+          <button v-for="t in TIERS" :key="t" type="button" role="tab" :aria-selected="tier === t" class="inline-flex h-full items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-xs font-medium transition-colors" :class="tier === t ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'" @click="tier = t">
+            <Flame v-if="t === 'Hot'" class="size-3.5 text-rose-500" />{{ t === 'all' ? 'All open' : t }} <span class="tabular-nums opacity-60">{{ t === 'all' ? totals.all || 0 : totals[t] || 0 }}</span>
+          </button>
+        </div>
+        <Select v-model="tier">
+          <SelectTrigger size="sm" class="h-8 w-[130px] text-xs xl:hidden" aria-label="Priority"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem v-for="t in TIERS" :key="t" :value="t">{{ t === 'all' ? 'All open' : t }} ({{ t === 'all' ? totals.all || 0 : totals[t] || 0 }})</SelectItem></SelectContent>
+        </Select>
+        <div class="relative">
+          <SearchIcon class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input v-model="search" placeholder="Search dealership, city, contact…" class="h-8 w-40 pl-8 text-xs lg:w-56" aria-label="Search" />
+        </div>
         <Select v-model="owner">
-          <SelectTrigger class="h-8 w-[140px] text-xs"><SelectValue /></SelectTrigger>
+          <SelectTrigger size="sm" class="h-8 w-[120px] text-xs" aria-label="Whose dealerships"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="all">Everyone</SelectItem><SelectItem value="mine">Mine</SelectItem></SelectContent>
         </Select>
         <Button variant="outline" size="icon" class="size-8" aria-label="Recalculate" :disabled="loading" @click="reload(false)"><RefreshCw class="size-4" :class="loading && 'animate-spin'" /></Button>
       </Teleport>
     </ClientOnly>
 
-    <div class="flex flex-wrap items-center gap-2">
-      <button v-for="t in ['all', 'Hot', 'Warm', 'Cool']" :key="t" type="button" class="rounded-full border px-3 py-1 text-xs inline-flex items-center gap-1.5" :class="tier === t ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted'" @click="tier = t">
-        <Flame v-if="t === 'Hot'" class="size-3.5" />{{ t === 'all' ? 'All open' : t }} <span class="tabular-nums opacity-70">{{ t === 'all' ? totals.all || 0 : totals[t] || 0 }}</span>
-      </button>
-      <span class="text-xs text-muted-foreground ml-1">{{ totals.needToday || 0 }} need a step today</span>
-      <Input v-model="search" placeholder="Search dealership, city, contact…" class="ml-auto h-8 w-64 text-xs" />
-    </div>
+    <p class="text-xs text-muted-foreground"><b class="font-semibold tabular-nums text-foreground">{{ totals.needToday || 0 }}</b> need a step today</p>
 
     <div v-if="loading && !rows.length" class="flex items-center justify-center py-20 text-muted-foreground gap-2"><Loader2 class="size-4 animate-spin" /> Scoring dealerships…</div>
     <div v-else class="rounded-xl border bg-card overflow-x-auto">

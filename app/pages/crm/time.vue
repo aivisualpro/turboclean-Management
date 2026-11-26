@@ -82,28 +82,26 @@ const showAdd = ref(false)
 
 <template>
   <div class="space-y-5">
+    <!-- Filters live in the main header -->
     <ClientOnly>
       <Teleport to="#page-header-actions">
-        <Button size="sm" class="h-9 gap-1.5" @click="showAdd = true"><Plus class="size-4" /> Add time</Button>
-        <Button variant="outline" size="icon" class="size-9" aria-label="Refresh" :disabled="loading" @click="reload(false)"><RefreshCw class="size-4" :class="loading && 'animate-spin'" /></Button>
+        <Loader2 v-if="loading && r" class="size-4 shrink-0 animate-spin text-muted-foreground" />
+        <Select v-model="range">
+          <SelectTrigger size="sm" class="h-8 w-[140px] text-xs" aria-label="Period"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem v-for="o in RANGES" :key="o.key" :value="o.key">{{ o.label }}</SelectItem></SelectContent>
+        </Select>
+        <Select v-model="scope">
+          <SelectTrigger size="sm" class="h-8 w-[150px] text-xs" aria-label="Whose time"><SelectValue /></SelectTrigger>
+          <SelectContent class="max-h-72">
+            <SelectItem value="mine">Mine{{ (me as any)?.name ? ` (${(me as any).name})` : '' }}</SelectItem>
+            <SelectItem value="all">Everyone</SelectItem>
+            <SelectItem v-for="u in users.filter(u => u.id !== (me as any)?.id)" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button size="sm" class="h-8 gap-1.5" @click="showAdd = true"><Plus class="size-4" /><span class="hidden lg:inline">Add time</span></Button>
+        <Button variant="outline" size="icon" class="size-8" aria-label="Refresh" :disabled="loading" @click="reload(false)"><RefreshCw class="size-4" :class="loading && 'animate-spin'" /></Button>
       </Teleport>
     </ClientOnly>
-
-    <div class="flex flex-wrap items-center gap-2">
-      <Select v-model="range">
-        <SelectTrigger class="h-9 w-[150px] text-xs"><SelectValue /></SelectTrigger>
-        <SelectContent><SelectItem v-for="o in RANGES" :key="o.key" :value="o.key">{{ o.label }}</SelectItem></SelectContent>
-      </Select>
-      <Select v-model="scope">
-        <SelectTrigger class="h-9 w-[180px] text-xs"><SelectValue /></SelectTrigger>
-        <SelectContent class="max-h-72">
-          <SelectItem value="mine">Mine{{ (me as any)?.name ? ` (${(me as any).name})` : '' }}</SelectItem>
-          <SelectItem value="all">Everyone</SelectItem>
-          <SelectItem v-for="u in users.filter(u => u.id !== (me as any)?.id)" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
-        </SelectContent>
-      </Select>
-      <Loader2 v-if="loading && r" class="size-4 animate-spin text-muted-foreground" />
-    </div>
 
     <div v-if="!r" class="flex items-center justify-center py-24 text-muted-foreground gap-2"><Loader2 class="size-4 animate-spin" /> Loading time…</div>
 

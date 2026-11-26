@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { LostDeal, LostBreakdownRow } from '~/composables/useCrmLost'
-import { RefreshCw, Download, Loader2, CircleX, Handshake, Undo2, AlertTriangle, Pencil, ChevronRight, X, Swords } from 'lucide-vue-next'
+import { RefreshCw, Download, Loader2, CircleX, Handshake, Undo2, AlertTriangle, Pencil, ChevronRight, X, Swords, SlidersHorizontal } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { format, subDays, startOfYear, parseISO } from 'date-fns'
 import { OPEN_STAGES, NURTURE_STAGE, STAGE_STYLE } from '~/constants/crm'
@@ -25,6 +25,8 @@ const range = useLocalStorage<string>('crm-lost-range', 'all')
 const ownerId = ref('all')
 const stage = ref('all')
 const includeReopened = ref(false)
+/** How many of the filters tucked into the "Filters" popover are switched on. */
+const extraFilters = computed(() => (stage.value !== 'all' ? 1 : 0) + (includeReopened.value ? 1 : 0))
 const users = ref<{ id: string, name: string }[]>([])
 onMounted(async () => {
   try { const res = await $fetch<any[]>('/api/users'); users.value = (res || []).map(u => ({ id: u.id, name: u.name || u.email })).sort((a, b) => a.name.localeCompare(b.name)) } catch {}
@@ -137,35 +139,44 @@ function exportCsv() {
 
 <template>
   <div class="space-y-5">
+    <!-- Filters live in the main header -->
     <ClientOnly>
       <Teleport to="#page-header-actions">
-        <Button variant="outline" size="sm" class="h-9 gap-1.5" :disabled="!deals.length" @click="exportCsv"><Download class="size-4" /> Export CSV</Button>
-        <Button variant="outline" size="icon" class="size-9" aria-label="Refresh" :disabled="loading" @click="reload(false)"><RefreshCw class="size-4" :class="loading && 'animate-spin'" /></Button>
+        <Loader2 v-if="loading && r" class="size-4 shrink-0 animate-spin text-muted-foreground" />
+        <Select v-model="range">
+          <SelectTrigger size="sm" class="h-8 w-[140px] text-xs" aria-label="Period"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem v-for="o in RANGES" :key="o.key" :value="o.key">{{ o.label }}</SelectItem></SelectContent>
+        </Select>
+        <Select v-model="ownerId">
+          <SelectTrigger size="sm" class="h-8 w-[150px] text-xs" aria-label="Owner"><SelectValue /></SelectTrigger>
+          <SelectContent class="max-h-72"><SelectItem value="all">All owners</SelectItem><SelectItem v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}</SelectItem></SelectContent>
+        </Select>
+        <Popover>
+          <PopoverTrigger as-child>
+            <Button variant="outline" size="sm" class="h-8 gap-1.5 px-2.5 text-xs" aria-label="More filters"><SlidersHorizontal class="size-3.5" /><span class="hidden lg:inline">Filters</span><span v-if="extraFilters" class="rounded-full bg-primary px-1.5 text-[10px] leading-4 text-primary-foreground">{{ extraFilters }}</span></Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" class="w-72 space-y-3 p-3">
+            <div class="space-y-1">
+              <p class="text-xs font-medium">Lost at stage</p>
+              <Select v-model="stage">
+                <SelectTrigger size="sm" class="h-8 w-full text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent class="max-h-72">
+                  <SelectItem value="all">Lost at any stage</SelectItem>
+                  <SelectItem v-for="s in [...OPEN_STAGES, NURTURE_STAGE]" :key="s" :value="s"><span class="flex items-center gap-2"><span class="size-1.5 rounded-full" :class="STAGE_STYLE[s]?.dot" />Lost at {{ s }}</span></SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <label class="flex cursor-pointer select-none items-center justify-between gap-3 text-xs">
+              <span>Include re-opened<span class="block text-[11px] text-muted-foreground">Deals lost and later re-opened</span></span>
+              <Switch v-model="includeReopened" />
+            </label>
+            <Button v-if="extraFilters" variant="ghost" size="sm" class="h-7 w-full text-xs" @click="stage = 'all'; includeReopened = false">Clear these filters</Button>
+          </PopoverContent>
+        </Popover>
+        <Button variant="outline" size="sm" class="h-8 gap-1.5" :disabled="!deals.length" @click="exportCsv"><Download class="size-4" /><span class="hidden lg:inline">Export CSV</span></Button>
+        <Button variant="outline" size="icon" class="size-8" aria-label="Refresh" :disabled="loading" @click="reload(false)"><RefreshCw class="size-4" :class="loading && 'animate-spin'" /></Button>
       </Teleport>
     </ClientOnly>
-
-    <!-- Filters -->
-    <div class="flex flex-wrap items-center gap-2">
-      <Select v-model="range">
-        <SelectTrigger class="h-9 w-[150px] text-xs"><SelectValue /></SelectTrigger>
-        <SelectContent><SelectItem v-for="o in RANGES" :key="o.key" :value="o.key">{{ o.label }}</SelectItem></SelectContent>
-      </Select>
-      <Select v-model="ownerId">
-        <SelectTrigger class="h-9 w-[170px] text-xs"><SelectValue /></SelectTrigger>
-        <SelectContent class="max-h-72"><SelectItem value="all">All owners</SelectItem><SelectItem v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}</SelectItem></SelectContent>
-      </Select>
-      <Select v-model="stage">
-        <SelectTrigger class="h-9 w-[210px] text-xs"><SelectValue /></SelectTrigger>
-        <SelectContent class="max-h-72">
-          <SelectItem value="all">Lost at any stage</SelectItem>
-          <SelectItem v-for="s in [...OPEN_STAGES, NURTURE_STAGE]" :key="s" :value="s"><span class="flex items-center gap-2"><span class="size-1.5 rounded-full" :class="STAGE_STYLE[s]?.dot" />Lost at {{ s }}</span></SelectItem>
-        </SelectContent>
-      </Select>
-      <label class="h-9 inline-flex items-center gap-2 rounded-md border px-3 text-xs cursor-pointer select-none" title="Count deals that were lost and later re-opened">
-        <Switch v-model="includeReopened" /> Include re-opened
-      </label>
-      <Loader2 v-if="loading && r" class="size-4 animate-spin text-muted-foreground" />
-    </div>
 
     <div v-if="!r" class="flex items-center justify-center py-24 text-muted-foreground gap-2"><Loader2 class="size-4 animate-spin" /> Loading lost deals…</div>
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { RefreshCw, Loader2, Lightbulb, AlertCircle, Mail, Phone, Footprints } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
-import { format, startOfQuarter, startOfYear, subDays } from 'date-fns'
+import { format, parseISO, startOfQuarter, startOfYear, subDays } from 'date-fns'
 import { money } from '~/composables/useCrmWon'
 import { localDay } from '~/composables/useCrmDealerships'
 
@@ -34,6 +34,8 @@ const period = computed(() => {
   }
 })
 
+const periodLabel = computed(() => period.value.from ? `${format(parseISO(period.value.from), 'MMM d')} – ${format(parseISO(period.value.to), 'MMM d, yyyy')}` : 'All time')
+
 const data = ref<any>(null)
 const loading = ref(false)
 async function load(quiet = true) {
@@ -54,30 +56,24 @@ const tdMax = computed(() => Math.max(1, ...(a.value?.touchesToMeeting.distribut
 
 <template>
   <div class="space-y-5">
+    <!-- Filters live in the main header -->
     <ClientOnly>
       <Teleport to="#page-header-actions">
-        <Button variant="outline" size="icon" class="size-9" aria-label="Refresh" :disabled="loading" @click="load(false)"><RefreshCw class="size-4" :class="loading && 'animate-spin'" /></Button>
+        <Loader2 v-if="loading && a" class="size-4 shrink-0 animate-spin text-muted-foreground" />
+        <PeriodPicker v-model="range" v-model:from="customFrom" v-model:to="customTo" :ranges="RANGES" :label="periodLabel" />
+        <Select v-model="scope">
+          <SelectTrigger size="sm" class="h-8 w-[150px] text-xs" aria-label="Whose numbers"><SelectValue /></SelectTrigger>
+          <SelectContent class="max-h-72">
+            <SelectItem value="all">Everyone</SelectItem>
+            <SelectItem value="mine">Mine{{ (me as any)?.name ? ` (${(me as any).name})` : '' }}</SelectItem>
+            <SelectItem v-for="u in users.filter(u => u.id !== (me as any)?.id)" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button variant="outline" size="icon" class="size-8" aria-label="Refresh" :disabled="loading" @click="load(false)"><RefreshCw class="size-4" :class="loading && 'animate-spin'" /></Button>
       </Teleport>
     </ClientOnly>
 
-    <div class="flex flex-wrap items-center gap-2">
-      <div class="inline-flex rounded-lg border bg-muted/40 p-0.5">
-        <button v-for="r in RANGES" :key="r.key" type="button" class="px-3 py-1.5 rounded-md text-xs font-medium transition-colors" :class="range === r.key ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'" @click="range = r.key">{{ r.label }}</button>
-      </div>
-      <template v-if="range === 'custom'">
-        <Input v-model="customFrom" type="date" class="h-9 w-40 text-xs" aria-label="From" /><span class="text-xs text-muted-foreground">to</span><Input v-model="customTo" type="date" class="h-9 w-40 text-xs" aria-label="To" />
-      </template>
-      <Select v-model="scope">
-        <SelectTrigger class="h-9 w-[170px] text-xs"><SelectValue /></SelectTrigger>
-        <SelectContent class="max-h-72">
-          <SelectItem value="all">Everyone</SelectItem>
-          <SelectItem value="mine">Mine{{ (me as any)?.name ? ` (${(me as any).name})` : '' }}</SelectItem>
-          <SelectItem v-for="u in users.filter(u => u.id !== (me as any)?.id)" :key="u.id" :value="u.id">{{ u.name }}</SelectItem>
-        </SelectContent>
-      </Select>
-      <span v-if="a" class="text-xs text-muted-foreground">{{ a.base.contacted }} dealerships contacted · {{ a.base.emails }} emails · {{ a.base.meetings }} first meetings · {{ a.base.wins }} wins</span>
-      <Loader2 v-if="loading && a" class="size-4 animate-spin text-muted-foreground" />
-    </div>
+    <p v-if="a" class="text-xs text-muted-foreground">Based on {{ a.base.contacted }} dealerships contacted · {{ a.base.emails }} emails · {{ a.base.meetings }} first meetings · {{ a.base.wins }} wins</p>
 
     <div v-if="!a" class="flex items-center justify-center py-24 text-muted-foreground gap-2"><Loader2 class="size-4 animate-spin" /> Crunching the numbers…</div>
 

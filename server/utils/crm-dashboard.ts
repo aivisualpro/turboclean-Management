@@ -1,6 +1,13 @@
 /**
  * Main CRM dashboard: activity, funnel, results, efficiency for a date range.
  * from/to are calendar days (YYYY-MM-DD, the user's local dates); fromTs/toTs are the matching instants.
+ *
+ * One definition per word, used everywhere on the page, so the numbers tie out:
+ * - "Researched for the first time in the period" = the dealership's first research (or anything
+ *   later in the funnel, which implies it) falls in the period. That group is the "first time" figure
+ *   under *Dealerships researched*, the Researched row of the funnel, and the funnel's starting group.
+ * - Same for "contacted for the first time".
+ * - Dealership counts only include dealerships still in the CRM (not archived, not merged into another).
  */
 import type { Db } from 'mongodb'
 import { buildFacts, FUNNEL_LABELS, FUNNEL_STEPS, OUTREACH_TYPES } from './crm-facts'
@@ -24,6 +31,7 @@ export async function dashboard(db: Db, q: DashboardQuery) {
 
   const allFacts = await buildFacts(db)
   const facts = q.userId ? allFacts.filter(f => f.ownerId === q.userId) : allFacts
+  const live = new Set(allFacts.map(f => f.id))
 
   // ── Activity (what was done in the period) ──
   const ixMatch: any = { voidedAt: null, occurredAt: { $gte: q.fromTs, $lte: q.toTs } }
@@ -38,14 +46,19 @@ export async function dashboard(db: Db, q: DashboardQuery) {
   ])
   const count = (types: string[]) => ix.filter(i => types.includes(i.type)).length
   const distinct = (types: string[]) => new Set(ix.filter(i => types.includes(i.type)).map(i => i.dealershipId)).size
-  const researchedIds = new Set([...ix.filter(i => i.type === 'research_completed').map(i => i.dealershipId), ...audits.map(a => a.dealershipId), ...researchedStages.map(h => h.dealershipId)])
   const contactTypes = OUTREACH_TYPES.filter(t => !t.startsWith('meeting') && t !== 'proposal_sent')
-  const contactedIds = new Set(ix.filter(i => contactTypes.includes(i.type)).map(i => i.dealershipId))
-  const firstContacted = facts.filter(f => inTs(f.steps.contacted)).length
+  const liveIds = (rows: any[]) => rows.map(r => String(r.dealershipId)).filter(id => live.has(id))
+  // First time ever, in this period.
+  const firstResearched = facts.filter(f => inTs(f.steps.researched))
+  const firstContacted = facts.filter(f => inTs(f.steps.contacted))
+  // Every dealership worked on in the period = the first-timers + those worked on again.
+  const researchedIds = new Set([...liveIds(ix.filter(i => i.type === 'research_completed')), ...liveIds(audits), ...liveIds(researchedStages), ...firstResearched.map(f => f.id)])
+  const contactedIds = new Set([...liveIds(ix.filter(i => contactTypes.includes(i.type))), ...firstContacted.map(f => f.id)])
   const activity = {
     researched: researchedIds.size,
+    newlyResearched: firstResearched.length,
     contacted: contactedIds.size,
-    newlyContacted: firstContacted,
+    newlyContacted: firstContacted.length,
     emails: count(['email_sent']),
     calls: count(['phone_call', 'connected_call', 'voicemail', 'text_message']),
     connectedCalls: count(['connected_call']),
@@ -58,15 +71,21 @@ export async function dashboard(db: Db, q: DashboardQuery) {
     dealershipsTouched: distinct(contactTypes),
   }
 
-  // Daily (or weekly for long ranges) outreach volume.
-  const days = Math.round((new Date(q.toTs).getTime() - new Date(q.fromTs).getTime()) / 86_400_000) + 1
+  // Daily (or weekly for long ranges) outreach volume, on the user's own calendar days, with empty days kept
+  // so the chart is a real timeline.
+  const days = Math.round((Date.parse(`${q.to}T00:00:00.000Z`) - Date.parse(`${q.from}T00:00:00.000Z`)) / 86_400_000) + 1
   const weekly = days > 62
-  const bucketOf = (iso: string) => {
-    const d = new Date(iso)
-    if (!weekly) return iso.slice(0, 10)
-    const m = new Date(d); m.setUTCDate(m.getUTCDate() - ((m.getUTCDay() + 6) % 7)); return m.toISOString().slice(0, 10)
-  }
+  // fromTs is the user's local midnight of `from`; the gap to UTC midnight is their offset from UTC.
+  const offsetMs = (Date.parse(`${q.from}T00:00:00.000Z`) - Date.parse(q.fromTs)) || 0
+  const localDayOf = (iso: string) => new Date(Date.parse(iso) + offsetMs).toISOString().slice(0, 10)
+  const weekOf = (day: string) => { const m = new Date(`${day}T00:00:00.000Z`); m.setUTCDate(m.getUTCDate() - ((m.getUTCDay() + 6) % 7)); return m.toISOString().slice(0, 10) }
+  const bucketOf = (iso: string) => weekly ? weekOf(localDayOf(iso)) : localDayOf(iso)
   const series = new Map<string, { emails: number, calls: number, visits: number, other: number }>()
+  for (let t = Date.parse(`${q.from}T00:00:00.000Z`), end = Date.parse(`${q.to}T00:00:00.000Z`), n = 0; t <= end && n < 800; t += 86_400_000, n++) {
+    const day = new Date(t).toISOString().slice(0, 10)
+    const k = weekly ? weekOf(day) : day
+    if (!series.has(k)) series.set(k, { emails: 0, calls: 0, visits: 0, other: 0 })
+  }
   for (const i of ix) {
     if (!OUTREACH_TYPES.includes(i.type)) continue
     const k = bucketOf(i.occurredAt)
@@ -79,13 +98,15 @@ export async function dashboard(db: Db, q: DashboardQuery) {
   }
 
   // ── Funnel ──
-  const entered = facts.filter(f => inTs(f.steps.researched) || inTs(f.steps.contacted))
+  // Starting group: dealerships researched for the first time in the period (a first contact without a
+  // logged research step counts — contacting implies it). Same group as activity.newlyResearched.
+  const entered = firstResearched
   const funnelRows = (pick: (f: DealershipFacts, s: FunnelStep) => boolean, base: DealershipFacts[]) => {
     const rows = FUNNEL_STEPS.map(s => ({ key: s, label: FUNNEL_LABELS[s], count: base.filter(f => pick(f, s)).length }))
     return rows.map((r, i) => ({ ...r, ofPrevious: i ? per100(r.count, rows[i - 1]!.count) : null, ofFirst: i ? per100(r.count, rows[0]!.count) : null }))
   }
   const funnel = {
-    /** Dealerships that entered the funnel in the period — how far they have got since. */
+    /** Dealerships first researched in the period — how far they have got since. */
     cohort: funnelRows((f, s) => !!f.steps[s], entered),
     /** Dealerships that reached each step for the first time during the period. */
     period: funnelRows((f, s) => inTs(f.steps[s]), facts),

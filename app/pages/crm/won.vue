@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { WonDeal, WonGroupRow } from '~/composables/useCrmWon'
 import { money } from '~/composables/useCrmWon'
-import { RefreshCw, Download, Loader2, Trophy, AlertTriangle, ChevronRight, Hourglass, Footprints, Receipt } from 'lucide-vue-next'
+import { RefreshCw, Download, Loader2, Trophy, AlertTriangle, ChevronRight, Hourglass, Footprints, Receipt, SlidersHorizontal } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { format, subDays, startOfYear, parseISO } from 'date-fns'
 
@@ -79,27 +79,33 @@ function exportCsv() {
 
 <template>
   <div class="space-y-5">
+    <!-- Filters live in the main header -->
     <ClientOnly>
       <Teleport to="#page-header-actions">
-        <Button variant="outline" size="sm" class="h-9 gap-1.5" :disabled="!r?.wins.length" @click="exportCsv"><Download class="size-4" /> Export CSV</Button>
-        <Button variant="outline" size="icon" class="size-9" aria-label="Refresh" :disabled="loading" @click="reload(false)"><RefreshCw class="size-4" :class="loading && 'animate-spin'" /></Button>
+        <Loader2 v-if="loading && r" class="size-4 shrink-0 animate-spin text-muted-foreground" />
+        <Select v-model="range">
+          <SelectTrigger size="sm" class="h-8 w-[140px] text-xs" aria-label="Period"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem v-for="o in RANGES" :key="o.key" :value="o.key">{{ o.label }}</SelectItem></SelectContent>
+        </Select>
+        <Select v-model="ownerId">
+          <SelectTrigger size="sm" class="h-8 w-[150px] text-xs" aria-label="Owner"><SelectValue /></SelectTrigger>
+          <SelectContent class="max-h-72"><SelectItem value="all">All owners</SelectItem><SelectItem v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}</SelectItem></SelectContent>
+        </Select>
+        <Popover>
+          <PopoverTrigger as-child>
+            <Button variant="outline" size="sm" class="h-8 gap-1.5 px-2.5 text-xs" aria-label="More filters"><SlidersHorizontal class="size-3.5" /><span class="hidden lg:inline">Filters</span><span v-if="includeReverted" class="rounded-full bg-primary px-1.5 text-[10px] leading-4 text-primary-foreground">1</span></Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" class="w-64 p-3">
+            <label class="flex cursor-pointer select-none items-center justify-between gap-3 text-xs">
+              <span>Include undone wins<span class="block text-[11px] text-muted-foreground">Wins later undone (dealer deleted)</span></span>
+              <Switch v-model="includeReverted" />
+            </label>
+          </PopoverContent>
+        </Popover>
+        <Button variant="outline" size="sm" class="h-8 gap-1.5" :disabled="!r?.wins.length" @click="exportCsv"><Download class="size-4" /><span class="hidden lg:inline">Export CSV</span></Button>
+        <Button variant="outline" size="icon" class="size-8" aria-label="Refresh" :disabled="loading" @click="reload(false)"><RefreshCw class="size-4" :class="loading && 'animate-spin'" /></Button>
       </Teleport>
     </ClientOnly>
-
-    <div class="flex flex-wrap items-center gap-2">
-      <Select v-model="range">
-        <SelectTrigger class="h-9 w-[150px] text-xs"><SelectValue /></SelectTrigger>
-        <SelectContent><SelectItem v-for="o in RANGES" :key="o.key" :value="o.key">{{ o.label }}</SelectItem></SelectContent>
-      </Select>
-      <Select v-model="ownerId">
-        <SelectTrigger class="h-9 w-[170px] text-xs"><SelectValue /></SelectTrigger>
-        <SelectContent class="max-h-72"><SelectItem value="all">All owners</SelectItem><SelectItem v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}</SelectItem></SelectContent>
-      </Select>
-      <label class="h-9 inline-flex items-center gap-2 rounded-md border px-3 text-xs cursor-pointer select-none" title="Include wins that were later undone (dealer deleted)">
-        <Switch v-model="includeReverted" /> Include undone wins
-      </label>
-      <Loader2 v-if="loading && r" class="size-4 animate-spin text-muted-foreground" />
-    </div>
 
     <div v-if="!r" class="flex items-center justify-center py-24 text-muted-foreground gap-2"><Loader2 class="size-4 animate-spin" /> Loading won deals…</div>
 
