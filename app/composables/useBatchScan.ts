@@ -14,7 +14,9 @@ export interface BatchItem {
   /** Continue a paused scan instead of starting over (set by the server when a stopped item is queued again). */
   resumeFrom?: string | null
   dealershipId: string, name: string, website: string, urls: string[], status: ItemStatus, scanId: string | null, auditId: string | null
-  summary: { total: number, withoutReal: number, withoutRealPct: number | null, by?: Record<string, number> } | null
+  summary: { total: number, withoutReal: number, withoutRealPct: number | null, by?: Record<string, number>,
+    /** Each crawled inventory page with its own numbers (older batches have none). */
+    pages?: { url: string, label: string, total: number, withoutReal: number, withoutRealPct: number | null }[] } | null
   error: string | null, claimedAt: string | null, finishedAt: string | null
   /** The scan pages this crawl covered and how each one went — nothing else on the site was read. */
   scope?: { url: string, label: string, status: string, vehicles: number, resultPages: number, advertised: number | null, note: string }[]

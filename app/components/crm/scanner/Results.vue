@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import type { FinalVerdict, ImageRule, ScanResults, ScannedVehicle } from '~/composables/useInventoryScanner'
-import { VERDICT_META } from '~/composables/useInventoryScanner'
-import { ImageOff, Search, ExternalLink, Check, Brain, Layers, Trash2, Plus, Sparkles, Info, Link2, Ban, AlertTriangle, X, MoreHorizontal, RotateCcw, RefreshCw, Loader2, ChevronDown, ChevronUp, HelpCircle, Pencil } from 'lucide-vue-next'
+import { VERDICT_META, isAdVehicle, summarizeVehicles } from '~/composables/useInventoryScanner'
+import { pagePath } from '~/lib/scanScope'
+import { FileText, ImageOff, Search, ExternalLink, Check, Brain, Layers, Trash2, Plus, Sparkles, Info, Link2, Ban, AlertTriangle, X, MoreHorizontal, RotateCcw, RefreshCw, Loader2, ChevronDown, ChevronUp, HelpCircle, Pencil } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 
 /**
  * Crawl results — one simple screen.
  *
+ *   0. One tab per inventory page that was crawled, plus "Combined". Every number below follows the tab
+ *      (and the New / Pre-owned filter): the headline, the answer tabs and the cars.
  *   1. One headline: how many vehicles have no real photo.
  *   2. Big tabs, one per answer: All · No photo · Stock image · Blurry · Real photo (· Not sure · Ads).
  *   3. Every car shows its photo and four buttons — Real / No photo / Stock / Blurry. One click corrects it.
@@ -24,10 +27,50 @@ const props = defineProps<{
   removeRule: (id: string) => Promise<any>
   /** Download and judge every photo again (no new crawl). When absent the button is not shown. */
   recheck?: () => Promise<{ before: { withoutReal: number }, after: { withoutReal: number }, seconds: number } | null>
+  /** Open on this inventory page's tab (its address) instead of "Combined". */
+  startPage?: string | null
 }>()
 
 const r = computed(() => props.results)
-const s = computed(() => r.value.summary)
+
+// ── What is on screen: one inventory page or all of them together, new or pre-owned ──
+/** The chosen page tab: 'all' (Combined) or the address of one crawled inventory page. */
+const page = ref('all')
+const cond = ref<'all' | 'new' | 'used'>('all')
+const crawlPages = computed(() => (r.value.crawlPages || []).filter(p => p.total > 0))
+const whole = computed(() => page.value === 'all' && cond.value === 'all')
+const inView = (v: ScannedVehicle) => (page.value === 'all' || v.listUrl === page.value) && (cond.value === 'all' || (cond.value === 'new' ? v.condition === 'new' : v.condition !== 'new'))
+const viewVehicles = computed(() => whole.value ? r.value.vehicles : r.value.vehicles.filter(inView))
+/** Every number on this screen: of the whole crawl, or of just the page / condition being looked at. */
+const s = computed(() => whole.value ? r.value.summary : summarizeVehicles(viewVehicles.value, r.value.clusters, r.value.countStockAsMissing))
+const pctTone = (p: number | null | undefined) => (p ?? 0) >= 25 ? 'text-rose-600 dark:text-rose-400' : (p ?? 0) >= 10 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'
+/** The page tabs — shown when the crawl covered two or more inventory pages. Their numbers never depend on the other filters. */
+const pageTabs = computed(() => {
+  const pages = crawlPages.value
+  if (pages.length < 2) return []
+  const by = new Map<string, ScannedVehicle[]>()
+  for (const v of r.value.vehicles) { const k = v.listUrl || ''; const list = by.get(k); if (list) list.push(v); else by.set(k, [v]) }
+  const names = pages.map(p => p.label.trim().toLowerCase())
+  const all = r.value.summary
+  return [
+    { k: 'all', label: 'Combined', hint: `All ${pages.length} pages together`, combined: true, total: all.total, withoutReal: all.withoutReal, pct: all.withoutRealPct },
+    ...pages.map((p, i) => {
+      const x = summarizeVehicles(by.get(p.url) || [], r.value.clusters, r.value.countStockAsMissing)
+      // Two pages with the same name: tell them apart by their address.
+      const twin = names.indexOf(names[i]!) !== names.lastIndexOf(names[i]!)
+      return { k: p.url, label: twin || !p.label ? `${p.label || 'Inventory'} · ${pagePath(p.url)}` : p.label, hint: p.url, combined: false, total: x.total, withoutReal: x.withoutReal, pct: x.withoutRealPct }
+    }),
+  ]
+})
+if (props.startPage && pageTabs.value.some(x => x.k === props.startPage)) page.value = props.startPage
+watch(pageTabs, (t) => { if (page.value !== 'all' && !t.some(x => x.k === page.value)) page.value = 'all' })
+/** What the numbers are of, in words — shown next to the headline whenever it is not simply everything. */
+const viewLabel = computed(() => {
+  const p = pageTabs.value.find(x => x.k === page.value)
+  const where = !pageTabs.value.length ? '' : p && !p.combined ? p.label : `Combined · ${crawlPages.value.length} pages`
+  const what = cond.value === 'new' ? 'New only' : cond.value === 'used' ? 'Pre-owned only' : ''
+  return [where, what].filter(Boolean).join(' · ')
+})
 const coverage = computed<{ checked: number, advertised: number | null, blocked: { url: string, page: number }[] } | null>(() => (r.value as any).coverage || null)
 /** What people choose from. A placeholder image ("photos coming soon") means the car has no photo: one choice. */
 const CHOICES: FinalVerdict[] = ['real', 'placeholder', 'stock', 'blurry']
@@ -36,7 +79,7 @@ const noPhoto = (f: FinalVerdict) => f === 'placeholder' || f === 'missing'
 const choiceOf = (f: FinalVerdict): FinalVerdict => f === 'missing' ? 'placeholder' : f
 const noPhotoCount = computed(() => s.value.by.placeholder + s.value.by.missing)
 const blurryCount = computed(() => s.value.by.blurry || 0)
-const tone = computed(() => (s.value.withoutRealPct ?? 0) >= 25 ? 'text-rose-600 dark:text-rose-400' : (s.value.withoutRealPct ?? 0) >= 10 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400')
+const tone = computed(() => pctTone(s.value.withoutRealPct))
 /** The AI did not look at this crawl's photos: say so — the calls are the built-in checks only. */
 const aiOff = computed(() => {
   const pc = r.value.photoCheck
@@ -50,19 +93,23 @@ const aiOff = computed(() => {
 type Tab = 'all' | 'nophoto' | 'stock' | 'blurry' | 'real' | 'review' | 'ads'
 const tab = ref<Tab>('all')
 const q = ref('')
-const cond = ref<'all' | 'new' | 'used'>('all')
-/** Crawl page (URL) filter — offered when the crawl covered 2+ pages. */
-const page = ref('all')
 const scope = computed(() => props.results.scope || [])
-const crawlPages = computed<{ url: string, label: string, total: number, withoutReal: number, withoutRealPct: number | null }[]>(() => ((r.value as any).crawlPages || []).filter((p: any) => p.total > 0))
+/** The site lists more vehicles than were checked — for the whole crawl, or for the page being looked at. */
+const shortfall = computed<{ checked: number, advertised: number, blocked: number[], onPage: boolean } | null>(() => {
+  if (cond.value !== 'all') return null
+  const blocked = coverage.value?.blocked || []
+  if (page.value === 'all') { const adv = r.value.advertised; return adv && adv > s.value.total ? { checked: s.value.total, advertised: adv, blocked: blocked.map(b => b.page), onPage: false } : null }
+  const adv = scope.value.find(x => x.url === page.value)?.advertised
+  return adv && adv > s.value.total ? { checked: s.value.total, advertised: adv, blocked: blocked.filter(b => b.url === page.value).map(b => b.page), onPage: true } : null
+})
 const shown = ref(120)
 watch([tab, q, cond, page], () => { shown.value = 120 })
 /** Advertisement / promo tile — shown under "Ads", never counted. */
-const isAdCard = (v: ScannedVehicle) => v.listing ? v.listing === 'ad' : !!v.adReason
-const adCount = computed(() => r.value.vehicles.filter(isAdCard).length)
+const isAdCard = isAdVehicle
+const adCount = computed(() => viewVehicles.value.filter(isAdCard).length)
 const unsure = (v: ScannedVehicle) => v.verdict === 'review' && !v.override
 const tabs = computed(() => [
-  { k: 'all' as Tab, label: 'All vehicles', n: s.value.total, dot: 'bg-foreground/60', sub: 'everything the crawl found' },
+  { k: 'all' as Tab, label: 'All vehicles', n: s.value.total, dot: 'bg-foreground/60', sub: page.value !== 'all' ? 'everything on this page' : 'everything the crawl found' },
   { k: 'nophoto' as Tab, label: 'No photo', n: noPhotoCount.value, dot: VERDICT_META.placeholder.dot, sub: 'counted as missing' },
   { k: 'stock' as Tab, label: 'Stock image', n: s.value.by.stock, dot: VERDICT_META.stock.dot, sub: r.value.countStockAsMissing ? 'counted as missing' : 'not counted as missing' },
   { k: 'blurry' as Tab, label: 'Blurry photo', n: blurryCount.value, dot: VERDICT_META.blurry.dot, sub: 'listed apart, not counted' },
@@ -76,14 +123,11 @@ const RANK: Record<string, number> = { review: 0, placeholder: 1, missing: 1, st
 const rank = (v: ScannedVehicle) => unsure(v) ? 0 : (RANK[v.final] ?? 4)
 const filtered = computed(() => {
   const needle = q.value.trim().toLowerCase()
-  const list = r.value.vehicles.filter((v) => {
+  const list = viewVehicles.value.filter((v) => {
     if ((tab.value === 'ads') !== isAdCard(v)) return false
     if (tab.value === 'review' && !unsure(v)) return false
     if (tab.value === 'nophoto' && !noPhoto(v.final)) return false
     if ((tab.value === 'stock' || tab.value === 'blurry' || tab.value === 'real') && v.final !== tab.value) return false
-    if (page.value !== 'all' && (v as any).listUrl !== page.value) return false
-    if (cond.value === 'new' && v.condition !== 'new') return false
-    if (cond.value === 'used' && v.condition === 'new') return false
     if (needle && !`${v.title} ${v.vin} ${v.stock} ${v.price}`.toLowerCase().includes(needle)) return false
     return true
   })
@@ -204,7 +248,7 @@ function pickAll(on: boolean) {
   picked.value = next
 }
 function clearPicked() { picked.value = new Set(); lastPicked = null }
-watch(() => r.value.scanId, () => { clearPicked(); opened.value = new Set() })
+watch(() => r.value.scanId, () => { clearPicked(); opened.value = new Set(); page.value = 'all'; cond.value = 'all' })
 async function markPicked(verdict: FinalVerdict | null) { const list = pickedList.value; clearPicked(); await markCars(list, verdict, plural(list.length)) }
 async function markPickedListing(ad: boolean) { const list = pickedList.value; clearPicked(); await setListing(list, ad) }
 
@@ -276,14 +320,29 @@ const newLine = computed(() => `${s.value.counts.newMissingPhotos} of ${s.value.
 <template>
   <!-- Desktop: fixed frame, the vehicle list scrolls. Phone / tablet: the whole screen scrolls as one page. -->
   <div class="flex flex-col h-full min-h-0 overflow-y-auto lg:overflow-hidden">
+    <!-- 0 · One tab per crawled inventory page, plus Combined — everything below follows it -->
+    <div v-if="pageTabs.length" role="tablist" aria-label="Inventory page" class="shrink-0 flex items-end gap-1 overflow-x-auto border-b bg-muted/40 px-2 pt-2">
+      <button
+        v-for="p in pageTabs" :key="p.k" type="button" role="tab" :aria-selected="page === p.k" :title="p.hint"
+        class="-mb-px shrink-0 max-w-[280px] rounded-t-lg border border-t-2 border-b-0 px-3 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        :class="page === p.k ? 'bg-card border-border border-t-primary text-foreground' : 'border-transparent text-muted-foreground hover:bg-card/60 hover:text-foreground'" @click="page = p.k"
+      >
+        <span class="flex items-center gap-1.5 text-sm font-semibold"><component :is="p.combined ? Layers : FileText" class="size-3.5 shrink-0 opacity-70" /><span class="truncate">{{ p.label }}</span></span>
+        <span class="block text-[11px] tabular-nums whitespace-nowrap"><b :class="pctTone(p.pct)">{{ p.pct ?? 0 }}%</b> <span class="text-muted-foreground">· {{ p.withoutReal }} of {{ p.total }} no real photo</span></span>
+      </button>
+    </div>
+
     <!-- 1 · The headline -->
     <header class="shrink-0 border-b bg-card p-2 flex flex-wrap items-center gap-x-6 gap-y-2">
       <div class="flex items-center gap-3 min-w-0">
         <p class="text-4xl font-bold tabular-nums leading-none" :class="tone">{{ s.withoutRealPct ?? 0 }}%</p>
         <div class="min-w-0">
-          <p class="text-sm font-semibold leading-snug"><span class="tabular-nums">{{ s.withoutReal }}</span> of <span class="tabular-nums">{{ s.total }}</span> vehicles have no real photo</p>
+          <p class="text-sm font-semibold leading-snug flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span><span class="tabular-nums">{{ s.withoutReal }}</span> of <span class="tabular-nums">{{ s.total }}</span> vehicles have no real photo</span>
+            <span v-if="viewLabel" class="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">{{ viewLabel }}</span>
+          </p>
           <p class="text-xs text-muted-foreground tabular-nums">
-            Pre-owned <b class="text-foreground">{{ usedLine }}</b><template v-if="s.counts.newTotal"> · New <b class="text-foreground">{{ newLine }}</b></template><template v-if="blurryCount"> · {{ blurryCount }} blurry (not counted)</template><template v-if="adCount"> · {{ adCount }} ad{{ adCount === 1 ? '' : 's' }} left out</template>
+            <template v-if="s.counts.usedTotal || !s.counts.newTotal">Pre-owned <b class="text-foreground">{{ usedLine }}</b></template><template v-if="s.counts.usedTotal && s.counts.newTotal"> · </template><template v-if="s.counts.newTotal">New <b class="text-foreground">{{ newLine }}</b></template><template v-if="blurryCount"> · {{ blurryCount }} blurry (not counted)</template><template v-if="adCount"> · {{ adCount }} ad{{ adCount === 1 ? '' : 's' }} left out</template>
           </p>
         </div>
       </div>
@@ -296,8 +355,8 @@ const newLine = computed(() => `${s.value.counts.newMissingPhotos} of ${s.value.
         <Button size="sm" variant="outline" class="h-8 gap-1.5 text-xs" @click="rulesOpen = true"><Brain class="size-3.5" /> Saved rules<span v-if="rules.length" class="tabular-nums text-muted-foreground">{{ rules.length }}</span></Button>
         <Button v-if="changes" size="sm" variant="ghost" class="h-8 gap-1.5 text-xs" :disabled="rechecking" title="Take back every change made by hand on this crawl" @click="resetAll"><RotateCcw class="size-3.5" /> Reset my changes<span class="tabular-nums text-muted-foreground">{{ changes }}</span></Button>
       </div>
-      <p v-if="r.advertised && r.advertised > s.total" class="basis-full rounded-md bg-amber-500/10 px-2 py-1 text-[11px] leading-snug text-amber-700 dark:text-amber-300">
-        Checked <b>{{ s.total }}</b> of the <b>{{ r.advertised }}</b> vehicles the site lists — {{ r.advertised - s.total }} not reached{{ coverage?.blocked?.length ? ` (the site blocked result page ${coverage!.blocked.map((b: any) => b.page).join(', ')})` : '' }}. The % is of the {{ s.total }} checked.
+      <p v-if="shortfall" class="basis-full rounded-md bg-amber-500/10 px-2 py-1 text-[11px] leading-snug text-amber-700 dark:text-amber-300">
+        Checked <b>{{ shortfall.checked }}</b> of the <b>{{ shortfall.advertised }}</b> vehicles the site lists{{ shortfall.onPage ? ' on this page' : '' }} — {{ shortfall.advertised - shortfall.checked }} not reached{{ shortfall.blocked.length ? ` (the site blocked result page ${shortfall.blocked.join(', ')})` : '' }}. The % is of the {{ shortfall.checked }} checked.
       </p>
     </header>
 
@@ -335,7 +394,6 @@ const newLine = computed(() => `${s.value.counts.newMissingPhotos} of ${s.value.
         </label>
         <p class="hidden xl:flex items-center gap-1.5 text-[11px] text-muted-foreground"><HelpCircle class="size-3.5" /> Wrong call? Press the right button on the car. Tick cars to change many at once.</p>
         <div class="ml-auto flex flex-wrap items-center gap-2">
-          <Select v-if="crawlPages.length > 1" v-model="page"><SelectTrigger class="h-8 w-[190px] text-xs" aria-label="Inventory page"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All {{ crawlPages.length }} pages</SelectItem><SelectItem v-for="p in crawlPages" :key="p.url" :value="p.url">{{ p.label }} · {{ p.withoutReal }} of {{ p.total }}</SelectItem></SelectContent></Select>
           <Select v-model="cond"><SelectTrigger class="h-8 w-[118px] text-xs" aria-label="New or used"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">New + used</SelectItem><SelectItem value="used">Pre-owned</SelectItem><SelectItem value="new">New</SelectItem></SelectContent></Select>
           <div class="relative"><Search class="size-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><Input v-model="q" placeholder="Search title, VIN, stock…" class="h-8 w-44 sm:w-56 pl-8 text-xs" aria-label="Search the vehicles" /></div>
         </div>

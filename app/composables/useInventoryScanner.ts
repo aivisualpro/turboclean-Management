@@ -53,7 +53,11 @@ export interface ScannedVehicle {
   /** The picture is a car placed on a background that many other listings share (a stock image) — the group's id. */
   backdropId?: string | null
   override: FinalVerdict | null
+  /** The inventory list (saved scan page) this vehicle was read on. */
+  listUrl?: string
 }
+/** One crawled inventory list with its own numbers. */
+export interface CrawlPage { url: string, label: string, total: number, withoutReal: number, withoutRealPct: number | null }
 export interface ScannedImage { id: string, url: string, ok: boolean, error: string | null, w: number | null, h: number | null, hash: string | null, hash2?: string | null, text: string, ocr: boolean, /** Sharpness 0 (a smear) – 100 (crisp); null when not measured. */ sharp?: number | null }
 export interface ImageGroup { id: string, imageIds: string[], hash: string, hash2?: string, vehicles: number, models: number, modelNames: string[], thumb: string, url: string, verdict: PhotoVerdict, reason: string, override: FinalVerdict | null, exact?: boolean }
 export interface ScanResults {
@@ -73,6 +77,8 @@ export interface ScanResults {
   images: Record<string, ScannedImage>
   /** Scope report: the scan pages this crawl covered, with status and numbers for each. */
   scope?: ScopeRow[]
+  /** Results per crawled inventory list, in crawl order — the page tabs of the review screen. */
+  crawlPages?: CrawlPage[]
   savedAuditId: string | null
   labels: Record<PhotoVerdict, string>
   finishedAt: string | null
@@ -88,6 +94,32 @@ export const VERDICT_META: Record<PhotoVerdict, { label: string, short: string, 
   // A real photo, but out of focus / smeared / low-resolution — its own count, not "without a real photo".
   blurry: { label: 'Blurry photo', short: 'Blurry', dot: 'bg-amber-500', pill: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/30', ring: 'ring-amber-500/50', hex: '#f59e0b', solid: 'bg-amber-500 text-black border-amber-500' },
   review: { label: 'Needs review', short: 'Review', dot: 'bg-sky-500', pill: 'bg-sky-500/15 text-sky-700 dark:text-sky-300 ring-sky-500/30', ring: 'ring-sky-500/50', hex: '#0ea5e9', solid: 'bg-sky-600 text-white border-sky-600' },
+}
+
+/** Advertisement / promo tile — never counted. A person's call wins. */
+export const isAdVehicle = (v: Pick<ScannedVehicle, 'listing' | 'adReason'>) => v.listing ? v.listing === 'ad' : !!v.adReason
+/**
+ * The numbers of a part of a crawl (one inventory page, new or pre-owned only) — the very same sums the
+ * server makes for the whole crawl (summarize in server/utils/scanner-images.ts), so a page's numbers
+ * and the combined ones always add up.
+ */
+export function summarizeVehicles(all: ScannedVehicle[], clusters: Pick<ImageGroup, 'id' | 'override'>[], countStockAsMissing: boolean): ScanResults['summary'] & { ads: number } {
+  const decided = new Set(clusters.filter(c => c.override).map(c => c.id))
+  const by: Record<FinalVerdict, number> = { real: 0, placeholder: 0, stock: 0, missing: 0, blurry: 0 }
+  const counts = { newTotal: 0, usedTotal: 0, newMissingPhotos: 0, usedMissingPhotos: 0 }
+  let total = 0, ads = 0, review = 0
+  for (const v of all) {
+    if (isAdVehicle(v)) { ads++; continue }
+    total++
+    by[v.final]++
+    const noReal = v.final === 'missing' || v.final === 'placeholder' || (countStockAsMissing && v.final === 'stock')
+    if (v.condition === 'new') { counts.newTotal++; if (noReal) counts.newMissingPhotos++ }
+    else { counts.usedTotal++; if (noReal) counts.usedMissingPhotos++ }
+    if (v.verdict === 'review' && !v.override && !(v.clusterId && decided.has(v.clusterId))) review++
+  }
+  const withoutReal = by.missing + by.placeholder + (countStockAsMissing ? by.stock : 0)
+  const pct = (n: number, of: number) => of ? Math.round((n / of) * 1000) / 10 : null
+  return { total, by, withoutReal, ads, blurry: by.blurry, blurryPct: pct(by.blurry, total), withoutRealPct: pct(withoutReal, total), review, counts, newPct: pct(counts.newMissingPhotos, counts.newTotal), usedPct: pct(counts.usedMissingPhotos, counts.usedTotal) }
 }
 
 const errMsg = (e: any, fallback: string) => e?.data?.message || e?.data?.statusMessage || e?.statusMessage || e?.message || fallback

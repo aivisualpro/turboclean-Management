@@ -39,7 +39,9 @@ export interface BatchItem {
   status: ItemStatus
   scanId: string | null
   auditId: string | null
-  summary: { total: number, withoutReal: number, withoutRealPct: number | null, by?: Record<string, number>, advertised?: number | null } | null
+  summary: { total: number, withoutReal: number, withoutRealPct: number | null, by?: Record<string, number>, advertised?: number | null,
+    /** Each crawled inventory page with its own numbers (crawls saved before this was added have none). */
+    pages?: { url: string, label: string, total: number, withoutReal: number, withoutRealPct: number | null }[] } | null
   error: string | null
   claimedAt: string | null
   finishedAt: string | null

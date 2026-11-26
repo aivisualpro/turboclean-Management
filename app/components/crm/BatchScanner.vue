@@ -9,7 +9,7 @@ import type { PreviewContext } from '~/composables/useTemplatePreview'
 import {
   X, Radar, Play, Pause, Square, Loader2, CheckCircle2, AlertTriangle, CircleDashed, Car, ImageOff, Clock, Mail, Send, Eye, ChevronRight, ListChecks,
   RotateCcw, Globe, Sparkles, Inbox, ExternalLink, Users, Check, Ban, Zap, Archive, Pencil, Wand2, DoorOpen, Cloud, WifiOff, ShieldCheck,
-  FileDown, FileText, FileBarChart, ChevronDown,
+  FileDown, FileText, FileBarChart, ChevronDown, LayoutGrid,
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { SCOPE_META, checkScanPage, pagePath } from '~/lib/scanScope'
@@ -125,6 +125,17 @@ const pct = computed(() => batch.value ? Math.round(((batch.value.counts.total -
 const withoutPct = computed(() => { const t = batch.value?.totals; return t && t.vehicles ? Math.round((t.withoutReal / t.vehicles) * 1000) / 10 : null })
 const focus = ref<string | null>(null)
 const focused = computed(() => items.value.find(i => i.dealershipId === focus.value) || null)
+// ── Dealer tabs: "All dealers", then one tab per dealership. Inside a dealership, its crawled pages are tabs too. ──
+/** The page tab to open inside the dealership's results (a page row was clicked in "All dealers"). */
+const startPage = ref<string | null>(null)
+function openDealer(id: string | null, pageUrl: string | null = null) { startPage.value = pageUrl; focus.value = id; if (id) showResults.value = true }
+const tabStrip = ref<HTMLElement | null>(null)
+watch(focus, () => nextTick(() => tabStrip.value?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })))
+const pctClass = (p: number | null | undefined) => (p ?? 0) >= 25 ? 'text-rose-300' : (p ?? 0) >= 10 ? 'text-amber-300' : 'text-emerald-300'
+/** "All dealers": every crawled dealership with the pages it was read on (the same ones the totals count). */
+const overview = computed(() => doneItems.value.filter(i => i.summary).map(i => ({ i, s: i.summary!, pages: (i.summary!.pages || []).filter(p => p.total > 0) })))
+/** The batch as a whole is on screen (live consoles, the totals, every dealership) — not one finished dealership. */
+const showAll = computed(() => items.value.length < 2 || !focused.value || focused.value.status === 'running' || focused.value.status === 'queued')
 // Full results for the picked dealership — same review screen as a single crawl (re-label photos,
 // image groups, rules). Saving corrects that dealership's audit, so emails use the corrected numbers.
 const rv = useInventoryScanner()
@@ -414,7 +425,7 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
             <aside class="min-h-0 overflow-y-auto border-r border-white/10 bg-[#070b09]/80 backdrop-blur-sm">
               <ul class="divide-y divide-white/5">
                 <li v-for="i in items" :key="i.dealershipId">
-                  <button type="button" class="w-full text-left px-3 py-2.5 hover:bg-white/5 transition-colors" :class="focus === i.dealershipId && 'bg-emerald-500/10'" @click="focus = i.dealershipId">
+                  <button type="button" class="w-full text-left px-3 py-2.5 hover:bg-white/5 transition-colors" :class="focus === i.dealershipId && 'bg-emerald-500/10'" @click="openDealer(i.dealershipId)">
                     <div class="flex items-center gap-2">
                       <component :is="STATUS[i.status]!.icon" class="size-4 shrink-0" :class="[STATUS[i.status]!.cls, i.status === 'running' && 'animate-spin']" />
                       <span class="text-sm font-medium truncate flex-1">{{ i.name }}</span>
@@ -434,6 +445,17 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
 
             <!-- Consoles -->
             <section class="min-h-0 flex flex-col">
+              <!-- Dealer tabs: everything together, or one dealership (its pages are tabs inside its results) -->
+              <div v-if="items.length > 1" ref="tabStrip" role="tablist" aria-label="Dealership" class="shrink-0 flex items-end gap-1 overflow-x-auto border-b border-white/10 bg-black/50 px-3 pt-2 [scrollbar-width:thin]">
+                <button type="button" role="tab" :aria-selected="!focus" class="-mb-px shrink-0 rounded-t-lg border border-t-2 border-b-0 px-3 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400" :class="!focus ? 'bg-[#0b100d] border-white/15 border-t-emerald-400 text-white' : 'border-transparent text-zinc-400 hover:bg-white/5 hover:text-white'" @click="openDealer(null)">
+                  <span class="flex items-center gap-1.5 text-sm font-semibold"><LayoutGrid class="size-3.5 shrink-0 opacity-80" /> All dealers</span>
+                  <span class="block text-[11px] tabular-nums whitespace-nowrap text-zinc-500">{{ doneItems.length }} of {{ items.length }} crawled<template v-if="withoutPct !== null"> · <b :class="pctClass(withoutPct)">{{ withoutPct }}%</b> no real photo</template></span>
+                </button>
+                <button v-for="i in items" :key="i.dealershipId" type="button" role="tab" :aria-selected="focus === i.dealershipId" :title="i.name" class="-mb-px shrink-0 max-w-[230px] rounded-t-lg border border-t-2 border-b-0 px-3 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400" :class="focus === i.dealershipId ? 'bg-[#0b100d] border-white/15 border-t-emerald-400 text-white' : 'border-transparent text-zinc-400 hover:bg-white/5 hover:text-white'" @click="openDealer(i.dealershipId)">
+                  <span class="flex items-center gap-1.5 text-sm font-semibold"><component :is="STATUS[i.status]!.icon" class="size-3.5 shrink-0" :class="[STATUS[i.status]!.cls, i.status === 'running' && 'animate-spin']" /><span class="truncate">{{ i.name }}</span></span>
+                  <span class="block text-[11px] tabular-nums whitespace-nowrap"><template v-if="i.summary"><b :class="pctClass(i.summary.withoutRealPct)">{{ i.summary.withoutRealPct ?? 0 }}%</b> <span class="text-zinc-500">· {{ i.summary.withoutReal }} of {{ i.summary.total }}</span></template><span v-else :class="STATUS[i.status]!.cls">{{ STATUS[i.status]!.label }}</span></span>
+                </button>
+              </div>
               <div class="flex-1 min-h-0 overflow-y-auto p-3">
                 <!-- Focused finished / failed dealer -->
                 <div v-if="focused && focused.status !== 'running' && focused.status !== 'queued'" class="mb-3 rounded-2xl border border-white/10 bg-[#0b100d]/90 backdrop-blur p-4">
@@ -462,10 +484,11 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
                   </div>
                   <div class="dark h-[72vh] min-h-[520px] bg-background text-foreground">
                     <div v-if="rvLoading || !rv.results.value" class="h-full flex items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 class="size-4 animate-spin" /> Loading {{ focused?.name }}'s results…</div>
-                    <CrmScannerResults v-else :results="rv.results.value" :review="rv.review" :recheck="rv.recheck" :list-rules="rv.listRules" :add-rule="rv.addRule" :remove-rule="rv.removeRule" />
+                    <CrmScannerResults v-else :results="rv.results.value" :start-page="startPage" :review="rv.review" :recheck="rv.recheck" :list-rules="rv.listRules" :add-rule="rv.addRule" :remove-rule="rv.removeRule" />
                   </div>
                 </div>
 
+                <template v-if="showAll">
                 <!-- Live consoles -->
                 <div v-if="activeItems.length" class="grid gap-3" :class="activeItems.length > 1 ? 'xl:grid-cols-2' : ''">
                   <article v-for="i in activeItems" :key="i.dealershipId" class="rounded-2xl border border-emerald-500/25 bg-[#0b100d]/90 backdrop-blur overflow-hidden ring-1 ring-emerald-400/10">
@@ -503,14 +526,48 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
                 <div v-else-if="batch.finished && !doneItems.length" class="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-6 text-center">
                   <AlertTriangle class="size-8 mx-auto text-rose-400" />
                   <p class="mt-2 text-lg font-semibold">Nothing was scanned</p>
-                  <p class="text-sm text-zinc-400">{{ batch.counts.failed }} failed{{ batch.counts.skipped ? `, ${batch.counts.skipped} skipped` : '' }}{{ batch.counts.cancelled ? `, ${batch.counts.cancelled} cancelled` : '' }}. Pick a dealership on the left to see why — most often its inventory pages are not picked yet. Fix the pages, then press Retry.</p>
+                  <p class="text-sm text-zinc-400">{{ batch.counts.failed }} failed{{ batch.counts.skipped ? `, ${batch.counts.skipped} skipped` : '' }}{{ batch.counts.cancelled ? `, ${batch.counts.cancelled} cancelled` : '' }}. Open a dealership to see why — most often its inventory pages are not picked yet. Fix the pages, then press Retry.</p>
                 </div>
                 <div v-else-if="batch.finished" class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6 text-center">
                   <CheckCircle2 class="size-8 mx-auto text-emerald-400" />
                   <p class="mt-2 text-lg font-semibold">All done — {{ batch.totals.vehicles.toLocaleString() }} vehicles checked across {{ doneItems.length }} dealership{{ doneItems.length === 1 ? '' : 's' }}</p>
-                  <p class="text-sm text-zinc-400">{{ batch.totals.withoutReal.toLocaleString() }} without a real photo{{ withoutPct !== null ? ` (${withoutPct}%)` : '' }}.{{ batch.counts.failed ? ` ${batch.counts.failed} failed — see the left rail.` : '' }} Audits are saved. Pick a dealership on the left for details, or go to Emails.</p>
+                  <p class="text-sm text-zinc-400">{{ batch.totals.withoutReal.toLocaleString() }} without a real photo{{ withoutPct !== null ? ` (${withoutPct}%)` : '' }}.{{ batch.counts.failed ? ` ${batch.counts.failed} failed — open them to see why.` : '' }} Audits are saved. Open a dealership to review its photos page by page, or go to Emails.</p>
                   <Button class="mt-4 h-10 gap-2 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold" @click="goEmail"><Mail class="size-4" /> Continue to emails</Button>
                 </div>
+
+                <!-- All dealers: every dealership and each of its pages, with their own numbers -->
+                <div v-if="overview.length" class="mt-3 rounded-2xl border border-white/10 bg-[#0b100d]/90 backdrop-blur overflow-hidden">
+                  <div class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 px-4 py-2.5 border-b border-white/10">
+                    <h3 class="text-sm font-semibold">Results by dealership and page</h3>
+                    <p class="text-[11px] text-zinc-500">Click a dealership — or one of its pages — to review the photos.</p>
+                  </div>
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                      <thead class="text-[10px] uppercase tracking-wider text-zinc-500">
+                        <tr><th class="px-4 py-2 text-left font-medium">Dealership / page</th><th class="px-3 py-2 text-right font-medium">Vehicles</th><th class="px-3 py-2 text-right font-medium whitespace-nowrap">No real photo</th><th class="pl-3 pr-4 py-2 text-right font-medium">Rate</th></tr>
+                      </thead>
+                      <tbody class="tabular-nums">
+                        <tr v-if="overview.length > 1" class="border-t border-white/10 bg-white/[0.04] font-semibold">
+                          <td class="px-4 py-2"><span class="inline-flex items-center gap-2"><LayoutGrid class="size-3.5 text-zinc-400" /> Combined · {{ overview.length }} dealerships</span></td>
+                          <td class="px-3 py-2 text-right">{{ batch.totals.vehicles.toLocaleString() }}</td><td class="px-3 py-2 text-right">{{ batch.totals.withoutReal.toLocaleString() }}</td><td class="pl-3 pr-4 py-2 text-right" :class="pctClass(withoutPct)">{{ withoutPct ?? 0 }}%</td>
+                        </tr>
+                        <template v-for="o in overview" :key="o.i.dealershipId">
+                          <tr class="border-t border-white/10 cursor-pointer hover:bg-white/5 transition-colors" @click="openDealer(o.i.dealershipId)">
+                            <td class="px-4 py-2"><button type="button" class="inline-flex items-center gap-1.5 font-medium text-left hover:text-emerald-300 focus-visible:outline-none focus-visible:underline" @click.stop="openDealer(o.i.dealershipId)">{{ o.i.name }} <ChevronRight class="size-3.5 text-zinc-500" /></button><span v-if="o.i.status === 'stopped'" class="ml-2 text-[11px] text-amber-300">partly read</span></td>
+                            <td class="px-3 py-2 text-right">{{ o.s.total.toLocaleString() }}</td><td class="px-3 py-2 text-right">{{ o.s.withoutReal.toLocaleString() }}</td><td class="pl-3 pr-4 py-2 text-right font-semibold" :class="pctClass(o.s.withoutRealPct)">{{ o.s.withoutRealPct ?? 0 }}%</td>
+                          </tr>
+                          <template v-if="o.pages.length > 1">
+                            <tr v-for="p in o.pages" :key="p.url" class="cursor-pointer text-zinc-400 hover:bg-white/5 hover:text-zinc-200 transition-colors" @click="openDealer(o.i.dealershipId, p.url)">
+                              <td class="pl-9 pr-4 py-1.5 text-xs"><button type="button" class="inline-flex items-center gap-1.5 text-left focus-visible:outline-none focus-visible:underline" :title="p.url" @click.stop="openDealer(o.i.dealershipId, p.url)"><FileText class="size-3 shrink-0 opacity-70" /> {{ p.label || pagePath(p.url) }}</button></td>
+                              <td class="px-3 py-1.5 text-right text-xs">{{ p.total.toLocaleString() }}</td><td class="px-3 py-1.5 text-right text-xs">{{ p.withoutReal.toLocaleString() }}</td><td class="pl-3 pr-4 py-1.5 text-right text-xs" :class="pctClass(p.withoutRealPct)">{{ p.withoutRealPct ?? 0 }}%</td>
+                            </tr>
+                          </template>
+                        </template>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                </template>
               </div>
               <!-- Activity stream -->
               <div ref="feedEl" class="shrink-0 h-36 overflow-y-auto border-t border-white/10 bg-black/60 backdrop-blur px-3 py-2 font-mono text-[11px] leading-5 [scrollbar-width:thin]">

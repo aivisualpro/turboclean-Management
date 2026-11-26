@@ -88,7 +88,9 @@ export interface CrmDealership {
   }
 }
 
-export interface CrmAuditExample { url: string, label: string }
+export interface CrmAuditExample { url: string, label: string, /** The inventory page it was found on (automated audits). */ listUrl?: string }
+/** One crawled inventory page of an automated audit, with its own numbers. */
+export interface CrmAuditPage { url: string, label: string, kind: string, total: number, withoutReal: number, withoutRealPct: number | null, real: number, placeholder: number, missing: number, stock: number, blurry: number }
 export interface CrmAudit {
   id: string
   dealershipId: string
@@ -112,6 +114,10 @@ export interface CrmAudit {
   websiteIssuesNotes: string
   notes: string
   examples: CrmAuditExample[]
+  /** Photo verdicts of an automated audit (real excludes the blurry ones). */
+  photoBreakdown?: { real: number, placeholder: number, missing: number, stock: number, blurry: number, countStockAsMissing: boolean } | null
+  /** Each crawled inventory page with its own numbers (automated audits; empty on audits recorded by hand). */
+  pages?: CrmAuditPage[]
   collector: { name: string, version: string, runId: string } | null
   auditedBy: CrmActor | null
   createdAt: string

@@ -596,7 +596,7 @@ async function finalizeIfInterrupted(db: Db, doc: ScanDoc) {
   doc.log = [...(doc.log || []), { at: now, text: 'The server cut this scan off — keeping the vehicles found so far; photos judged by address and text only' }].slice(-60)
   Object.assign(doc.progress, { phase: 'stopped', message: `Cut off early — ${sum.total} vehicles · ${sum.withoutReal} without a real photo (${sum.withoutRealPct ?? 0}%)`, finishedAt: now })
   await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { status: 'stopped', error: 'Cut off by the server', progress: doc.progress, log: doc.log, vehicles: doc.vehicles, images: doc.images, clusters: doc.clusters, heartbeatAt: now } }).catch(() => {})
-  if (doc.batchId) batchNote(db, doc, 'stopped', { summary: { total: sum.total, withoutReal: sum.withoutReal, withoutRealPct: sum.withoutRealPct, by: sum.by }, error: 'Cut off by the server' }).catch(() => {})
+  if (doc.batchId) batchNote(db, doc, 'stopped', { summary: batchSummary(doc, sum), error: 'Cut off by the server' }).catch(() => {})
   return doc
 }
 
@@ -1175,7 +1175,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     }
     emit('done', { id: String(doc._id), status: doc.status, summary: sum, auditId })
     // (an unreadable site counts as failed in a batch: its numbers stay out of the totals and no email is drafted)
-    if (doc.batchId) batchNote(db, doc, unreliable ? 'failed' : doc.status === 'stopped' ? 'stopped' : 'done', { summary: { total: sum.total, withoutReal: sum.withoutReal, withoutRealPct: sum.withoutRealPct, by: sum.by, advertised: advertisedTotal(doc) }, auditId, error: doc.error || null, scope: scopeBrief(doc) }).catch(() => {})
+    if (doc.batchId) batchNote(db, doc, unreliable ? 'failed' : doc.status === 'stopped' ? 'stopped' : 'done', { summary: batchSummary(doc, sum), auditId, error: doc.error || null, scope: scopeBrief(doc) }).catch(() => {})
   }
   catch (e: any) {
     const message = e?.message || e?.statusMessage || 'Scan failed'
@@ -1197,6 +1197,17 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
 
 /** The shared Chromium died (crash, out of memory, host teardown) — not the dealer's fault. */
 const isBrowserGone = (e: any) => /connection is closed|Target closed|Session closed|target crashed|Inspected target navigated or closed|browser (has )?disconnected|No target with given id/i.test(String(e?.message || e || ''))
+
+/**
+ * What a batch keeps of one dealership's crawl: the totals, and each inventory page's own numbers —
+ * Mission Control shows a tab per dealership and, inside it, the pages that were crawled.
+ */
+function batchSummary(doc: ScanDoc, sum: ReturnType<typeof summarize>) {
+  const cmap = new Map(doc.clusters.map(c => [c.id, c]))
+  // (the same names and numbers as the page tabs of the review screen — see resultsOf)
+  const pages = pageBreakdown(doc, null, cmap).map(p => ({ url: p.url, label: p.label, total: p.total, withoutReal: p.withoutReal, withoutRealPct: p.withoutRealPct }))
+  return { total: sum.total, withoutReal: sum.withoutReal, withoutRealPct: sum.withoutRealPct, by: sum.by, advertised: advertisedTotal(doc), pages }
+}
 
 /** Report a batch item's state back to its batch (see scanner-batch.ts). */
 async function batchNote(db: Db, doc: ScanDoc, status: 'running' | 'done' | 'stopped' | 'failed', extra: Record<string, any> = {}) {
@@ -1655,7 +1666,7 @@ export async function saveScan(db: Db, id: string, actor: SessionActor) {
   // A batch crawl corrected after review: the batch (and its email step) shows the corrected numbers.
   if (doc.batchId && prevAudit) {
     const { updateBatchItem } = await import('./scanner-batch')
-    await updateBatchItem(db, doc.batchId, doc.dealershipId, { summary: { total: sum.total, withoutReal: sum.withoutReal, withoutRealPct: sum.withoutRealPct, by: sum.by }, auditId: audit?.id || null }).catch(() => {})
+    await updateBatchItem(db, doc.batchId, doc.dealershipId, { summary: batchSummary(doc, sum), auditId: audit?.id || null }).catch(() => {})
   }
   await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { status: 'saved', auditId: audit?.id || null, summary: sum, savedAt: new Date().toISOString(), savedBy: { id: actor.id, name: actor.name } } })
   try {
