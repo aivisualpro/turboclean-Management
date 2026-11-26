@@ -51,6 +51,7 @@ export function usePermissions() {
     'Won deals': 'crm_dealership',
     'Time & ROI': 'crm_dealership',
     'CRM Dashboard': 'crm_dealership',
+    'Goals': 'crm_dealership',
     'Analytics': 'crm_dealership',
     'Data quality': 'crm_dealership',
     'Automation Center': 'automations',

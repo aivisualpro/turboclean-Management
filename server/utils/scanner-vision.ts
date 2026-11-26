@@ -65,6 +65,46 @@ export async function photoCheckStatus(): Promise<{ on: boolean, provider: Provi
   return { on: false, provider: null, label: 'Off', reason: 'The AI photo check has no AI key on this server.', fix: 'Add ANTHROPIC_API_KEY (Claude) or GOOGLE_GEMINI_API_KEY to the server environment (Vercel → Settings → Environment Variables), then redeploy.' }
 }
 
+/** An AI error in plain words (never contains a key). */
+export function aiProblem(message: string) {
+  const m = String(message || '')
+  if (/\b401\b|authentication|invalid x-api-key|api key not valid|API_KEY_INVALID/i.test(m)) return 'the key is not accepted (wrong, deleted, or replaced by a newer one)'
+  if (/credit balance|billing|payment|quota/i.test(m)) return 'the AI account has no credit / quota left'
+  if (/\b403\b|permission/i.test(m)) return 'the key is not allowed to do this'
+  if (/\b429\b|rate limit/i.test(m)) return 'too many requests right now'
+  if (/\b(529|5\d\d)\b|overload/i.test(m)) return 'the AI service is busy right now'
+  if (/abort|timed? ?out/i.test(m)) return 'no answer in time'
+  if (/not set/i.test(m)) return 'no key on the server'
+  return m.replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-…').slice(0, 140)
+}
+/** A problem with the key or the account (not a passing hiccup): worth switching to the other AI. */
+const keyProblem = (m: string) => /\b(401|403)\b|authentication|invalid x-api-key|permission|credit balance|billing/i.test(m)
+
+/** A tiny picture (a white square on red) for the connection test. */
+const TEST_JPEG = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA0JCgsKCA0LCgsODg0PEyAVExISEyccHhcgLikxMC4pLSwzOko+MzZGNywtQFdBRkxOUlNSMj5aYVpQYEpRUk//2wBDAQ4ODhMREyYVFSZPNS01T09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0//wAARCAAwAEADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDCooorzj7EKKu6dpN9qnmfYYPN8rG/51XGc46kehq7/wAIprn/AD4/+RU/xqlFvZGUq1OLtKST9TFora/4RTXP+fH/AMip/jVXUNE1LTYFmvbbyo2bYDvVucE9j7GhxkugKvSk7KS+8z6KKKk1CiiigDtPh3/zEf8Atn/7NXaVxfw7/wCYj/2z/wDZq7Su2l8CPmsw/wB4l8vyQVzHj/8A5AcP/Xyv/oLV09cx4/8A+QHD/wBfK/8AoLU6nwsjB/x4+p59RRRXCfUBRRRQBqaLrl1ovnfZY4X87bu8wE4xnGMEetaf/Cc6p/zws/8Avhv/AIquYoq1OSVkzCeGpTlzSjdnT/8ACc6p/wA8LP8A74b/AOKqhrHiO91i1W3uYrdUVw4MakHIBHcn1rHooc5PRsUcLRi+aMdQoooqDoP/2Q=='
+/**
+ * "Is the AI really working?" — one small, real request to each AI that has a key on this server, through
+ * the same code the photo check uses. Says which one answered, how fast, and in plain words why one did not.
+ */
+export async function testPhotoAi() {
+  const ai = await import('./automation-ai')
+  const one = async (p: Provider) => {
+    const configured = p === 'anthropic' ? ai.claudeVisionConfigured() : ai.visionConfigured()
+    if (!configured) return { configured: false, ok: false, model: '', ms: 0, answer: '', problem: 'no key on the server' }
+    const t0 = Date.now()
+    try {
+      const req = { system: 'You confirm that a connection works. Answer only with JSON.', prompt: 'One picture follows. Answer ONLY with JSON: {"ok":true,"colour":"<the main colour of the picture, one word>"}', images: [{ label: 'Item 1', mime: 'image/jpeg', b64: TEST_JPEG }], maxTokens: p === 'anthropic' ? 2000 : 300, timeoutMs: 45_000, purpose: 'scanner-ai-test' }
+      const r = p === 'anthropic' ? await ai.askClaudeVision(req) : await ai.askGeminiVision(req)
+      return { configured: true, ok: !!r.data, model: r.model, ms: Date.now() - t0, answer: String(r.data?.colour || '').slice(0, 24), problem: r.data ? '' : 'it answered, but not in the expected form' }
+    }
+    catch (e: any) { return { configured: true, ok: false, model: '', ms: Date.now() - t0, answer: '', problem: aiProblem(String(e?.message || e)) } }
+  }
+  const [anthropic, gemini] = await Promise.all([one('anthropic'), one('gemini')])
+  const first = await pickProvider()
+  const uses: Provider | null = first === 'anthropic' ? (anthropic.ok ? 'anthropic' : gemini.ok ? 'gemini' : null) : first === 'gemini' ? (gemini.ok ? 'gemini' : null) : null
+  return { anthropic, gemini, uses, at: new Date().toISOString() }
+}
+
 const cacheKey = (i: ImageInfo) => (i.hash2 ? `${i.hash}:${i.hash2}` : '') || ''
 /** Cache entries are per provider (+ "you" corrections, which always count). */
 const docId = (k: string, p: Provider | 'you') => `${p}|${k}`
@@ -109,7 +149,7 @@ function cardLine(v: ScanVehicle | undefined) {
  */
 export async function visionCheck(db: Db | null, images: ImageInfo[], vehicles: ScanVehicle[], o: { log: (s: string) => void, deadline: number, onProgress?: (done: number, total: number) => void, /** Facts measured across the inventory, per image id — shown to the AI next to the card. */ notes?: Map<string, string> }) {
   const ai = await import('./automation-ai')
-  const provider = await pickProvider()
+  let provider = await pickProvider()
   const todo = images.filter(i => i.ok && !i.ai && ((i as any).thumb || cacheKey(i)))
   const state = (extra: { checked: number, cached: number, failed: number }) => ({ ...extra, provider, off: provider ? '' : 'no-key' })
   if (!todo.length) return state({ checked: 0, cached: 0, failed: 0 })
@@ -131,22 +171,26 @@ export async function visionCheck(db: Db | null, images: ImageInfo[], vehicles: 
   const batches: ImageInfo[][] = []
   for (let k = 0; k < ask.length; k += BATCH) batches.push(ask.slice(k, k + BATCH))
   let done = 0, failed = 0, firstError = '', model = ''
+  // Claude first when it has a key — but a key it refuses (wrong, replaced, out of credit) must not leave the
+  // photos unchecked: Gemini takes over for the rest of the crawl when it has a key.
+  const canFallBack = provider === 'anthropic' && ai.visionConfigured()
   const worker = async () => {
     while (batches.length) {
       const batch = batches.shift()!
       const left = o.deadline - Date.now()
       if (left < 10_000) { failed += batch.length; continue }
+      const p = provider as Provider
       try {
         const req = {
           system: SYSTEM,
           prompt: `There are ${batch.length} items, labelled "Item 1" to "Item ${batch.length}", each followed by its image. Answer ONLY with JSON: {"items":[{"i":1,"ad":false,"adWhy":"","v":"real|placeholder|stock","blur":false,"c":0.95,"t":"","why":""}, …]} — one entry per item, in order.`,
           images: batch.map((im, k) => ({ label: `Item ${k + 1} — ${cardLine(byImage.get(im.id))}${o.notes?.get(im.id) ? ` · note: ${o.notes.get(im.id)}` : ''}`, mime: 'image/jpeg', b64: (im as any).thumb as string })),
-          maxTokens: provider === 'anthropic' ? 6000 + 150 * batch.length : 150 * batch.length + 400,
-          timeoutMs: Math.min(provider === 'anthropic' ? 120_000 : 45_000, left - 2_000),
+          maxTokens: p === 'anthropic' ? 6000 + 150 * batch.length : 150 * batch.length + 400,
+          timeoutMs: Math.min(p === 'anthropic' ? 120_000 : 45_000, left - 2_000),
           purpose: 'scanner-photos',
         }
-        const r = provider === 'anthropic' ? await ai.askClaudeVision(req) : await ai.askGeminiVision(req)
-        model ||= r.model
+        const r = p === 'anthropic' ? await ai.askClaudeVision(req) : await ai.askGeminiVision(req)
+        if (p === provider) model = r.model
         const items: any[] = Array.isArray(r.data?.items) ? r.data.items : []
         for (const it of items) {
           const im = batch[(Number(it?.i) || 0) - 1]
@@ -154,11 +198,19 @@ export async function visionCheck(db: Db | null, images: ImageInfo[], vehicles: 
           if (!im || !['real', 'placeholder', 'stock'].includes(v)) continue
           const verdict: VisionVerdict = { v: v as any, c: Math.max(0, Math.min(1, Number(it?.c) || 0.7)), why: String(it?.why || '').slice(0, 80), text: String(it?.t || '').slice(0, 80), model: r.model, ad: it?.ad === true, adWhy: String(it?.adWhy || '').slice(0, 80), blur: v === 'real' ? it?.blur === true : undefined }
           im.ai = verdict
-          await writeCache(db, im, verdict, provider)
+          await writeCache(db, im, verdict, p)
         }
         failed += batch.filter(im => !im.ai).length
       }
-      catch (e: any) { failed += batch.length; firstError ||= String(e?.message || e).slice(0, 160) }
+      catch (e: any) {
+        const msg = String(e?.message || e)
+        if (p === 'anthropic' && canFallBack && keyProblem(msg)) {
+          if (provider === 'anthropic') { provider = 'gemini'; model = ''; o.log(`Claude did not take the request — ${aiProblem(msg)}. Gemini checks the photos of this crawl instead.`) }
+          batches.push(batch)
+          continue
+        }
+        failed += batch.length; firstError ||= aiProblem(msg)
+      }
       done += batch.length
       o.onProgress?.(done, ask.length)
     }

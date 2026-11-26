@@ -55,6 +55,11 @@ export const navMenu: NavMenu[] = [
         link: '/crm/dashboard',
       },
       {
+        title: 'Goals',
+        icon: 'i-lucide-target',
+        link: '/crm/goals',
+      },
+      {
         title: 'Today',
         icon: 'i-lucide-calendar-check',
         link: '/crm/today',

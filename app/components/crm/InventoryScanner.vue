@@ -34,6 +34,19 @@ const failMsg = ref('')
 const engine = ref<string>('')
 /** Is the AI photo check running on this server? (off → photos are judged by the built-in checks only) */
 const photoCheck = ref<{ on: boolean, label: string, reason: string, fix: string } | null>(null)
+/** "Is the AI really working?" — one small real request to each AI that has a key on the server. */
+const aiTesting = ref(false)
+async function testAi() {
+  if (aiTesting.value) return
+  aiTesting.value = true
+  try {
+    const r = await $fetch<{ anthropic: any, gemini: any, uses: 'anthropic' | 'gemini' | null }>('/api/scanner/ai-test', { method: 'POST' })
+    const line = (name: string, x: any) => !x.configured ? `${name}: no key on the server` : x.ok ? `${name}: working (${x.model}, ${(x.ms / 1000).toFixed(1)} s)` : `${name}: not working — ${x.problem}`
+    const description = `${line('Claude', r.anthropic)} · ${line('Gemini', r.gemini)}`
+    if (r.uses) toast.success(`The AI photo check works — photos are checked by ${r.uses === 'anthropic' ? 'Claude' : 'Gemini'}`, { description, duration: 20_000 })
+    else toast.error('The AI photo check is not working', { description, duration: 30_000 })
+  } catch (e: any) { toast.error('The test could not run', { description: e?.data?.statusMessage || 'Try again in a moment.' }) } finally { aiTesting.value = false }
+}
 const address = ref('')
 const editingAddress = ref(false)
 const addressInput = ref<HTMLInputElement | null>(null)
@@ -385,8 +398,8 @@ const crawlLabel = computed(() => chosen.value.length ? `Crawl ${chosen.value.le
           <div class="ml-auto flex items-center gap-2">
             <span v-if="phase === 'ready'" class="hidden md:inline-flex items-center gap-1.5 rounded-full px-2 h-6 text-[11px] font-medium" :class="TONE.ok.soft" title="The crawler reads the saved scan pages and their result pages. It never starts from the home page and never follows a link out of a list."><ShieldCheck class="size-3.5" /> Scan pages only</span>
             <span v-if="phase === 'ready'" class="hidden lg:inline-flex items-center gap-1.5 text-[11px] text-muted-foreground"><Cloud class="size-3.5" /> {{ engineLabel }} · 1440×900</span>
-            <span v-if="phase === 'ready' && photoCheck && photoCheck.on" class="hidden xl:inline-flex items-center gap-1.5 text-[11px] text-muted-foreground" title="Every photo is looked at by AI as well as measured"><Sparkles class="size-3.5 text-violet-500" /> AI photo check · {{ photoCheck.label }}</span>
-            <span v-else-if="phase === 'ready' && photoCheck" class="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300" :title="`${photoCheck.reason} ${photoCheck.fix}`"><AlertTriangle class="size-3.5" /> AI photo check is off</span>
+            <button v-if="phase === 'ready' && photoCheck && photoCheck.on" type="button" class="hidden xl:inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground hover:border-foreground/40 disabled:opacity-60" :disabled="aiTesting" title="Every photo is looked at by AI as well as measured. Click to test that the AI really answers." @click="testAi"><Loader2 v-if="aiTesting" class="size-3.5 animate-spin" /><Sparkles v-else class="size-3.5 text-violet-500" /> AI photo check · {{ photoCheck.label }} · {{ aiTesting ? 'testing…' : 'test' }}</button>
+            <button v-else-if="phase === 'ready' && photoCheck" type="button" class="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300" :title="`${photoCheck.reason} ${photoCheck.fix} Click to test.`" :disabled="aiTesting" @click="testAi"><Loader2 v-if="aiTesting" class="size-3.5 animate-spin" /><AlertTriangle v-else class="size-3.5" /> AI photo check is off</button>
             <Button variant="ghost" size="icon" class="size-8" aria-label="Close the crawler" @click="closeDialog"><X class="size-4" /></Button>
           </div>
         </header>

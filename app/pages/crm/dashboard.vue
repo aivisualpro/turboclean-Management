@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { RefreshCw, Loader2, Search, Send, Phone, Footprints, RefreshCcw, MessagesSquare, CalendarCheck, Store, FileText, Trophy, XCircle, DollarSign, TrendingUp, Clock, Gauge, Target, ArrowRight, Users } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
-import { endOfDay, format, parseISO, startOfDay, startOfMonth, startOfQuarter, startOfWeek } from 'date-fns'
+import { endOfDay, endOfMonth, endOfQuarter, endOfWeek, format, parseISO, startOfDay, startOfMonth, startOfQuarter, startOfWeek } from 'date-fns'
 import { money } from '~/composables/useCrmWon'
 import { localDay } from '~/composables/useCrmDealerships'
 import { STAGE_STYLE } from '~/constants/crm'
+import { CRM_GOAL_STATUS } from '~/composables/useCrmGoals'
+import type { CrmGoalRow } from '~/composables/useCrmGoals'
 
 /**
  * Main CRM dashboard — what was done, how far new dealerships got, what it earned, for a chosen period.
@@ -14,6 +16,8 @@ import { STAGE_STYLE } from '~/constants/crm'
 const { setHeader } = usePageHeader()
 setHeader({ title: 'CRM Dashboard', icon: 'i-lucide-layout-dashboard' })
 const { user: me } = useAuth()
+const { isActionAllowed } = usePermissions()
+const canEditGoals = computed(() => isActionAllowed('crm_dealership', 'Edit'))
 
 const RANGES = [{ key: 'today', label: 'Today' }, { key: 'week', label: 'This week' }, { key: 'month', label: 'This month' }, { key: 'quarter', label: 'This quarter' }, { key: 'custom', label: 'Custom' }] as const
 const range = useLocalStorage<string>('crm-dash-range', 'week')
@@ -26,13 +30,14 @@ onMounted(async () => { try { const res = await $fetch<any[]>('/api/users'); use
 
 const window_ = computed(() => {
   const now = new Date()
-  let a: Date, b: Date = endOfDay(now)
+  // Whole periods (this week = Mon–Sun), so goals are for the full week / month / quarter.
+  let a: Date, b: Date
   switch (range.value) {
-    case 'today': a = startOfDay(now); break
-    case 'month': a = startOfMonth(now); break
-    case 'quarter': a = startOfQuarter(now); break
+    case 'today': a = startOfDay(now); b = endOfDay(now); break
+    case 'month': a = startOfMonth(now); b = endOfMonth(now); break
+    case 'quarter': a = startOfQuarter(now); b = endOfQuarter(now); break
     case 'custom': a = startOfDay(parseISO(customFrom.value || localDay(now))); b = endOfDay(parseISO(customTo.value || localDay(now))); break
-    default: a = startOfWeek(now, { weekStartsOn: 1 })
+    default: a = startOfWeek(now, { weekStartsOn: 1 }); b = endOfWeek(now, { weekStartsOn: 1 })
   }
   if (b < a) b = endOfDay(a)
   return { from: localDay(a), to: localDay(b), fromTs: a.toISOString(), toTs: b.toISOString() }
@@ -58,21 +63,21 @@ const d = computed(() => data.value)
 const fmt = (v: number | null | undefined, suffix = '') => v == null ? '—' : `${v.toLocaleString()}${suffix}`
 const firstTimeSplit = (total: number, first: number | undefined) => first == null ? '' : `${first.toLocaleString()} first time · ${(total - first).toLocaleString()} again`
 
-interface Tile { label: string, value: string, unit?: string, icon: any, hint: string, sub?: string, subTone?: 'warn', to?: string, toLabel?: string, tone?: 'good' }
+interface Tile { key?: string, label: string, value: string, unit?: string, icon: any, hint: string, sub?: string, subTone?: 'warn', to?: string, toLabel?: string, tone?: 'good' }
 const activityTiles = computed<Tile[]>(() => {
   const a = d.value?.activity
   if (!a) return []
   return [
-    { label: 'Researched', value: fmt(a.researched), unit: 'dealerships', icon: Search, sub: firstTimeSplit(a.researched, a.newlyResearched),
+    { key: 'researched', label: 'Researched', value: fmt(a.researched), unit: 'dealerships', icon: Search, sub: firstTimeSplit(a.researched, a.newlyResearched),
       hint: 'Dealerships worked on in this period: research logged, an inventory audit (by hand or an automatic scan), or moved to Researched.\n\nFirst time = never researched before. These are the dealerships the funnel below starts with.\nAgain = researched before and worked on again now.\n\nOnly dealerships still in the CRM count (not archived or merged).' },
-    { label: 'Contacted', value: fmt(a.contacted), unit: 'dealerships', icon: Store, sub: firstTimeSplit(a.contacted, a.newlyContacted),
+    { key: 'contacted', label: 'Contacted', value: fmt(a.contacted), unit: 'dealerships', icon: Store, sub: firstTimeSplit(a.contacted, a.newlyContacted),
       hint: 'Dealerships reached by email, call, text, walk-in or follow-up in this period.\n\nFirst time = never contacted before.\nAgain = contacted before and contacted again now.' },
-    { label: 'Emails sent', value: fmt(a.emails), icon: Send, hint: 'Every email sent in this period. One dealership can get several.' },
-    { label: 'Calls', value: fmt(a.calls), icon: Phone, sub: `${fmt(a.connectedCalls)} connected`, hint: 'Calls, voicemails and texts logged in this period.\nConnected = you actually spoke to someone.' },
-    { label: 'Walk-ins', value: fmt(a.walkIns), icon: Footprints, hint: 'In-person visits logged in this period.' },
-    { label: 'Follow-ups', value: fmt(a.followUps), icon: RefreshCcw, hint: 'Follow-ups logged in this period.' },
-    { label: 'Conversations', value: fmt(a.conversations), icon: MessagesSquare, hint: 'Real two-way conversations: connected calls plus conversations logged.' },
-    { label: 'Meetings held', value: fmt(a.meetingsHeld), icon: CalendarCheck, sub: `${fmt(a.meetingsScheduled)} booked`, hint: 'Meetings that took place in this period.\nBooked = meetings scheduled in this period (they may happen later).' },
+    { key: 'emails', label: 'Emails sent', value: fmt(a.emails), icon: Send, hint: 'Every email sent in this period. One dealership can get several.' },
+    { key: 'calls', label: 'Calls', value: fmt(a.calls), icon: Phone, sub: `${fmt(a.connectedCalls)} connected`, hint: 'Calls, voicemails and texts logged in this period.\nConnected = you actually spoke to someone.' },
+    { key: 'walkIns', label: 'Walk-ins', value: fmt(a.walkIns), icon: Footprints, hint: 'In-person visits logged in this period.' },
+    { key: 'followUps', label: 'Follow-ups', value: fmt(a.followUps), icon: RefreshCcw, hint: 'Follow-ups logged in this period.' },
+    { key: 'conversations', label: 'Conversations', value: fmt(a.conversations), icon: MessagesSquare, hint: 'Real two-way conversations: connected calls plus conversations logged.' },
+    { key: 'meetingsHeld', label: 'Meetings held', value: fmt(a.meetingsHeld), icon: CalendarCheck, sub: `${fmt(a.meetingsScheduled)} booked`, hint: 'Meetings that took place in this period.\nBooked = meetings scheduled in this period (they may happen later).' },
   ]
 })
 const resultTiles = computed<Tile[]>(() => {
@@ -99,6 +104,15 @@ const efficiencyTiles = computed<Tile[]>(() => {
     { label: 'Revenue per hour', value: e.annualRevenuePerHour == null ? '—' : money(e.annualRevenuePerHour), icon: DollarSign, tone: 'good', hint: 'Yearly revenue won ÷ hours prospecting.' },
   ]
 })
+
+// ─── Goals ───
+const goals = computed(() => d.value?.goals)
+/** The goal for an Activity tile in this period (only when there is one). */
+const goalOf = (key?: string): CrmGoalRow | null => {
+  const r = key && goals.value?.active ? goals.value.metrics?.[key] : null
+  return r && r.goal > 0 ? r : null
+}
+const goalTitle = (r: CrmGoalRow) => `Goal for this period: ${r.goal.toLocaleString()}` + (r.pacePct != null ? ` · due by now: ${Math.round(r.goalToDate).toLocaleString()}` : '') + (r.needed ? ` · ${r.needed.toLocaleString()} still to do${r.perDay ? ` (≈ ${r.perDay} a day)` : ''}` : ' · done')
 
 // ─── Funnel ───
 const funnel = computed<any[]>(() => d.value?.funnel?.[funnelMode.value] || [])
@@ -154,6 +168,9 @@ const showLabel = (i: number) => i === series.value.length - 1 || (i % labelEver
     <div v-if="!d" class="flex items-center justify-center py-24 text-muted-foreground gap-2"><Loader2 class="size-4 animate-spin" /> Loading dashboard…</div>
 
     <template v-else>
+      <!-- Goals: goal vs actual for this period -->
+      <CrmGoalsCard v-if="goals" :goals="goals" :can-edit="canEditGoals" :person="person" @pick-person="scope = $event" />
+
       <!-- 1. Activity -->
       <section class="space-y-2" aria-labelledby="dash-activity">
         <h2 id="dash-activity" class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Activity <span class="normal-case tracking-normal font-normal">— what was done {{ label }}</span></h2>
@@ -162,6 +179,16 @@ const showLabel = (i: number) => i === series.value.length - 1 || (i % labelEver
             <p class="text-[11px] text-muted-foreground flex items-center gap-1.5"><component :is="t.icon" class="size-3.5 shrink-0" /><span class="truncate">{{ t.label }}</span><CrmHint :text="t.hint" :label="t.label" /></p>
             <p class="text-2xl font-bold tabular-nums mt-1">{{ t.value }}<span v-if="t.unit" class="ml-1 text-xs font-normal text-muted-foreground">{{ t.unit }}</span></p>
             <p v-if="t.sub" class="text-[11px] text-muted-foreground tabular-nums">{{ t.sub }}</p>
+            <div v-if="goalOf(t.key)" class="mt-1.5 space-y-1" :title="goalTitle(goalOf(t.key)!)" :data-goal="t.key">
+              <div class="relative">
+                <div class="h-1.5 overflow-hidden rounded-full bg-muted"><div class="h-full rounded-full transition-all" :class="CRM_GOAL_STATUS[goalOf(t.key)!.status].bar" :style="{ width: `${Math.min(100, goalOf(t.key)!.pct ?? 0)}%` }" /></div>
+                <span v-if="goalOf(t.key)!.pacePct != null && goalOf(t.key)!.status !== 'met'" class="absolute -top-0.5 h-2.5 w-0.5 -translate-x-1/2 rounded bg-foreground/70" :style="{ left: `${goalOf(t.key)!.pacePct}%` }" aria-hidden="true" />
+              </div>
+              <p class="flex items-center justify-between gap-1 text-[10px]">
+                <span class="truncate tabular-nums text-muted-foreground">{{ goalOf(t.key)!.pct }}% of {{ goalOf(t.key)!.goal.toLocaleString() }}</span>
+                <span class="shrink-0 rounded-full px-1.5 leading-4 ring-1" :class="CRM_GOAL_STATUS[goalOf(t.key)!.status].chip">{{ CRM_GOAL_STATUS[goalOf(t.key)!.status].label }}</span>
+              </p>
+            </div>
           </div>
         </div>
 

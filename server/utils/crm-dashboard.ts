@@ -12,6 +12,7 @@
 import type { Db } from 'mongodb'
 import { buildFacts, FUNNEL_LABELS, FUNNEL_STEPS, OUTREACH_TYPES } from './crm-facts'
 import type { DealershipFacts, FunnelStep } from './crm-facts'
+import { goalReport } from './crm-goals'
 
 /** Chance an open deal at this stage closes — used for the weighted pipeline. */
 export const STAGE_WEIGHT: Record<string, number> = {
@@ -81,7 +82,10 @@ export async function dashboard(db: Db, q: DashboardQuery) {
   const weekOf = (day: string) => { const m = new Date(`${day}T00:00:00.000Z`); m.setUTCDate(m.getUTCDate() - ((m.getUTCDay() + 6) % 7)); return m.toISOString().slice(0, 10) }
   const bucketOf = (iso: string) => weekly ? weekOf(localDayOf(iso)) : localDayOf(iso)
   const series = new Map<string, { emails: number, calls: number, visits: number, other: number }>()
-  for (let t = Date.parse(`${q.from}T00:00:00.000Z`), end = Date.parse(`${q.to}T00:00:00.000Z`), n = 0; t <= end && n < 800; t += 86_400_000, n++) {
+  // Empty days are drawn up to today only (the rest of the week hasn't happened yet).
+  const localToday = new Date(Date.now() + offsetMs).toISOString().slice(0, 10)
+  const lastDay = q.to < localToday ? q.to : localToday
+  for (let t = Date.parse(`${q.from}T00:00:00.000Z`), end = Date.parse(`${lastDay}T00:00:00.000Z`), n = 0; t <= end && n < 800; t += 86_400_000, n++) {
     const day = new Date(t).toISOString().slice(0, 10)
     const k = weekly ? weekOf(day) : day
     if (!series.has(k)) series.set(k, { emails: 0, calls: 0, visits: 0, other: 0 })
@@ -157,8 +161,12 @@ export async function dashboard(db: Db, q: DashboardQuery) {
     annualRevenuePerHour: hours ? round2(annualWon / hours) : null,
   }
 
+  // ── Goals: the same Activity numbers, against the goals for this period ──
+  const goals = await goalReport(db, { from: q.from, to: q.to, fromTs: q.fromTs, toTs: q.toTs, offsetMs, userId: q.userId, activity })
+
   return {
     range: { from: q.from, to: q.to, days, bucket: weekly ? 'week' : 'day' },
+    goals,
     activity,
     series: [...series.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([key, v]) => ({ key, ...v, total: v.emails + v.calls + v.visits + v.other })),
     funnel, results, efficiency,
