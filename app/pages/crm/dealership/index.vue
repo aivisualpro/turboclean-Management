@@ -3,6 +3,8 @@ import type { CrmDealership } from '~/composables/useCrmDealerships'
 import { dueState, formatDuration, verificationState } from '~/composables/useCrmDealerships'
 import type { Condition, DealershipFacts } from '~/composables/useCrmFilters'
 import type { GridColumnDef } from '~/lib/gridLayout'
+import type { DealershipView } from '~/lib/dealershipView'
+import { VIEW_PARAMS, dealershipViewFromQuery, dealershipViewToQuery, normalizeDealershipView } from '~/lib/dealershipView'
 import { matchAll } from '~/composables/useCrmFilters'
 import { INTERACTION_TYPE_MAP } from '~/constants/crm'
 import { INTERACTION_ICONS } from '~/constants/crm-icons'
@@ -100,10 +102,8 @@ const rowPad = computed(() => density.value === 'compact' ? 'py-1' : 'py-3')
 
 // ─── Filters & sort ───
 const search = ref('')
-const q = refDebounced(search, 200)
 const route = useRoute()
-// Deep links from the Pipeline report: /crm/dealership?stage=Replied or ?view=stalled
-const stage = ref(DEALERSHIP_STAGES.includes(String(route.query.stage) as any) ? String(route.query.stage) : 'all')
+const stage = ref('all')
 const leadSource = ref('all')
 const state = ref('all')
 const assignee = ref('all')
@@ -112,16 +112,61 @@ const brand = ref('all')
 const group = ref('all')
 const city = ref('all')
 const territory = ref('all')
-const routeF = ref(String(route.query.route || 'all'))
+const routeF = ref('all')
 const nextActionF = ref<'all' | 'overdue' | 'today' | 'upcoming' | 'none'>('all')
 const lastTouchF = ref<'all' | '7' | '30' | 'older30' | 'never'>('all')
 const auditF = ref<'all' | 'audited' | 'not' | 'gt10' | 'gt20'>('all')
 const contactsF = ref<'all' | 'yes' | 'no'>('all')
 const addedF = ref<'all' | '7' | '30' | '90'>('all')
 const filtersOpen = ref(false)
-const quick = ref<'all' | 'won' | 'stalled' | 'followUps' | 'neverContacted' | 'noNextStep' | 'stale' | 'unassigned' | 'noContacts' | 'notAudited'>(['stalled', 'followUps', 'neverContacted', 'noNextStep'].includes(String(route.query.view)) ? String(route.query.view) as any : 'all')
+const quick = ref<'all' | 'won' | 'stalled' | 'followUps' | 'neverContacted' | 'noNextStep' | 'stale' | 'unassigned' | 'noContacts' | 'notAudited'>('all')
 // Advanced conditions (search & filtering) — evaluated against facts computed from each dealership's history.
-const conditions = useLocalStorage<Condition[]>('crm-dealership-conditions', [])
+const conditions = ref<Condition[]>([])
+
+// ─── The filters live in the page address and are remembered for the signed-in person ───
+// Every filter that is on shows in the address as it changes (/crm/dealership?stage=Replied&state=CT):
+// reload, bookmark or send the link and the same list opens. Opening the list with no filters in the
+// address — from the menu, tomorrow, on another computer — brings back the ones this person last had.
+// A link that names filters (the Pipeline report's ?stage=…, ?view=stalled) always wins. See useListView.
+const VIEW_RULES = { stages: DEALERSHIP_STAGES as readonly string[] }
+function readView(): DealershipView {
+  return {
+    q: search.value, view: quick.value, stage: stage.value, source: leadSource.value, owner: assignee.value, state: state.value, city: city.value,
+    territory: territory.value, route: routeF.value, brand: brand.value, group: group.value, next: nextActionF.value, touch: lastTouchF.value,
+    audit: auditF.value, contacts: contactsF.value, added: addedF.value, conditions: conditions.value,
+  }
+}
+function applyView(v: DealershipView) {
+  search.value = v.q; quick.value = v.view as typeof quick.value; stage.value = v.stage; leadSource.value = v.source; assignee.value = v.owner
+  state.value = v.state; city.value = v.city; territory.value = v.territory; routeF.value = v.route; brand.value = v.brand; group.value = v.group
+  nextActionF.value = v.next as typeof nextActionF.value; lastTouchF.value = v.touch as typeof lastTouchF.value; auditF.value = v.audit as typeof auditF.value
+  contactsF.value = v.contacts as typeof contactsF.value; addedF.value = v.added as typeof addedF.value
+  conditions.value = v.conditions.map(c => ({ ...c }))
+}
+const listView = useListView<DealershipView>('crm-dealerships', {
+  read: readView,
+  apply: applyView,
+  normalize: raw => normalizeDealershipView(raw, VIEW_RULES),
+  toQuery: dealershipViewToQuery,
+  fromQuery: query => dealershipViewFromQuery(query, VIEW_RULES),
+  params: VIEW_PARAMS,
+  // The search text is in the address (a reload keeps it) but a new visit starts with an empty search box.
+  forget: v => ({ ...v, q: '' }),
+})
+await listView.start()
+/** The search as it filters the list (a moment after typing stops). Made after the filters are in place, so the first paint is already filtered. */
+const q = refDebounced(search, 200)
+onMounted(() => {
+  // History conditions used to be kept in this browser only: carry them over once.
+  try {
+    const old = localStorage.getItem('crm-dealership-conditions')
+    if (!old) return
+    localStorage.removeItem('crm-dealership-conditions')
+    const list = normalizeDealershipView({ conditions: JSON.parse(old) }).conditions
+    if (list.length && listView.source.value === 'plain' && !conditions.value.length) conditions.value = list
+  }
+  catch {}
+})
 const factsById = ref(new Map<string, DealershipFacts>())
 const factsLoading = ref(false)
 async function loadFacts() {

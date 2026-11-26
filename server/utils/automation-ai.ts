@@ -54,6 +54,15 @@ export interface AskOptions {
   cacheSystem?: boolean
   /** Use Claude for this call whenever a Claude key is set, whichever provider is the default (precision work: reading page layouts). */
   prefer?: 'anthropic'
+  /**
+   * Gemini 3 "thinks" silently before writing — on long design jobs that can be minutes of nothing.
+   * 'low' = fast (default for streams), 'high' = deeper, 'off' = leave the model default.
+   */
+  thinking?: 'low' | 'high' | 'off'
+  /** Streams: receives the model's thought summaries while it plans (Gemini includeThoughts). */
+  onThought?: (text: string) => void
+  /** Streams: give up on an attempt when no data arrives for this long (retried / falls back). Default 90 s. */
+  idleMs?: number
 }
 
 async function brainBlock(opts: AskOptions): Promise<string> {
@@ -113,16 +122,45 @@ async function askAnthropic(opts: AskOptions, model: string, signal: AbortSignal
 }
 async function streamAnthropic(opts: AskOptions, model: string, signal: AbortSignal, onText: (d: string, full: string) => void) {
   const body: any = { model, max_tokens: opts.maxTokens ?? 16_000, stream: true, system: await anthropicSystem(opts), messages: [{ role: 'user', content: opts.prompt }] }
-  const res = await anthropicPost(body, signal)
-  if (!res.ok || !res.body) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 300)}`)
-  let full = '', usage: any = {}, served = model
-  for await (const ev of sseEvents(res.body)) {
-    if (ev.type === 'message_start') { served = ev.message?.model || model; usage = { ...usage, ...ev.message?.usage } }
-    else if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') { full += ev.delta.text; onText(ev.delta.text, full) }
-    else if (ev.type === 'message_delta') usage = { ...usage, ...ev.usage }
-    else if (ev.type === 'error') throw new Error(ev.error?.message || 'Claude stream error')
+  const idle = idleWatch(signal, opts.idleMs ?? 90_000)
+  try {
+    const res = await anthropicPost(body, idle.signal)
+    if (!res.ok || !res.body) throw new Error(`Claude API ${res.status}: ${(await res.text()).slice(0, 300)}`)
+    let full = '', usage: any = {}, served = model, finish = ''
+    for await (const ev of sseEvents(res.body)) {
+      idle.touch()
+      if (ev.type === 'message_start') { served = ev.message?.model || model; usage = { ...usage, ...ev.message?.usage } }
+      else if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') { full += ev.delta.text; onText(ev.delta.text, full) }
+      else if (ev.type === 'message_delta') { usage = { ...usage, ...ev.usage }; if (ev.delta?.stop_reason) finish = ev.delta.stop_reason === 'max_tokens' ? 'MAX_TOKENS' : ev.delta.stop_reason }
+      else if (ev.type === 'error') throw new Error(ev.error?.message || 'Claude stream error')
+    }
+    return { text: full, model: served, usage: anthropicUsage({ usage }), finish }
   }
-  return { text: full, model: served, usage: anthropicUsage({ usage }) }
+  catch (e: any) {
+    if (idle.stalled()) throw new Error(`Claude stopped sending data for ${Math.round((opts.idleMs ?? 90_000) / 1000)}s`)
+    throw e
+  }
+  finally { idle.clear() }
+}
+
+/**
+ * Per-attempt inactivity guard for streams: aborts when nothing arrives for `ms`. A stalled
+ * connection used to hang Template Studio for 10 minutes; now the attempt is retried or fails fast.
+ */
+function idleWatch(outer: AbortSignal, ms: number) {
+  const ctrl = new AbortController()
+  let stalled = false
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const arm = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { stalled = true; ctrl.abort() }, ms) }
+  const onOuter = () => ctrl.abort()
+  if (outer.aborted) ctrl.abort(); else outer.addEventListener('abort', onOuter, { once: true })
+  arm()
+  return {
+    signal: ctrl.signal,
+    touch: arm,
+    stalled: () => stalled && !outer.aborted,
+    clear: () => { if (timer) clearTimeout(timer); outer.removeEventListener('abort', onOuter) },
+  }
 }
 
 // ───────────────────────── Gemini ─────────────────────────
@@ -130,12 +168,17 @@ function geminiUsage(data: any) {
   const u = data?.usageMetadata || {}
   return { inputTokens: u.promptTokenCount || 0, outputTokens: (u.candidatesTokenCount || 0) + (u.thoughtsTokenCount || 0), cacheReadTokens: u.cachedContentTokenCount || 0, cacheWriteTokens: 0 }
 }
+/** Set once a model rejects thinkingConfig, so later calls stop sending it. */
+let geminiThinkingUnsupported = false
 async function geminiBody(opts: AskOptions, maxTokens: number) {
   const ctx = await brainBlock(opts)
+  const thinking = opts.thinking && opts.thinking !== 'off' && !geminiThinkingUnsupported
+    ? { thinkingConfig: { thinkingLevel: opts.thinking, ...(opts.onThought ? { includeThoughts: true } : {}) } }
+    : {}
   const body: any = {
     systemInstruction: { parts: [{ text: ctx ? `${opts.system}\n\n${ctx}` : opts.system }] },
     contents: [{ role: 'user', parts: [{ text: opts.prompt }] }],
-    generationConfig: { maxOutputTokens: maxTokens, ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}) },
+    generationConfig: { maxOutputTokens: maxTokens, ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}), ...thinking },
     safetySettings: ['HARM_CATEGORY_HARASSMENT', 'HARM_CATEGORY_HATE_SPEECH', 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'HARM_CATEGORY_DANGEROUS_CONTENT'].map(category => ({ category, threshold: 'BLOCK_ONLY_HIGH' })),
   }
   return body
@@ -183,7 +226,8 @@ async function geminiWithRetries<T>(primary: string, signal: AbortSignal, attemp
         last = e
         if (signal.aborted || started() || !(e instanceof GeminiHttpError) || !geminiRetryable(e.status)) throw geminiFriendly(e, models.slice(0, models.indexOf(model) + 1), attempts)
         const wait = GEMINI_RETRY_WAITS[i]
-        if (wait === undefined) break
+        // A stalled stream already cost a full idle window — go straight to the next model.
+        if (wait === undefined || /stalled/.test(e.message)) break
         onRetry?.(`${model} answered ${e.status} — retrying in ${wait / 1000}s`)
         await sleep(wait, signal)
       }
@@ -204,42 +248,86 @@ async function askGemini(opts: AskOptions, model: string, signal: AbortSignal) {
   }, () => false)
 }
 async function streamGemini(opts: AskOptions & { onNote?: (note: string) => void }, model: string, signal: AbortSignal, onText: (d: string, full: string) => void) {
-  const body = JSON.stringify(await geminiBody(opts, opts.maxTokens ?? 16_000))
+  let body = JSON.stringify(await geminiBody(opts, opts.maxTokens ?? 16_000))
+  const idleMs = opts.idleMs ?? 90_000
   let full = ''
   return geminiWithRetries(model, signal, async (m) => {
-    const res = await fetch(geminiUrl(m, 'streamGenerateContent'), { method: 'POST', signal, headers: geminiHeaders(), body })
-    if (!res.ok || !res.body) throw new GeminiHttpError(res.status, await res.text())
-    let last: any = null, served = m
-    for await (const chunk of sseEvents(res.body)) {
-      last = chunk
-      if (chunk?.modelVersion) served = chunk.modelVersion
-      const blocked = geminiBlocked(chunk)
-      if (blocked) throw new Error(blocked)
-      const t = geminiText(chunk)
-      if (t) { full += t; onText(t, full) }
+    const idle = idleWatch(signal, idleMs)
+    try {
+      let res = await fetch(geminiUrl(m, 'streamGenerateContent'), { method: 'POST', signal: idle.signal, headers: geminiHeaders(), body })
+      if (res.status === 400 && /thinking/i.test(body)) {
+        const txt = await res.text()
+        if (!/thinking/i.test(txt)) throw new GeminiHttpError(400, txt)
+        geminiThinkingUnsupported = true // this model has no thinking level — ask without it from now on
+        body = JSON.stringify(await geminiBody(opts, opts.maxTokens ?? 16_000))
+        idle.touch()
+        res = await fetch(geminiUrl(m, 'streamGenerateContent'), { method: 'POST', signal: idle.signal, headers: geminiHeaders(), body })
+      }
+      if (!res.ok || !res.body) throw new GeminiHttpError(res.status, await res.text())
+      let last: any = null, served = m, finish = ''
+      for await (const chunk of sseEvents(res.body)) {
+        idle.touch()
+        last = chunk
+        if (chunk?.modelVersion) served = chunk.modelVersion
+        const blocked = geminiBlocked(chunk)
+        if (blocked) throw new Error(blocked)
+        const fr = chunk?.candidates?.[0]?.finishReason
+        if (fr) finish = fr
+        if (opts.onThought) {
+          const thought = ((chunk?.candidates?.[0]?.content?.parts || []) as any[]).filter(p => p?.thought && typeof p.text === 'string').map(p => p.text).join('')
+          if (thought) opts.onThought(thought)
+        }
+        const t = geminiText(chunk)
+        if (t) { full += t; onText(t, full) }
+      }
+      return { text: full, model: served, usage: geminiUsage(last), finish }
     }
-    return { text: full, model: served, usage: geminiUsage(last) }
+    catch (e: any) {
+      // A stall before any text is treated like a 504 → retried / next model. After text: a clear error.
+      if (idle.stalled()) {
+        if (!full) throw new GeminiHttpError(504, `no data for ${Math.round(idleMs / 1000)}s (stalled)`)
+        throw new Error(`Gemini stopped sending data for ${Math.round(idleMs / 1000)}s in the middle of the answer`)
+      }
+      throw e
+    }
+    finally { idle.clear() }
   }, () => full.length > 0, opts.onNote)
 }
 
-/** Parse a Server-Sent Events body into JSON data objects. */
+/**
+ * Parse a Server-Sent Events body into JSON data objects.
+ * Handles every line ending the spec allows (\n, \r\n, \r) — Gemini separates events with
+ * "\r\n\r\n", which the old "\n\n"-only parser never matched, so nothing streamed and the
+ * whole answer was dropped. Whatever is left in the buffer when the stream ends is flushed too.
+ */
 async function* sseEvents(body: ReadableStream<Uint8Array>) {
   const reader = body.getReader()
   const dec = new TextDecoder()
   let buf = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += dec.decode(value, { stream: true })
-    let i: number
-    while ((i = buf.indexOf('\n\n')) !== -1) {
-      const block = buf.slice(0, i)
-      buf = buf.slice(i + 2)
-      const data = block.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trim()).join('')
-      if (!data || data === '[DONE]') continue
-      try { yield JSON.parse(data) } catch {}
-    }
+  const parse = (block: string) => {
+    const data = block.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).replace(/^ /, '')).join('\n').trim()
+    if (!data || data === '[DONE]') return undefined
+    try { return JSON.parse(data) } catch { return undefined }
   }
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += dec.decode(value, { stream: true })
+      // Normalise line endings; keep a lone trailing \r (its \n may arrive in the next chunk).
+      buf = buf.replace(/\r\n/g, '\n').replace(/\r(?!$)/g, '\n')
+      let i: number
+      while ((i = buf.indexOf('\n\n')) !== -1) {
+        const ev = parse(buf.slice(0, i))
+        buf = buf.slice(i + 2)
+        if (ev !== undefined) yield ev
+      }
+    }
+    buf += dec.decode()
+    const tail = parse(buf.replace(/\r\n?/g, '\n'))
+    if (tail !== undefined) yield tail
+  }
+  finally { try { reader.releaseLock() } catch {} }
 }
 
 const isOverload = (e: any) => /^Gemini is (overloaded|rate limit)/.test(String(e?.message || ''))
@@ -376,16 +464,17 @@ export async function streamClaude(opts: AskOptions & { signal?: AbortSignal, /*
   try {
     const r = provider === 'gemini' ? await streamGemini(opts, model, t.signal, onText) : await streamAnthropic(opts, model, t.signal, onText)
     logCall({ provider, purpose: opts.purpose || 'stream', brain: opts.brain || null, model: r.model, ms: Date.now() - t0, ok: true, ...r.usage })
-    return { text: r.text, model: r.model }
+    return { text: r.text, model: r.model, finish: r.finish }
   }
   catch (e: any) {
     logCall({ provider, purpose: opts.purpose || 'stream', brain: opts.brain || null, model, ms: Date.now() - t0, ok: false, error: String(e?.message || e).slice(0, 300) })
+    if (t.signal.aborted && !opts.signal?.aborted) throw new Error(`The AI took longer than ${Math.round((opts.timeoutMs ?? 300_000) / 60_000)} minutes — try again, or ask for a shorter email`)
     if (provider === 'gemini' && isOverload(e) && anthropicKey() && !t.signal.aborted) {
       const m2 = process.env.ANTHROPIC_MODEL || AI_DEFAULT_MODEL
       opts.onNote?.(`Gemini unavailable — switching to Claude (${m2})`)
       const r = await streamAnthropic(opts, m2, t.signal, onText)
       logCall({ provider: 'anthropic', purpose: opts.purpose || 'stream', brain: opts.brain || null, model: r.model, ms: Date.now() - t0, ok: true, ...r.usage })
-      return { text: r.text, model: r.model }
+      return { text: r.text, model: r.model, finish: r.finish }
     }
     throw e
   }
