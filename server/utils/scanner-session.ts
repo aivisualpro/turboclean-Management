@@ -26,7 +26,7 @@ import type { BrowserHandle, CdpConnection } from './scanner-cdp'
 import { ANALYZE_FN_JS, EXTRACT_JS, FIND_NEXT_JS, HOTSPOTS_JS, NAV_LINKS_JS, SCANNER_BOOTSTRAP_JS, SCROLL_STEP_JS, extractWith } from './scanner-page'
 import type { CardLayout } from './scanner-page'
 import { forgetLayout, learnLayout, readingProblem, savedLayout, unreliableResult } from './scanner-layout'
-import { classify, countable, downloadImage, FINAL_VERDICTS, finalVerdict, isAd, listRules, RULES_COLLECTION, sharpnessScore, summarize, VERDICT_LABEL } from './scanner-images'
+import { buildBackdrops, classify, countable, downloadImage, FINAL_VERDICTS, finalVerdict, isAd, listRules, RULES_COLLECTION, sharpnessScore, summarize, VERDICT_LABEL } from './scanner-images'
 import type { ImageCluster, ImageInfo, PhotoVerdict, ScanVehicle } from './scanner-images'
 import { checkScanPage, healthFromScope, inList, landing, matchScanPage, scopeKey, scopeOf, scopePath } from './scanner-scope'
 import type { ScopeEntry } from './scanner-scope'
@@ -515,6 +515,17 @@ export function scanMeta(doc: ScanDoc) {
   }
 }
 
+function backdropGroups(doc: ScanDoc) {
+  const groups = new Map<string, { id: string, vehicles: number, models: Set<string>, url: string }>()
+  for (const v of doc.vehicles) {
+    if (!v.backdropId || isAd(v)) continue
+    const g = groups.get(v.backdropId) || { id: v.backdropId, vehicles: 0, models: new Set<string>(), url: v.image?.url || '' }
+    g.vehicles++; g.models.add(`${v.make} ${v.model}`.trim() || v.title)
+    groups.set(v.backdropId, g)
+  }
+  return [...groups.values()].filter(g => g.vehicles >= 2).sort((a, b) => b.vehicles - a.vehicles).map(g => ({ id: g.id, vehicles: g.vehicles, models: g.models.size, url: g.url }))
+}
+
 export function resultsOf(doc: ScanDoc) {
   const summary = summarize(doc.vehicles, doc.clusters, { countStockAsMissing: doc.countStockAsMissing })
   const used = new Set(doc.vehicles.map(v => v.imageId).filter(Boolean) as string[])
@@ -533,6 +544,8 @@ export function resultsOf(doc: ScanDoc) {
     // Coverage: how much of what the site lists we could actually check (blocked pages are retried from their checkpoint).
     coverage: { checked: countable(doc.vehicles).length, advertised: advertisedTotal(doc), blocked: (doc.progress.blocked || []).map(b => ({ url: b.url, page: b.page })) },
     vehicles: doc.vehicles.map(v => ({ ...v, listUrl: listKey(v, doc), final: finalVerdict(v, cmap) })), clusters: doc.clusters, images,
+    // Stock images placed on one shared background: each group with one example picture.
+    backdrops: backdropGroups(doc),
     // Results per crawl page (URL) — the review screen can filter by page.
     crawlPages: pageBreakdown(doc, null, cmap).map(p => ({ url: p.url, label: p.label, total: p.total, withoutReal: p.withoutReal, withoutRealPct: p.withoutRealPct })),
     // Scope: the saved scan pages this crawl covered — status, result pages and numbers for each. Nothing else was read.
@@ -718,7 +731,7 @@ async function runScan(db: Db, doc: ScanDoc, emit: Emit, opts: { isClosed: () =>
     try {
       // Vehicles go with every heartbeat, so a scan cut off by the server keeps what it found.
       doc.progress.memMb = Math.round(process.memoryUsage().rss / 1e6)
-      const r = await col.findOneAndUpdate({ _id: doc._id }, { $set: { progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, ...(doc.progress.phase === 'analyzing' ? { images: doc.images.map(stripImage) } : {}), heartbeatAt: new Date().toISOString() } }, { projection: { stopRequested: 1, stopReason: 1 }, returnDocument: 'after' })
+      const r = await col.findOneAndUpdate({ _id: doc._id }, { $set: { progress: doc.progress, log: doc.log.slice(-60), vehicles: doc.vehicles, ...(doc.progress.phase === 'analyzing' ? { images: doc.images.map(lightImage) } : {}), heartbeatAt: new Date().toISOString() } }, { projection: { stopRequested: 1, stopReason: 1 }, returnDocument: 'after' })
       if ((r as any)?.stopRequested && !stop) {
         stop = true
         pausing = (r as any)?.stopReason === 'pause'
@@ -1262,6 +1275,8 @@ function coverageText(doc: ScanDoc) {
   return adv && adv > n ? `checked ${n} of the ${adv} vehicles listed` : `checked ${n} vehicles`
 }
 const stripImage = (i: ImageInfo): ImageInfo => { const { bytes, thumb, ...rest } = i as any; return rest }
+/** For the every-few-seconds heartbeat: without the fingerprint (it is stored once, when the photos are done). */
+const lightImage = (i: ImageInfo): ImageInfo => { const { bytes, thumb, fp, ...rest } = i as any; return rest }
 
 async function analyzePhotos(t: Tab, doc: ScanDoc, o: { setProgress: (p: Partial<ScanProgress>) => void, log: (s: string) => void, deadline: number, db?: Db | null }) {
   const images = new Map(doc.images.map(i => [i.id, i]))
@@ -1321,7 +1336,14 @@ async function analyzePhotos(t: Tab, doc: ScanDoc, o: { setProgress: (p: Partial
   // AI photo check (Gemini): every photo, cached by fingerprint — instant for pictures seen before.
   try {
     const { visionCheck } = await import('./scanner-vision')
-    const r = await visionCheck(o.db || null, [...images.values()], doc.vehicles, { log: o.log, deadline: Math.min(o.deadline, Date.now() + 90_000), onProgress: (d, n) => o.setProgress({ message: `AI photo check… ${d} of ${n}` }) })
+    // What the measurements already know goes to the AI with each picture.
+    const notes = new Map<string, string>()
+    const backdropOf = buildBackdrops(images)
+    const perBackdrop = new Map<string, number>(), perImage = new Map<string, number>()
+    for (const v of doc.vehicles) { if (!v.imageId) continue; perImage.set(v.imageId, (perImage.get(v.imageId) || 0) + 1); const b = backdropOf.get(v.imageId); if (b) perBackdrop.set(b, (perBackdrop.get(b) || 0) + 1) }
+    for (const [id, b] of backdropOf) { const n = perBackdrop.get(b) || 0; if (n >= 4) notes.set(id, `the background of this image is identical, pixel for pixel, on ${n} listings of different vehicles (only the car differs)`) }
+    for (const [id, n] of perImage) if (n >= 2 && !notes.has(id)) notes.set(id, `this exact image is the main image of ${n} different listings`)
+    const r = await visionCheck(o.db || null, [...images.values()], doc.vehicles, { log: o.log, notes, deadline: Math.min(o.deadline, Date.now() + 200_000), onProgress: (d, n) => o.setProgress({ message: `AI photo check… ${d} of ${n}` }) })
     doc.progress.photoCheck = { provider: r.provider || null, checked: r.checked, cached: r.cached, failed: r.failed, off: r.off || '' }
   }
   catch (e: any) { o.log(`AI photo check skipped (${String(e?.message || e).slice(0, 100)})`); doc.progress.photoCheck = { provider: null, checked: 0, cached: 0, failed: 0, off: 'error' } }
@@ -1418,9 +1440,17 @@ export async function applyReview(db: Db, id: string, body: any) {
   const doc = await getScan(db, id)
   if (!hasResults(doc)) throw createError({ statusCode: 409, statusMessage: 'Wait for the scan to finish' })
   const ok = (v: any): Exclude<PhotoVerdict, 'review'> | null => (FINAL_VERDICTS as readonly string[]).includes(v) ? v : null
+  /** Pictures whose correction is being taken back: what the scanner "learned" from it goes too. */
+  const untaught = new Set<string>()
+  const takeBack = (v: ScanVehicle) => { if ((v.override || v.listing) && v.imageId) untaught.add(v.imageId) }
+  // "Reset my changes": every choice a person made on this crawl goes back to the scanner's own call.
+  if (body?.reset === true) {
+    for (const v of doc.vehicles) { takeBack(v); v.override = null; v.listing = null }
+    for (const c of doc.clusters) { if (c.override) for (const id of c.imageIds) untaught.add(id); c.override = null }
+  }
   if (Array.isArray(body?.vehicles)) {
     const set = new Map<string, any>(body.vehicles.map((x: any) => [String(x.key), x.verdict]))
-    for (const v of doc.vehicles) if (set.has(v.key)) v.override = ok(set.get(v.key))
+    for (const v of doc.vehicles) if (set.has(v.key)) { const next = ok(set.get(v.key)); if (!next && v.override && v.imageId) untaught.add(v.imageId); v.override = next }
   }
   if (Array.isArray(body?.clusters)) {
     for (const x of body.clusters) { const c = doc.clusters.find(c => c.id === x.id); if (c) c.override = ok(x.verdict) }
@@ -1453,14 +1483,60 @@ export async function applyReview(db: Db, id: string, body: any) {
     }
   }
   if (typeof body?.countStockAsMissing === 'boolean') doc.countStockAsMissing = body.countStockAsMissing
-  if (body?.reapplyRules) await reclassify(db, doc)
+  // Taken-back corrections: forget them for future crawls, and where this crawl's own call already came from
+  // such a correction (after "Check photos again"), judge the picture afresh.
+  let judgeAgain = false
+  if (untaught.size) {
+    try {
+      const { forgetTeaching } = await import('./scanner-vision')
+      const gone = doc.images.filter(i => untaught.has(i.id))
+      await forgetTeaching(db, gone)
+      for (const i of gone) if (i.ai?.model === 'you') { delete i.ai; judgeAgain = true }
+    } catch {}
+  }
+  if (body?.reapplyRules || judgeAgain) await reclassify(db, doc)
   // Any change after saving makes it a draft again until saved once more.
   if (doc.status === 'saved') doc.status = 'done'
   // Remember which audit these results came from: saving again corrects that audit (no duplicate).
   if (doc.auditId) doc.revisesAuditId = doc.auditId
   doc.auditId = null
-  await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { vehicles: doc.vehicles, clusters: doc.clusters, countStockAsMissing: doc.countStockAsMissing, status: doc.status, auditId: null, revisesAuditId: doc.revisesAuditId || null } })
+  await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { vehicles: doc.vehicles, clusters: doc.clusters, ...(judgeAgain ? { images: doc.images.map(stripImage) } : {}), countStockAsMissing: doc.countStockAsMissing, status: doc.status, auditId: null, revisesAuditId: doc.revisesAuditId || null } })
   return resultsOf(doc)
+}
+
+/**
+ * "Check the photos again": download and judge every photo of a finished crawl afresh — same vehicles, no
+ * visit to the dealer's list pages. Used after the photo checks improved (or the AI was off during the
+ * crawl). A person's own choices on the crawl are kept; the result is a draft until it is saved again.
+ */
+export async function recheckPhotos(db: Db, id: string) {
+  const doc = await getScan(db, id)
+  if (!hasResults(doc)) throw createError({ statusCode: 409, statusMessage: 'Wait for the scan to finish' })
+  const t0 = Date.now()
+  const log = (text: string) => { doc.log = [...(doc.log || []), { at: new Date().toISOString(), text }].slice(-60) }
+  const before = summarize(doc.vehicles, doc.clusters, { countStockAsMissing: doc.countStockAsMissing })
+  log('Checking the photos again (no new crawl)…')
+  // Forget what was measured before: every picture is downloaded, measured and looked at again.
+  doc.images = doc.images.map(i => ({ id: i.id, url: i.url, ok: false }))
+  const t = await openTab()
+  try {
+    await analyzePhotos(t, doc, { setProgress: (p) => { Object.assign(doc.progress, { analyzed: p.analyzed ?? doc.progress.analyzed, toAnalyze: p.toAnalyze ?? doc.progress.toAnalyze }) }, log, deadline: t0 + Math.min(budgetMs() * 0.7, 420_000), db })
+  }
+  finally { await closeTab(t) }
+  await reclassify(db, doc, log)
+  keepEvidencePictures(doc)
+  refreshScopeCounts(doc)
+  const sum = summarize(doc.vehicles, doc.clusters, { countStockAsMissing: doc.countStockAsMissing })
+  log(`Photos checked again in ${Math.round((Date.now() - t0) / 1000)}s — ${sum.withoutReal} of ${sum.total} without a real photo (was ${before.withoutReal})`)
+  const unreliable = unreliableResult(doc.vehicles, sum)
+  doc.progress.unreliable = unreliable || null
+  // A draft again until saved; saving corrects the audit these results came from (no second audit).
+  if (doc.status === 'saved') doc.status = 'done'
+  if (doc.auditId) doc.revisesAuditId = doc.auditId
+  doc.auditId = null
+  Object.assign(doc.progress, { phase: doc.status === 'stopped' ? 'stopped' : 'done', message: `${sum.total} vehicles · ${sum.withoutReal} without a real photo (${sum.withoutRealPct ?? 0}%)` })
+  await db.collection(SCANS_COLLECTION).updateOne({ _id: doc._id }, { $set: { vehicles: doc.vehicles, images: doc.images.map(stripImage), clusters: doc.clusters, evidenceThumbs: doc.evidenceThumbs || {}, progress: doc.progress, log: doc.log, status: doc.status, auditId: null, revisesAuditId: doc.revisesAuditId || null, heartbeatAt: new Date().toISOString() } })
+  return { ...resultsOf(doc), recheck: { before: { withoutReal: before.withoutReal, by: before.by }, after: { withoutReal: sum.withoutReal, by: sum.by }, seconds: Math.round((Date.now() - t0) / 1000) } }
 }
 
 /** Save the scan to the CRM as an automated inventory audit (no screenshots or images kept). */

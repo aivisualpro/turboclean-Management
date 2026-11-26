@@ -50,11 +50,15 @@ export interface ScannedVehicle {
   confidence: number
   reasons: string[]
   clusterId: string | null
+  /** The picture is a car placed on a background that many other listings share (a stock image) — the group's id. */
+  backdropId?: string | null
   override: FinalVerdict | null
 }
 export interface ScannedImage { id: string, url: string, ok: boolean, error: string | null, w: number | null, h: number | null, hash: string | null, hash2?: string | null, text: string, ocr: boolean, /** Sharpness 0 (a smear) – 100 (crisp); null when not measured. */ sharp?: number | null }
-export interface ImageGroup { id: string, imageIds: string[], hash: string, hash2?: string, vehicles: number, models: number, modelNames: string[], thumb: string, url: string, verdict: PhotoVerdict, reason: string, override: FinalVerdict | null }
+export interface ImageGroup { id: string, imageIds: string[], hash: string, hash2?: string, vehicles: number, models: number, modelNames: string[], thumb: string, url: string, verdict: PhotoVerdict, reason: string, override: FinalVerdict | null, exact?: boolean }
 export interface ScanResults {
+  /** Stock images placed on one shared background: each group with one example picture. */
+  backdrops?: { id: string, vehicles: number, models: number, url: string }[]
   scanId: string
   /** Why these numbers cannot be trusted (the site's cards were not read properly) — saving is refused. */
   unreliable?: string | null
@@ -75,15 +79,15 @@ export interface ScanResults {
 }
 export interface ImageRule { id: string, hash: string, urlContains: string, verdict: FinalVerdict, label: string, thumb: string, hits: number, createdAt: string, createdBy: { name: string } | null }
 
-export const VERDICT_META: Record<PhotoVerdict, { label: string, short: string, dot: string, pill: string, ring: string, hex: string }> = {
-  real: { label: 'Real photo', short: 'Real', dot: 'bg-emerald-500', pill: 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 ring-emerald-500/30', ring: 'ring-emerald-500/40', hex: '#10b981' },
+export const VERDICT_META: Record<PhotoVerdict, { label: string, short: string, dot: string, pill: string, ring: string, hex: string, /** The pressed state of a "this is …" button. */ solid: string }> = {
+  real: { label: 'Real photo', short: 'Real', dot: 'bg-emerald-500', pill: 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 ring-emerald-500/30', ring: 'ring-emerald-500/40', hex: '#10b981', solid: 'bg-emerald-600 text-white border-emerald-600' },
   // A placeholder ("Vehicle photos unavailable", "coming soon"…) means the car has no photo.
-  placeholder: { label: 'No photo', short: 'No photo', dot: 'bg-rose-500', pill: 'bg-rose-500/15 text-rose-700 dark:text-rose-300 ring-rose-500/30', ring: 'ring-rose-500/50', hex: '#f43f5e' },
-  stock: { label: 'Stock image', short: 'Stock', dot: 'bg-violet-500', pill: 'bg-violet-500/15 text-violet-700 dark:text-violet-300 ring-violet-500/30', ring: 'ring-violet-500/50', hex: '#8b5cf6' },
-  missing: { label: 'No photo', short: 'No photo', dot: 'bg-rose-500', pill: 'bg-rose-500/15 text-rose-700 dark:text-rose-300 ring-rose-500/30', ring: 'ring-rose-500/50', hex: '#f43f5e' },
+  placeholder: { label: 'No photo', short: 'No photo', dot: 'bg-rose-500', pill: 'bg-rose-500/15 text-rose-700 dark:text-rose-300 ring-rose-500/30', ring: 'ring-rose-500/50', hex: '#f43f5e', solid: 'bg-rose-600 text-white border-rose-600' },
+  stock: { label: 'Stock image', short: 'Stock', dot: 'bg-violet-500', pill: 'bg-violet-500/15 text-violet-700 dark:text-violet-300 ring-violet-500/30', ring: 'ring-violet-500/50', hex: '#8b5cf6', solid: 'bg-violet-600 text-white border-violet-600' },
+  missing: { label: 'No photo', short: 'No photo', dot: 'bg-rose-500', pill: 'bg-rose-500/15 text-rose-700 dark:text-rose-300 ring-rose-500/30', ring: 'ring-rose-500/50', hex: '#f43f5e', solid: 'bg-rose-600 text-white border-rose-600' },
   // A real photo, but out of focus / smeared / low-resolution — its own count, not "without a real photo".
-  blurry: { label: 'Blurry photo', short: 'Blurry', dot: 'bg-amber-500', pill: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/30', ring: 'ring-amber-500/50', hex: '#f59e0b' },
-  review: { label: 'Needs review', short: 'Review', dot: 'bg-sky-500', pill: 'bg-sky-500/15 text-sky-700 dark:text-sky-300 ring-sky-500/30', ring: 'ring-sky-500/50', hex: '#0ea5e9' },
+  blurry: { label: 'Blurry photo', short: 'Blurry', dot: 'bg-amber-500', pill: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/30', ring: 'ring-amber-500/50', hex: '#f59e0b', solid: 'bg-amber-500 text-black border-amber-500' },
+  review: { label: 'Needs review', short: 'Review', dot: 'bg-sky-500', pill: 'bg-sky-500/15 text-sky-700 dark:text-sky-300 ring-sky-500/30', ring: 'ring-sky-500/50', hex: '#0ea5e9', solid: 'bg-sky-600 text-white border-sky-600' },
 }
 
 const errMsg = (e: any, fallback: string) => e?.data?.message || e?.data?.statusMessage || e?.statusMessage || e?.message || fallback
@@ -296,9 +300,17 @@ export function useInventoryScanner() {
     running.value = false
   }
 
-  async function review(body: { listings?: { key: string, ad: boolean | null }[], vehicles?: { key: string, verdict: FinalVerdict | null }[], clusters?: { id: string, verdict: FinalVerdict | null }[], countStockAsMissing?: boolean, reapplyRules?: boolean }) {
+  async function review(body: { listings?: { key: string, ad: boolean | null }[], vehicles?: { key: string, verdict: FinalVerdict | null }[], clusters?: { id: string, verdict: FinalVerdict | null }[], countStockAsMissing?: boolean, reapplyRules?: boolean, /** Put every choice a person made back to the scanner's own call. */ reset?: boolean }) {
     if (!results.value) return
     results.value = await $fetch<ScanResults>(`/api/scanner/scans/${results.value.scanId}/review`, { method: 'POST', body })
+  }
+  /** Download and judge every photo of this crawl again (no new crawl). Takes about a minute. */
+  async function recheck() {
+    if (!results.value) return null
+    const r = await $fetch<ScanResults & { recheck: { before: { withoutReal: number }, after: { withoutReal: number }, seconds: number } }>(`/api/scanner/scans/${results.value.scanId}/recheck`, { method: 'POST', timeout: 780_000 })
+    results.value = r
+    if (scan.value) scan.value = { ...scan.value, status: scan.value.status === 'saved' ? 'done' : scan.value.status, auditId: null }
+    return r.recheck
   }
   async function save() {
     if (!results.value) throw new Error('Nothing to save')
@@ -308,7 +320,7 @@ export function useInventoryScanner() {
     return r
   }
   const listRules = () => $fetch<{ rules: ImageRule[] }>('/api/scanner/rules')
-  const addRule = (body: { hash?: string, hash2?: string, urlContains?: string, verdict: FinalVerdict, label?: string, thumb?: string }) => $fetch<{ rule: ImageRule }>('/api/scanner/rules', { method: 'POST', body })
+  const addRule = (body: { hash?: string, hash2?: string, scanId?: string, imageId?: string, urlContains?: string, verdict: FinalVerdict, label?: string, thumb?: string }) => $fetch<{ rule: ImageRule }>('/api/scanner/rules', { method: 'POST', body })
   const removeRule = (id: string) => $fetch(`/api/scanner/rules/${id}`, { method: 'DELETE' })
 
   function reset() {
@@ -318,5 +330,5 @@ export function useInventoryScanner() {
   }
 
   onBeforeUnmount(dispose)
-  return { preview, previewing, previewError, scan, progress, results, log, frame, error, running, status, loadPreview, loadLatest, refresh, run, stop, dispose, reset, review, save, listRules, addRule, removeRule }
+  return { preview, previewing, previewError, scan, progress, results, log, frame, error, running, status, loadPreview, loadLatest, refresh, run, stop, dispose, reset, review, recheck, save, listRules, addRule, removeRule }
 }

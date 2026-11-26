@@ -41,6 +41,8 @@ export interface ImageInfo {
   hash?: string
   /** 256-bit detail hash of the picture's centre (edges / dealer banners ignored). */
   hash2?: string
+  /** "The very same picture?" fingerprint (base64, 304 bytes: 16×16 grey + 4×4 colour) — see `samePictureFp`. */
+  fp?: string
   whiteRatio?: number
   grayRatio?: number
   colorfulness?: number
@@ -88,6 +90,8 @@ export interface ScanVehicle {
   adReason?: string | null
   /** A person's call: 'ad' (leave out) or 'vehicle' (count it) — beats the automatic one. */
   listing?: 'ad' | 'vehicle' | null
+  /** Set when the picture is a car placed on a generic background that many other listings share (see `buildBackdrops`). */
+  backdropId?: string | null
 }
 /** Is this card an advertisement (not part of the inventory)? A person's call wins. */
 export const isAd = (v: ScanVehicle) => v.listing ? v.listing === 'ad' : !!v.adReason
@@ -106,7 +110,9 @@ export function adSignal(v: ScanVehicle): string | null {
   if (!v.year && !v.price) return 'No year, price, VIN or stock # — looks like a banner, not a vehicle'
   return null
 }
-export interface ImageCluster { id: string, imageIds: string[], hash: string, hash2?: string, vehicles: number, models: number, modelNames: string[], thumb: string, url: string, verdict: PhotoVerdict, reason: string, override: Exclude<PhotoVerdict, 'review'> | null }
+export interface ImageCluster { id: string, imageIds: string[], hash: string, hash2?: string, vehicles: number, models: number, modelNames: string[], thumb: string, url: string, verdict: PhotoVerdict, reason: string, override: Exclude<PhotoVerdict, 'review'> | null
+  /** True when the pictures are the very same file (one address, or matching fingerprints). False = an older scan, matched by the coarse hashes only. */
+  exact?: boolean }
 
 export const RULES_COLLECTION = 'turboCleanScannerImageRules'
 
@@ -146,28 +152,73 @@ export function hamming(a?: string, b?: string) {
   }
   return d
 }
-/** Same picture even if resized/re-encoded. */
-export const SAME_IMAGE_DISTANCE = 5
-/** Detail-hash distance (of 256 bits) below which two pictures are the same photo. Different cars in the same frame are ~80–130 apart. */
-export const SAME_DETAIL_DISTANCE = 40
 /**
- * Same picture? The coarse 64-bit hash must match AND — when both images have one — the 256-bit
- * detail hash of the centre too. The coarse hash alone confuses different cars shot in the same
- * spot with the same dealer banner (e.g. HomeNet frames), which made real photos look like placeholders.
+ * THE SAME PICTURE — what that means here.
+ *
+ * A repeated picture is evidence ("a real photo belongs to one car"), so a wrong match is costly: at a
+ * dealership that photographs every car at the same spot, the old coarse hashes (9×8 / 17×16 difference
+ * hashes) called different cars "the same picture", chained them into one group of 148 and turned a lot
+ * full of real photos into "no photo". They were also unstable: the same file at another size often did
+ * not match itself.
+ *
+ * Now two pictures are the same only when their fingerprints (`fp`, made in the analysis tab) agree almost
+ * pixel for pixel: overall difference ≤ 1%, no 4×4 block off by more than 1.3%, colours within 1%.
+ * Measured: the same file re-saved (other size / quality) stays under 0.4% / 0.7%; different cars at one
+ * fixed spot, same colour and body style, start at 1.7% in their worst block; ordinary different photos
+ * are 5–10× further apart. Groups are built around one picture (no chaining).
  */
-export function samePicture(a: { hash?: string, hash2?: string } | undefined, b: { hash?: string, hash2?: string } | undefined) {
-  if (!a?.hash || !b?.hash) return false
+const FP_BYTES = 304
+const fpCache = new Map<string, Uint8Array | null>()
+function fpBytes(fp?: string): Uint8Array | null {
+  if (!fp || fp.length < 400) return null
+  let b = fpCache.get(fp)
+  if (b === undefined) {
+    try { const raw = Buffer.from(fp, 'base64'); b = raw.length === FP_BYTES ? new Uint8Array(raw) : null } catch { b = null }
+    if (fpCache.size > 6000) fpCache.clear()
+    fpCache.set(fp, b)
+  }
+  return b
+}
+const FP_ALL = 0.010 * 256 * 255, FP_BLOCK = 0.013 * 16 * 255, FP_COLOUR = 0.010 * 48 * 255
+function sameFpBytes(a: Uint8Array, b: Uint8Array) {
+  let sum = 0
+  const blocks = new Float64Array(16)
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) { const d = Math.abs(a[y * 16 + x]! - b[y * 16 + x]!); sum += d; blocks[(y >> 2) * 4 + (x >> 2)]! += d }
+    if (sum > FP_ALL) return false
+  }
+  for (let k = 0; k < 16; k++) if (blocks[k]! > FP_BLOCK) return false
+  let col = 0
+  for (let i = 256; i < FP_BYTES; i++) col += Math.abs(a[i]! - b[i]!)
+  return col <= FP_COLOUR
+}
+/** The very same picture, by fingerprint (false when either has none). */
+export function samePictureFp(a?: string, b?: string) {
+  const x = fpBytes(a), y = fpBytes(b)
+  return !!x && !!y && sameFpBytes(x, y)
+}
+/** A fingerprint of a (nearly) flat picture — blanks and spacers are judged on their own, never grouped. */
+function flatFp(b: Uint8Array) { let lo = 255, hi = 0; for (let i = 0; i < 256; i++) { if (b[i]! < lo) lo = b[i]!; if (b[i]! > hi) hi = b[i]! } return hi - lo < 10 }
+
+/** Older scans and rules carry only the coarse hashes: they count as the same picture only when nearly identical. */
+export const SAME_IMAGE_DISTANCE = 2
+export const SAME_DETAIL_DISTANCE = 12
+export function samePicture(a: { hash?: string, hash2?: string, fp?: string } | undefined, b: { hash?: string, hash2?: string, fp?: string } | undefined) {
+  if (!a || !b) return false
+  if (a.fp && b.fp) return samePictureFp(a.fp, b.fp)
+  if (!a.hash || !b.hash) return false
   if (hamming(a.hash, b.hash) > SAME_IMAGE_DISTANCE) return false
   if (a.hash2 && b.hash2 && a.hash2.length === b.hash2.length) return hamming(a.hash2, b.hash2) <= SAME_DETAIL_DISTANCE
-  return true
+  // No detail hash on one side (very old data): only an identical coarse hash counts.
+  return a.hash === b.hash
 }
 
-export interface ImageRule { id: string, hash: string, hash2?: string, urlContains: string, verdict: Exclude<PhotoVerdict, 'review'>, label: string, thumb: string, hits: number, createdAt: string, createdBy: { id: string, name: string } | null }
+export interface ImageRule { id: string, hash: string, hash2?: string, fp?: string, urlContains: string, verdict: Exclude<PhotoVerdict, 'review'>, label: string, thumb: string, hits: number, createdAt: string, createdBy: { id: string, name: string } | null }
 export async function listRules(db: Db): Promise<ImageRule[]> {
   const rows = await db.collection(RULES_COLLECTION).find({}).sort({ createdAt: -1 }).limit(500).toArray()
   return rows.map(({ _id, ...r }) => ({ id: _id.toString(), ...r } as any))
 }
-export async function saveRule(db: Db, body: { hash?: string, hash2?: string, urlContains?: string, verdict: string, label?: string, thumb?: string }, actor: SessionActor | null) {
+export async function saveRule(db: Db, body: { hash?: string, hash2?: string, fp?: string, urlContains?: string, verdict: string, label?: string, thumb?: string }, actor: SessionActor | null) {
   const verdict = (['real', 'placeholder', 'stock', 'missing'].includes(body.verdict) ? body.verdict : null) as ImageRule['verdict'] | null
   if (!verdict) throw createError({ statusCode: 400, statusMessage: 'Pick what this image is' })
   const hash = /^[0-9a-f]{16}$/i.test(String(body.hash || '')) ? String(body.hash).toLowerCase() : ''
@@ -176,7 +227,8 @@ export async function saveRule(db: Db, body: { hash?: string, hash2?: string, ur
   if (!hash && !urlContains) throw createError({ statusCode: 400, statusMessage: 'A rule needs an image or a piece of the image address' })
   const col = db.collection(RULES_COLLECTION)
   const existing = hash ? await col.findOne(hash2 ? { hash, hash2 } : { hash, hash2: { $in: ['', null] } }) : await col.findOne({ urlContains })
-  const doc = { hash, hash2, urlContains, verdict, label: String(body.label || '').slice(0, 120) || (verdict === 'real' ? 'Real photo' : verdict === 'stock' ? 'Stock image' : 'Placeholder image'), thumb: /^https?:\/\//i.test(String(body.thumb || '')) ? String(body.thumb).slice(0, 2000) : '', updatedAt: new Date().toISOString() }
+  const fp = hash && fpBytes(String(body.fp || '')) ? String(body.fp) : ''
+  const doc = { hash, hash2, ...(fp ? { fp } : {}), urlContains, verdict, label: String(body.label || '').slice(0, 120) || (verdict === 'real' ? 'Real photo' : verdict === 'stock' ? 'Stock image' : 'Placeholder image'), thumb: /^https?:\/\//i.test(String(body.thumb || '')) ? String(body.thumb).slice(0, 2000) : '', updatedAt: new Date().toISOString() }
   if (existing) { await col.updateOne({ _id: existing._id }, { $set: doc }); return { id: existing._id.toString(), ...existing, ...doc } }
   const res = await col.insertOne({ ...doc, hits: 0, createdAt: doc.updatedAt, createdBy: actor ? { id: actor.id, name: actor.name } : null })
   return { id: res.insertedId.toString(), ...doc, hits: 0 }
@@ -189,37 +241,163 @@ export async function deleteRule(db: Db, id: string) {
 const modelKey = (v: ScanVehicle) => `${v.make} ${v.model}`.trim().toLowerCase() || v.title.toLowerCase().replace(/\b(new|used|certified|pre-owned)\b/g, '').replace(/\b(19|20)\d{2}\b/, '').trim().split(/\s+/).slice(0, 2).join(' ')
 const short = (s: string, n = 48) => s.length > n ? `${s.slice(0, n - 1)}…` : s
 
-/** Group images that are the same picture (exact URL or perceptual-hash match). */
+/** Group images that are the very same picture (one address, or matching fingerprints — see `samePictureFp`). */
 export function buildClusters(vehicles: ScanVehicle[], images: Map<string, ImageInfo>): ImageCluster[] {
   const ids = [...images.keys()]
-  const parent = new Map(ids.map(id => [id, id]))
-  const find = (x: string): string => { let r = x; while (parent.get(r) !== r) r = parent.get(r)!; parent.set(x, r); return r }
-  // Spacers and flat blanks all hash alike — they are judged on their own, not grouped.
-  const bits = (h: string) => [...h].reduce((n, c) => n + Number.parseInt(c, 16).toString(2).replace(/0/g, '').length, 0)
-  const hashed = ids.filter((id) => {
-    const i = images.get(id)
-    if (!i?.hash || (i.w || 0) < 80 || (i.h || 0) < 60) return false
-    const b = bits(i.hash)
-    return b >= 4 && b <= 60
-  })
-  for (let i = 0; i < hashed.length; i++) {
-    for (let j = i + 1; j < hashed.length; j++) {
-      const a = images.get(hashed[i]!)!, b = images.get(hashed[j]!)!
-      if (samePicture(a, b)) parent.set(find(hashed[i]!), find(hashed[j]!))
+  // Each group is built around ONE picture: an image joins the first group whose picture it matches.
+  // (No chaining — "A looks like B, B looks like C" must never put A and C in one group.)
+  const groups: { rep: ImageInfo, bytes: Uint8Array | null, ids: string[], exact: boolean }[] = []
+  const grouped = new Set<string>()
+  for (const id of ids) {
+    const i = images.get(id)!
+    if ((i.w || 0) < 80 || (i.h || 0) < 60) continue
+    const bytes = fpBytes(i.fp)
+    if (bytes) {
+      // Spacers and flat blanks all look alike — they are judged on their own, not grouped.
+      if (flatFp(bytes)) continue
+      const g = groups.find(g => g.bytes && sameFpBytes(g.bytes, bytes))
+      if (g) g.ids.push(id)
+      else groups.push({ rep: i, bytes, ids: [id], exact: true })
+      grouped.add(id)
+    }
+    else if (i.hash) {
+      // An older scan (no fingerprint): the coarse hashes, nearly identical only.
+      const bits = [...i.hash].reduce((n, c) => n + Number.parseInt(c, 16).toString(2).replace(/0/g, '').length, 0)
+      if (bits < 4 || bits > 60) continue
+      const g = groups.find(g => !g.bytes && samePicture(g.rep, i))
+      if (g) g.ids.push(id)
+      else groups.push({ rep: i, bytes: null, ids: [id], exact: false })
+      grouped.add(id)
     }
   }
-  const groups = new Map<string, string[]>()
-  for (const id of ids) { const r = find(id); groups.set(r, [...(groups.get(r) || []), id]) }
+  // One address on several listings is the same picture too, measured or not.
+  for (const id of ids) if (!grouped.has(id)) groups.push({ rep: images.get(id)!, bytes: null, ids: [id], exact: true })
   const clusters: ImageCluster[] = []
   let n = 0
-  for (const imgIds of groups.values()) {
+  for (const g of groups) {
+    const imgIds = g.ids
     const vs = vehicles.filter(v => v.imageId && imgIds.includes(v.imageId))
     if (vs.length < 2) continue
     const models = [...new Set(vs.map(modelKey).filter(Boolean))]
-    const first = images.get(imgIds[0]!)!
-    clusters.push({ id: `c${++n}`, imageIds: imgIds, hash: first.hash || '', hash2: first.hash2 || '', vehicles: vs.length, models: models.length, modelNames: [...new Set(vs.map(v => `${v.make} ${v.model}`.trim() || modelKey(v)))].slice(0, 6), thumb: first.url, url: first.url, verdict: 'review', reason: '', override: null })
+    const first = g.rep
+    clusters.push({ id: `c${++n}`, imageIds: imgIds, hash: first.hash || '', hash2: first.hash2 || '', vehicles: vs.length, models: models.length, modelNames: [...new Set(vs.map(v => `${v.make} ${v.model}`.trim() || modelKey(v)))].slice(0, 6), thumb: first.url, url: first.url, verdict: 'review', reason: '', override: null, exact: g.exact })
   }
   return clusters.sort((a, b) => b.vehicles - a.vehicles)
+}
+
+/**
+ * ONE BACKGROUND, MANY CARS — stock images placed on a generic backdrop.
+ *
+ * Many dealer websites show new cars as a rendered car pasted onto one stock background (the brand's
+ * showroom under a blue sky, sometimes inside the dealer's own banner frame). Every picture is different
+ * (another car in the middle), so it is not a "repeated picture" — and it is not a photo of the car
+ * either. What gives it away: everything around the car is the same, cell for cell, on listing after
+ * listing. Real photos never do that — not even at a fixed spot (the light, the clouds, the cars behind
+ * and the framing change): measured on a real crawl, two real photos of one lot share 4% of their cells
+ * (13% at the 95th percentile), two of these composites 71%.
+ *
+ * A group needs: ≥ 4 pictures that share ≥ 60% of their 256 cells within 3 grey levels AND ≥ 50% of their
+ * detailed cells (cells on an edge — flat sky or asphalt proves nothing; on the same real crawl two real
+ * photos never shared more than 28% of those, two composites 65%); a common area
+ * (cells ≥ 80% of the group agrees on) of at least a quarter of the frame; and that area must be detailed
+ * scenery (≥ 30% of its cells sit on an edge) — a plain studio wall or a photo booth is not a "backdrop".
+ * A picture that matches a group's common area on ≥ 80% of it joins the group.
+ */
+const BACKDROP_T = 3
+/** The detailed cells of a fingerprint: those that differ from a neighbour by 10+ grey levels. */
+function detailedCells(a: Uint8Array) {
+  const on = new Uint8Array(256)
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const c = y * 16 + x, v = a[c]!
+    if ((x < 15 && Math.abs(v - a[c + 1]!) >= 10) || (x > 0 && Math.abs(v - a[c - 1]!) >= 10) || (y < 15 && Math.abs(v - a[c + 16]!) >= 10) || (y > 0 && Math.abs(v - a[c - 16]!) >= 10)) on[c] = 1
+  }
+  return on
+}
+/** How much of picture `a` is also in `b`, cell for cell: of all cells, and of a's detailed cells. */
+function sharedCells(a: Uint8Array, detailed: Uint8Array, b: Uint8Array) {
+  let all = 0, d = 0, dAll = 0
+  for (let i = 0; i < 256; i++) {
+    const same = Math.abs(a[i]! - b[i]!) <= BACKDROP_T
+    if (same) all++
+    if (detailed[i]) { dAll++; if (same) d++ }
+  }
+  return { share: all / 256, detailShare: dAll >= 40 ? d / dAll : 0 }
+}
+export function buildBackdrops(images: Map<string, ImageInfo>): Map<string, string> {
+  const of = new Map<string, string>()
+  const list: { id: string, b: Uint8Array }[] = []
+  for (const [id, i] of images) { const b = i.ok ? fpBytes(i.fp) : null; if (b && !flatFp(b) && (i.w || 0) >= 200 && (i.h || 0) >= 140) list.push({ id, b }) }
+  if (list.length < 4) return of
+  const groups: { rep: Uint8Array, detailed: Uint8Array, members: { id: string, b: Uint8Array }[] }[] = []
+  for (const x of list) {
+    const g = groups.find((g) => { const r = sharedCells(g.rep, g.detailed, x.b); return r.share >= 0.6 && r.detailShare >= 0.5 })
+    if (g) g.members.push(x)
+    else groups.push({ rep: x.b, detailed: detailedCells(x.b), members: [x] })
+  }
+  const taken = new Set<string>()
+  const backdrops: { id: string, common: Uint8Array, mask: number[] }[] = []
+  let n = 0
+  for (const g of groups) {
+    if (g.members.length < 4) continue
+    // The common area: cells nearly every member agrees on (the car in the middle is what differs).
+    const common = new Uint8Array(256), on = new Uint8Array(256), mask: number[] = []
+    for (let c = 0; c < 256; c++) {
+      const vals = g.members.map(m => m.b[c]!).sort((a, b) => a - b)
+      const med = vals[vals.length >> 1]!
+      common[c] = med
+      if (vals.filter(v => Math.abs(v - med) <= BACKDROP_T).length / vals.length >= 0.8) { on[c] = 1; mask.push(c) }
+    }
+    if (mask.length < 64) continue
+    // Detailed scenery, not a plain wall: how many of its cells sit on an edge.
+    let edges = 0
+    for (const c of mask) {
+      const x = c % 16, y = c >> 4
+      const d = Math.max(x < 15 && on[c + 1] ? Math.abs(common[c]! - common[c + 1]!) : 0, y < 15 && on[c + 16] ? Math.abs(common[c]! - common[c + 16]!) : 0)
+      if (d >= 10) edges++
+    }
+    if (edges / mask.length < 0.3) continue
+    const id = `b${++n}`
+    backdrops.push({ id, common, mask })
+    for (const m of g.members) { of.set(m.id, id); taken.add(m.id) }
+  }
+  // Two groups on the very same backdrop (their first pictures were too different to meet) are one group.
+  const same = new Map<string, string>()
+  for (let i = 0; i < backdrops.length; i++) {
+    for (let j = 0; j < i; j++) {
+      const A = backdrops[i]!, B = backdrops[j]!
+      const inB = new Set(B.mask)
+      const both = A.mask.filter(c => inB.has(c))
+      if (both.length >= 48 && both.filter(c => Math.abs(A.common[c]! - B.common[c]!) <= BACKDROP_T).length / both.length >= 0.9) { same.set(A.id, same.get(B.id) || B.id); break }
+    }
+  }
+  if (same.size) for (const [img, id] of of) if (same.has(id)) of.set(img, same.get(id)!)
+  // Pictures that did not match the group's first picture closely (a bigger car hides more) but do sit on its backdrop.
+  for (const x of list) {
+    if (taken.has(x.id)) continue
+    for (const bd of backdrops) {
+      let ok = 0
+      for (const c of bd.mask) if (Math.abs(x.b[c]! - bd.common[c]!) <= BACKDROP_T + 1) ok++
+      if (ok / bd.mask.length >= 0.8) { of.set(x.id, same.get(bd.id) || bd.id); break }
+    }
+  }
+  return of
+}
+/** A car on a plain, smooth, colourless studio background (the outer ring of the picture is featureless)? */
+function plainStudio(i?: ImageInfo): boolean {
+  const b = i?.ok ? fpBytes(i.fp) : null
+  if (!b) return false
+  let n = 0, sum = 0, rough = 0, pairs = 0
+  const ring = (x: number, y: number) => x < 2 || x > 13 || y < 2 || y > 13
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    if (!ring(x, y)) continue
+    const v = b[y * 16 + x]!; n++; sum += v
+    if (x < 15 && ring(x + 1, y)) { rough += Math.abs(v - b[y * 16 + x + 1]!); pairs++ }
+    if (y < 15 && ring(x, y + 1)) { rough += Math.abs(v - b[(y + 1) * 16 + x]!); pairs++ }
+  }
+  if (sum / n < 150 || rough / pairs > 2.5) return false
+  // colourless corners
+  for (const c of [0, 3, 12, 15]) { const o = 256 + c * 3; if (Math.max(b[o]!, b[o + 1]!, b[o + 2]!) - Math.min(b[o]!, b[o + 1]!, b[o + 2]!) > 14) return false }
+  return true
 }
 
 /**
@@ -263,6 +441,10 @@ export function classify(vehicles: ScanVehicle[], images: Map<string, ImageInfo>
   const clusters = buildClusters(vehicles, images)
   const clusterOf = new Map<string, ImageCluster>()
   for (const c of clusters) for (const id of c.imageIds) clusterOf.set(id, c)
+  // Stock images on one generic backdrop: how many listings stand on each.
+  const backdropOf = buildBackdrops(images)
+  const onBackdrop = new Map<string, number>()
+  for (const v of vehicles) { const b = v.imageId ? backdropOf.get(v.imageId) : undefined; if (b) onBackdrop.set(b, (onBackdrop.get(b) || 0) + 1) }
   const ruleHits = new Map<string, number>()
   /** Called blurry by the measurement alone (no AI, no person) — re-checked as a group below. */
   const measured: ScanVehicle[] = []
@@ -275,6 +457,9 @@ export function classify(vehicles: ScanVehicle[], images: Map<string, ImageInfo>
     const info = v.imageId ? images.get(v.imageId) : undefined
     const cluster = v.imageId ? clusterOf.get(v.imageId) : undefined
     v.clusterId = cluster?.id || null
+    const backdrop = v.imageId ? backdropOf.get(v.imageId) : undefined
+    const backdropCars = backdrop ? onBackdrop.get(backdrop) || 0 : 0
+    v.backdropId = backdrop && backdropCars >= 4 ? backdrop : null
     v.reasons = []
     // Advertisement / promo tile in the grid? The AI's call (it sees picture + card) first, else the built-in check.
     const aiAd = info?.ok && typeof info.ai?.ad === 'boolean' ? info.ai : null
@@ -301,8 +486,10 @@ export function classify(vehicles: ScanVehicle[], images: Map<string, ImageInfo>
     const ai = info?.ok ? info.ai : undefined
     // The very same picture on several listings (exact match on both fingerprints) is never "this car's" photo,
     // whatever it shows — so a "real" from the AI does not override a reliable duplicate.
-    const reliableDup = !!cluster && (!!info?.hash2 || (cluster.vehicles >= 3 && cluster.models >= 2))
-    if (ai && ai.c >= 0.75 && !(ai.v === 'real' && reliableDup)) {
+    // (an older scan's group, matched by the coarse hashes only, is not that reliable: there the AI's "real" stands)
+    const reliableDup = !!cluster && cluster.exact !== false
+    // Neither does it override a shared backdrop: a rendered car on a stock background can look like a photo taken at the dealership.
+    if (ai && ai.c >= 0.75 && !(ai.v === 'real' && (reliableDup || v.backdropId))) {
       const aiWhy = `AI check: ${ai.v === 'real' ? 'a real photo of the car' : ai.v === 'stock' ? 'a stock / studio image' : 'not a photo of the car'}${ai.why ? ` — ${short(ai.why, 60)}` : ''}${ai.text ? ` (reads “${short(ai.text, 40)}”)` : ''}`
       decide(ai.v, Math.round(Math.max(0.75, ai.c) * 100) / 100, [aiWhy])
       continue
@@ -331,10 +518,15 @@ export function classify(vehicles: ScanVehicle[], images: Map<string, ImageInfo>
       if ((info.borderWhite || 0) >= 0.9 && (info.whiteRatio || 0) >= 0.35 && (info.colorfulness || 0) >= 14 && !P.length) S.push([0.5, 'Car on a plain white background — looks like a studio / stock render'])
     }
     else if (info && !info.ok) R.push([0.5, `Couldn’t download the photo to check it (${info.error})`])
+    if (v.backdropId) S.push([0.93, `The same background stands behind ${backdropCars} different cars — a stock image placed on a generic backdrop, not a photo of this car`])
+    // A plain studio background alone proves nothing (a photo booth looks like that too): it asks for a look.
+    else if (!P.length && !S.length && plainStudio(info)) S.push([0.45, 'Car on a plain studio background — may be a stock render'])
     if (cluster) {
-      if (cluster.vehicles >= 3 && cluster.models >= 2) P.push([0.9, `The same picture is used on ${cluster.vehicles} different vehicles`])
-      else if (cluster.models <= 1) S.push([cluster.vehicles >= 3 ? 0.85 : 0.75, `The same photo is used on ${cluster.vehicles} different ${short(cluster.modelNames[0] || 'vehicles', 30)}${cluster.modelNames[0] ? 's' : ''} — a real photo belongs to one car`])
-      else P.push([0.7, `The same picture is used on ${cluster.vehicles} vehicles`])
+      // (a group from an older scan — coarse hashes only — is a hint, not proof: it asks for a look instead of deciding)
+      const sure = cluster.exact === false ? 0.5 : 1
+      if (cluster.vehicles >= 3 && cluster.models >= 2) P.push([0.9 * sure, `The same picture is used on ${cluster.vehicles} different vehicles`])
+      else if (cluster.models <= 1) S.push([(cluster.vehicles >= 3 ? 0.85 : 0.75) * sure, `The same photo is used on ${cluster.vehicles} different ${short(cluster.modelNames[0] || 'vehicles', 30)}${cluster.modelNames[0] ? 's' : ''} — a real photo belongs to one car`])
+      else P.push([0.7 * sure, `The same picture is used on ${cluster.vehicles} vehicles`])
     }
 
     const p = combine(P.map(x => x[0])), s = combine(S.map(x => x[0]))
@@ -368,7 +560,7 @@ export function classify(vehicles: ScanVehicle[], images: Map<string, ImageInfo>
     c.verdict = (top?.[0] || 'review') as PhotoVerdict
     c.reason = vs[0]?.reasons.find(r => /same (picture|photo)/i.test(r)) || vs[0]?.reasons[0] || ''
   }
-  return { clusters, ruleHits, softSite }
+  return { clusters, ruleHits, softSite, backdrops: [...onBackdrop.entries()].filter(([, n]) => n >= 4).map(([id, n]) => ({ id, vehicles: n })) }
 }
 
 /** The verdict that counts: a person's override, else the scanner's decision (best guess for "review"). */

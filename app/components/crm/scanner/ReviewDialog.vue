@@ -54,7 +54,7 @@ function close() {
       <DialogHeader class="px-5 pt-4 pb-3 border-b">
         <DialogTitle class="text-base flex items-center gap-2"><ScanSearch class="size-4 text-red-600" /> Crawl results{{ dealershipName ? ` · ${dealershipName}` : '' }}</DialogTitle>
         <DialogDescription class="text-xs flex flex-wrap items-center gap-2">
-          <span>{{ auditedAt ? `Audit of ${format(new Date(auditedAt), 'MMM d, yyyy h:mm a')} — ` : '' }}fix any photo the crawler got wrong; teach it with rules so the next crawl gets it right.</span>
+          <span>{{ auditedAt ? `Audit of ${format(new Date(auditedAt), 'MMM d, yyyy h:mm a')} — ` : '' }}press the right button on any car the scanner got wrong, then save.</span>
           <span v-if="auditId" class="ml-auto flex items-center gap-2">
             <Button v-if="canEmail" size="sm" class="h-7 gap-1.5 text-xs" :disabled="dirty" :title="dirty ? 'Save the corrections first — the email uses the saved numbers' : 'Email this audit to the dealer'" @click="emit('email')"><Mail class="size-3.5" /> Email this audit</Button>
             <Button as="a" :href="`/api/crm/audits/${auditId}/report?format=pdf&download=1`" size="sm" variant="outline" class="h-7 gap-1.5 text-xs"><FileDown class="size-3.5" /> Report PDF</Button>
@@ -63,13 +63,13 @@ function close() {
       </DialogHeader>
       <div v-if="dirty" class="shrink-0 flex flex-wrap items-center gap-3 px-5 py-2.5 bg-amber-500/10 border-b border-amber-500/20 text-sm">
         <Pencil class="size-4 text-amber-600" />
-        <span>Changed — now <b class="tabular-nums">{{ r!.summary.withoutReal }}</b> of {{ r!.summary.total }} without a real photo ({{ r!.summary.withoutRealPct ?? 0 }}%). Save to update the audit, report and emails.</span>
+        <span><b>Not saved yet</b> — now <b class="tabular-nums">{{ r!.summary.withoutReal }}</b> of {{ r!.summary.total }} without a real photo ({{ r!.summary.withoutRealPct ?? 0 }}%). The audit, report and emails keep the old numbers until you save.</span>
         <Button size="sm" class="ml-auto h-8 gap-1.5" :disabled="saving" @click="save"><Loader2 v-if="saving" class="size-3.5 animate-spin" /><Check v-else class="size-3.5" /> Save corrections</Button>
       </div>
       <div class="flex-1 min-h-0">
         <div v-if="loading" class="h-full flex items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 class="size-4 animate-spin" /> Loading the crawl…</div>
         <div v-else-if="failed" class="h-full flex items-center justify-center text-sm text-muted-foreground">{{ failed }}</div>
-        <CrmScannerResults v-else-if="r" :results="r" :review="sc.review" :list-rules="sc.listRules" :add-rule="sc.addRule" :remove-rule="sc.removeRule" />
+        <CrmScannerResults v-else-if="r" :results="r" :review="sc.review" :recheck="sc.recheck" :list-rules="sc.listRules" :add-rule="sc.addRule" :remove-rule="sc.removeRule" />
       </div>
     </DialogContent>
   </Dialog>

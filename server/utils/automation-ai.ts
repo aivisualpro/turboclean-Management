@@ -246,7 +246,7 @@ const isOverload = (e: any) => /^Gemini is (overloaded|rate limit)/.test(String(
 
 // ───────────────────────── Vision (Gemini) ─────────────────────────
 /** Gemini key present → photo checks can use vision. */
-export const visionConfigured = () => !!geminiKey() && String(process.env.SCANNER_AI || '').toLowerCase() !== 'off'
+export const visionConfigured = () => !!geminiKey()
 /** The vision model: SCANNER_VISION_MODEL, else GEMINI_MODEL, else the default flash model. */
 export const visionModel = () => process.env.SCANNER_VISION_MODEL || process.env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL
 let thinkingParam: 'level' | 'none' = 'level'

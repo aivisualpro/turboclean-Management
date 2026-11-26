@@ -678,7 +678,7 @@ const crawlLabel = computed(() => chosen.value.length ? `Crawl ${chosen.value.le
           <!-- Results -->
           <div v-if="phase === 'ready' && tab === 'results' && results" class="absolute inset-0 flex flex-col bg-background">
             <div class="flex-1 min-h-0">
-              <CrmScannerResults :results="results" :review="sc.review" :list-rules="sc.listRules" :add-rule="sc.addRule" :remove-rule="sc.removeRule" />
+              <CrmScannerResults :results="results" :review="sc.review" :recheck="sc.recheck" :list-rules="sc.listRules" :add-rule="sc.addRule" :remove-rule="sc.removeRule" />
             </div>
             <footer class="shrink-0 border-t bg-card px-3 py-2 flex flex-wrap items-center gap-3">
               <div class="flex items-center gap-3 text-xs text-muted-foreground min-w-0">

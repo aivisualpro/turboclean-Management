@@ -493,7 +493,7 @@ export const HOTSPOTS_JS = (maxHeight: number) => `(() => {
 
 /**
  * Runs in a blank analysis tab: decodes downloaded images and measures them.
- * dHash (64-bit perceptual hash, for spotting the same picture on many cars), white/grey share,
+ * A 304-byte fingerprint (`fp`, for spotting the very same picture on many cars), dHash (kept for older rules), white/grey share,
  * colourfulness, edge density, white border (studio renders), sharpness (blurry photos) and optional OCR.
  * Nothing is kept: the review screen shows the dealer's own image URL.
  */
@@ -502,6 +502,36 @@ export const ANALYZE_FN_JS = `async (items) => {
   var detector = null
   try { if (hasOcr) detector = new TextDetector() } catch (e) { detector = null }
   function b64ToBytes(b64) { var bin = atob(b64); var u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u }
+  // "The very same picture?" fingerprint: a 16x16 grey copy + a 4x4 colour copy (304 bytes), made through a
+  // smooth 64px step so the same file re-saved at another size or quality gives (almost) the same bytes.
+  // Another photo — even a similar car at the same spot — does not.
+  function fingerprintOf(bmp) {
+    var mid = new OffscreenCanvas(64, 64), mx = mid.getContext('2d', { willReadFrequently: true })
+    mx.imageSmoothingEnabled = true; mx.imageSmoothingQuality = 'high'
+    // (a large photo is brought down in steps — one big jump skips pixels and makes the copy noisy)
+    var src = bmp, sw = bmp.width, sh = bmp.height
+    while (sw > 256 || sh > 256) {
+      var nw = Math.max(64, Math.round(sw / 2)), nh = Math.max(64, Math.round(sh / 2))
+      var st = new OffscreenCanvas(nw, nh), sx = st.getContext('2d'); sx.imageSmoothingEnabled = true; sx.imageSmoothingQuality = 'high'
+      sx.drawImage(src, 0, 0, nw, nh); src = st; sw = nw; sh = nh
+    }
+    mx.drawImage(src, 0, 0, 64, 64)
+    var d = mx.getImageData(0, 0, 64, 64).data, out = new Uint8Array(304)
+    for (var gy = 0; gy < 16; gy++) for (var gx = 0; gx < 16; gx++) {
+      var s = 0
+      for (var yy = 0; yy < 4; yy++) for (var xx = 0; xx < 4; xx++) { var k = ((gy * 4 + yy) * 64 + gx * 4 + xx) * 4; s += 0.299 * d[k] + 0.587 * d[k + 1] + 0.114 * d[k + 2] }
+      out[gy * 16 + gx] = Math.round(s / 16)
+    }
+    for (var cy = 0; cy < 4; cy++) for (var cx2 = 0; cx2 < 4; cx2++) {
+      var r = 0, g = 0, b = 0
+      for (var y2 = 0; y2 < 16; y2++) for (var x2 = 0; x2 < 16; x2++) { var k2 = ((cy * 16 + y2) * 64 + cx2 * 16 + x2) * 4; r += d[k2]; g += d[k2 + 1]; b += d[k2 + 2] }
+      var o = 256 + (cy * 4 + cx2) * 3
+      out[o] = Math.round(r / 256); out[o + 1] = Math.round(g / 256); out[o + 2] = Math.round(b / 256)
+    }
+    var bin = ''
+    for (var z = 0; z < out.length; z++) bin += String.fromCharCode(out[z])
+    return btoa(bin)
+  }
   // Sharpness, independent of contrast and size. "blur": how little a small extra blur changes the picture (a sharp
   // photo loses most of its fine detail, a blurry one barely changes); "detail": fine detail left in the busiest parts.
   function sharpnessOf(bmp) {
@@ -614,7 +644,9 @@ export const ANALYZE_FN_JS = `async (items) => {
       if (detector) { try { var found = await detector.detect(bmp); text = found.map(function (f) { return f.rawValue }).join(' ').slice(0, 300) } catch (e) {} }
       var sharp = null
       try { sharp = sharpnessOf(bmp) } catch (e) { sharp = null }
-      out.push({ id: it.id, ok: true, w: bmp.width, h: bmp.height, blur: sharp ? sharp.blur : undefined, detail: sharp ? sharp.detail : undefined, hash: hash, hash2: hash2, thumb: thumb || undefined, whiteRatio: white / (W * H), grayRatio: gray / (W * H), colorfulness: Math.round(colorfulness * 10) / 10, edgeDensity: edges / ((W - 2) * (H - 2)), borderWhite: border ? borderWhite / border : 0, uniqueColors: Object.keys(q).length, text: text, ocr: !!detector })
+      var fp = ''
+      try { fp = fingerprintOf(bmp) } catch (e) { fp = '' }
+      out.push({ id: it.id, ok: true, w: bmp.width, h: bmp.height, blur: sharp ? sharp.blur : undefined, detail: sharp ? sharp.detail : undefined, fp: fp || undefined, hash: hash, hash2: hash2, thumb: thumb || undefined, whiteRatio: white / (W * H), grayRatio: gray / (W * H), colorfulness: Math.round(colorfulness * 10) / 10, edgeDensity: edges / ((W - 2) * (H - 2)), borderWhite: border ? borderWhite / border : 0, uniqueColors: Object.keys(q).length, text: text, ocr: !!detector })
       bmp.close && bmp.close()
     } catch (e) { out.push({ id: it.id, ok: false, error: String(e && e.message || e) }) }
   }

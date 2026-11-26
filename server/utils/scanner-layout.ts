@@ -83,7 +83,6 @@ export interface LearnedLayout { layout: CardLayout, result: any, model: string 
  * or no answer that reads the page better than the built-in rules).
  */
 export async function learnLayout(db: Db | null, url: string, evalJs: <T = any>(expression: string, timeoutMs?: number) => Promise<T>, log: (s: string) => void, before: Cardish[] = []): Promise<LearnedLayout | null> {
-  if (String(process.env.SCANNER_AI || '').toLowerCase() === 'off') return null
   const { aiConfigured, askClaudeJson } = await import('./automation-ai')
   if (!aiConfigured()) return null
   const sample = await evalJs<any>(LAYOUT_SAMPLE_JS, 20_000).catch(() => null)

@@ -139,6 +139,8 @@ watch(focusedScanId, async (id) => {
   try { await rv.refresh(id) } catch { toast.error('Could not load the crawl results') } finally { rvLoading.value = false }
 }, { immediate: true })
 const rvDirty = computed(() => !!rv.results.value && !rv.results.value.savedAuditId)
+/** The numbers in the dealer's header: the open review's own (so both always agree), else the saved ones. */
+const focusedSummary = computed<any>(() => (showResults.value && rv.results.value && focusedScanId.value && rv.results.value.scanId === focusedScanId.value ? rv.results.value.summary : null) || focused.value?.summary || null)
 async function saveCorrections() {
   if (!rv.results.value || !focused.value) return
   rvSaving.value = true
@@ -438,10 +440,10 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
                   <div class="flex flex-wrap items-center gap-3">
                     <component :is="STATUS[focused.status]!.icon" class="size-5" :class="STATUS[focused.status]!.cls" />
                     <div class="min-w-0 flex-1"><p class="font-semibold">{{ focused.name }}</p><p class="text-[11px] text-zinc-500">{{ STATUS[focused.status]!.label }}{{ focused.finishedAt ? ` · ${ago(focused.finishedAt)}` : '' }}{{ focused.error ? ` · ${focused.error}` : '' }}</p></div>
-                    <div v-if="focused.summary" class="flex gap-5 font-mono text-sm">
-                      <div><p class="text-[10px] uppercase tracking-wider text-zinc-500">Vehicles</p><p class="text-xl font-bold tabular-nums">{{ focused.summary.total }}</p></div>
-                      <div><p class="text-[10px] uppercase tracking-wider text-zinc-500">No real photo</p><p class="text-xl font-bold tabular-nums text-rose-400">{{ focused.summary.withoutReal }} <span class="text-sm">({{ focused.summary.withoutRealPct ?? 0 }}%)</span></p></div>
-                      <div v-if="focused.summary.by"><p class="text-[10px] uppercase tracking-wider text-zinc-500">Breakdown</p><p class="text-xs tabular-nums text-zinc-300 mt-1">{{ focused.summary.by.placeholder || 0 }} placeholder · {{ focused.summary.by.missing || 0 }} no image · {{ focused.summary.by.stock || 0 }} stock<template v-if="focused.summary.by.blurry"> · {{ focused.summary.by.blurry }} blurry</template></p></div>
+                    <div v-if="focusedSummary" class="flex gap-5 font-mono text-sm">
+                      <div><p class="text-[10px] uppercase tracking-wider text-zinc-500">Vehicles</p><p class="text-xl font-bold tabular-nums">{{ focusedSummary.total }}</p></div>
+                      <div><p class="text-[10px] uppercase tracking-wider text-zinc-500">No real photo<span v-if="rvDirty && showResults" class="ml-1 normal-case tracking-normal text-amber-300">· not saved</span></p><p class="text-xl font-bold tabular-nums text-rose-400">{{ focusedSummary.withoutReal }} <span class="text-sm">({{ focusedSummary.withoutRealPct ?? 0 }}%)</span></p></div>
+                      <div v-if="focusedSummary.by"><p class="text-[10px] uppercase tracking-wider text-zinc-500">Breakdown</p><p class="text-xs tabular-nums text-zinc-300 mt-1">{{ (focusedSummary.by.placeholder || 0) + (focusedSummary.by.missing || 0) }} no photo · {{ focusedSummary.by.stock || 0 }} stock<template v-if="focusedSummary.by.blurry"> · {{ focusedSummary.by.blurry }} blurry</template></p></div>
                     </div>
                     <div class="flex gap-1.5">
                       <Button v-if="focused.status === 'failed' || focused.status === 'cancelled' || focused.status === 'skipped'" size="sm" variant="outline" class="h-7 gap-1.5 text-xs bg-transparent border-white/15 text-zinc-100 hover:bg-white/10" :disabled="!focused.urls.length" @click="retry(focused)"><RotateCcw class="size-3.5" /> Retry</Button>
@@ -455,12 +457,12 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
                 <div v-if="focusedScanId && showResults" class="mb-3 rounded-2xl border border-white/10 overflow-hidden flex flex-col">
                   <div v-if="rvDirty" class="shrink-0 flex flex-wrap items-center gap-3 px-4 py-2.5 bg-amber-500/10 border-b border-amber-500/20 text-sm text-amber-100">
                     <Pencil class="size-4 text-amber-300" />
-                    <span>You changed some verdicts — now <b class="tabular-nums">{{ rv.results.value!.summary.withoutReal }}</b> of {{ rv.results.value!.summary.total }} without a real photo ({{ rv.results.value!.summary.withoutRealPct ?? 0 }}%). Save to update the audit, report and emails.</span>
+                    <span><b>Not saved yet</b> — now <b class="tabular-nums">{{ rv.results.value!.summary.withoutReal }}</b> of {{ rv.results.value!.summary.total }} without a real photo ({{ rv.results.value!.summary.withoutRealPct ?? 0 }}%). The audit, report and emails keep the old numbers until you save.</span>
                     <Button size="sm" class="ml-auto h-8 gap-1.5 bg-emerald-500 hover:bg-emerald-400 text-black font-semibold" :disabled="rvSaving" @click="saveCorrections"><Loader2 v-if="rvSaving" class="size-3.5 animate-spin" /><Check v-else class="size-3.5" /> Save corrections</Button>
                   </div>
                   <div class="dark h-[72vh] min-h-[520px] bg-background text-foreground">
                     <div v-if="rvLoading || !rv.results.value" class="h-full flex items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 class="size-4 animate-spin" /> Loading {{ focused?.name }}'s results…</div>
-                    <CrmScannerResults v-else :results="rv.results.value" :review="rv.review" :list-rules="rv.listRules" :add-rule="rv.addRule" :remove-rule="rv.removeRule" />
+                    <CrmScannerResults v-else :results="rv.results.value" :review="rv.review" :recheck="rv.recheck" :list-rules="rv.listRules" :add-rule="rv.addRule" :remove-rule="rv.removeRule" />
                   </div>
                 </div>
 

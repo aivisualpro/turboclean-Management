@@ -22,25 +22,31 @@ import type { ImageInfo, ScanVehicle } from './scanner-images'
 export const VISION_CACHE = 'turboCleanScannerVisionCache'
 export interface VisionVerdict { v: 'real' | 'placeholder' | 'stock', c: number, why: string, text: string, model: string, ad?: boolean, adWhy?: string, cached?: boolean, /** A real photo that is out of focus / smeared. */ blur?: boolean }
 
-const SYSTEM = `You audit vehicle listings on US car-dealer websites for a reconditioning / photo company. Each item is one card from the dealer's inventory grid: the main image plus what the card says. For each item decide two things.
+const SYSTEM = `You audit vehicle listings on US car-dealer websites for a company that sells dealerships real photography of their inventory. Each item is one card from the dealer's inventory grid: the main image plus what the card says. The question behind every item: did the dealer photograph THIS vehicle, or is the listing still waiting for real photos? Decide three things.
 
 1. "ad" — is this card an advertisement / promo tile rather than a vehicle for sale? Dealers mix banners into the grid: "Get pre-approved", "Value your trade", "Shop online", specials, lease offers, financing, service coupons, "Sell us your car", dealer awards, "Can't find what you want?", "Schedule a test drive" tiles, brand / model-line promos without a specific vehicle. A real listing is ONE specific vehicle: usually a year + make + model and some of: price, stock #, VIN, mileage, a link to its detail page. When in doubt and the card has a VIN or stock #, it is NOT an ad.
 
 2. "v" — what the image is (for ads still answer, it is ignored):
-- "real": an actual photograph of the specific vehicle (on the lot, in a showroom, outdoors, in a photo booth / turntable). Dealer banners, frames, borders, logos, price stickers or watermarks over a real photo still count as real.
-- "placeholder": NOT a photo of the car — "photos coming soon" / "image not available" / "more photos soon" graphics, grey or white car silhouettes or outline drawings (even with a brand logo or the model name), dealer logo or storefront only, blank / solid colour, a generic illustration.
-- "stock": manufacturer or stock-library imagery — a studio render or press photo of the model on a plain white / grey / gradient background, CGI, a colour-swatch render, the car with no real surroundings (often a different colour or trim than the listing).
+- "real": a photograph the dealer took of this specific vehicle. Signs: the dealer's lot, service lane, showroom or photo booth around it; other inventory, light poles, kerbs, buildings behind it; a dealer plate insert or plate frame; a window sticker, stock tag or hang tag; ordinary daylight, reflections of the surroundings in the paint, imperfect framing. Dealer banners, frames, borders, logos, price stickers or watermarks over a real photo still count as real.
+- "stock": NOT a photo of this vehicle — manufacturer or stock-library imagery standing in for it:
+  · a studio render or press shot on a plain white / grey / gradient background (often a soft shadow or a turntable ring under the car, flawless even lighting, no surroundings);
+  · a rendered car placed on a generic background — a brand showroom or dealership façade under a perfect sky, an empty lot — especially when the note says the same background is behind many other listings;
+  · a manufacturer press photo: a scenic or staged location (coast, mountain road, city street, desert, studio set), cinematic light, motion blur, no dealer context, a blank or brand-name plate, often another colour or trim than the listing;
+  · a brochure-style interior shot used as the main image (spotless, studio-lit, no wear, no dealer tags).
+  A used car from years ago shown in a flawless brochure picture is stock.
+- "placeholder": not a picture of a car at all — "photos coming soon" / "image not available" graphics, grey or white car silhouettes or outline drawings (even with a brand logo or the model name), a dealer logo or storefront only, blank / solid colour, a generic illustration.
 
 3. "blur" — only for "real": true when the photograph itself is clearly out of focus, motion-blurred, smeared, or a tiny picture blown up, so the vehicle's details cannot be made out. false for a normally sharp photo. A soft background, reflections, rain, a night shot, a dealer banner or ordinary image compression are NOT blur.
 
-Be decisive and precise. "c" = confidence 0–1 in "v". "t" = text readable on the image (max 60 chars, "" if none). "why" ≤ 8 words. "adWhy" ≤ 8 words, only when ad is true.`
+Use the note after each card when there is one: it states facts measured across the whole inventory (for example how many other listings show the very same background). Be decisive and precise. "c" = confidence 0–1 in "v" (use ≥ 0.85 only when the signs are clear; 0.5–0.7 when it could be either). "t" = text readable on the image (max 60 chars, "" if none). "why" ≤ 8 words. "adWhy" ≤ 8 words, only when ad is true.`
 
 type Provider = 'anthropic' | 'gemini'
-const switchedOff = () => String(process.env.SCANNER_AI || '').toLowerCase() === 'off'
+// The AI photo check is part of the scanner: it runs whenever an AI key is on the server. (An old
+// SCANNER_AI=off setting used to switch it off silently and left every verdict to the built-in checks —
+// it is no longer read.)
 async function pickProvider(): Promise<Provider | null> {
   const ai = await import('./automation-ai')
   const forced = String(process.env.SCANNER_VISION_PROVIDER || '').toLowerCase()
-  if (switchedOff()) return null
   if ((forced === 'anthropic' || forced === 'claude') && ai.claudeVisionConfigured()) return 'anthropic'
   if (forced === 'gemini' && ai.visionConfigured()) return 'gemini'
   if (ai.claudeVisionConfigured()) return 'anthropic'
@@ -56,7 +62,6 @@ export async function photoCheckStatus(): Promise<{ on: boolean, provider: Provi
   const ai = await import('./automation-ai')
   const provider = await pickProvider()
   if (provider) return { on: true, provider, label: provider === 'anthropic' ? `Claude (${ai.claudeVisionModels()[0]})` : `Gemini (${ai.visionModel()})`, reason: '', fix: '' }
-  if (switchedOff()) return { on: false, provider: null, label: 'Off', reason: 'The AI photo check is switched off on this server (the setting SCANNER_AI is "off").', fix: 'Remove SCANNER_AI from the server environment (Vercel → Settings → Environment Variables), then redeploy.' }
   return { on: false, provider: null, label: 'Off', reason: 'The AI photo check has no AI key on this server.', fix: 'Add ANTHROPIC_API_KEY (Claude) or GOOGLE_GEMINI_API_KEY to the server environment (Vercel → Settings → Environment Variables), then redeploy.' }
 }
 
@@ -102,18 +107,18 @@ function cardLine(v: ScanVehicle | undefined) {
  * Give every image with a thumbnail an `ai` verdict (photo kind + ad or not). Returns counts.
  * `deadline` (epoch ms) bounds the whole step; whatever isn't answered keeps the built-in verdict.
  */
-export async function visionCheck(db: Db | null, images: ImageInfo[], vehicles: ScanVehicle[], o: { log: (s: string) => void, deadline: number, onProgress?: (done: number, total: number) => void }) {
+export async function visionCheck(db: Db | null, images: ImageInfo[], vehicles: ScanVehicle[], o: { log: (s: string) => void, deadline: number, onProgress?: (done: number, total: number) => void, /** Facts measured across the inventory, per image id — shown to the AI next to the card. */ notes?: Map<string, string> }) {
   const ai = await import('./automation-ai')
   const provider = await pickProvider()
   const todo = images.filter(i => i.ok && !i.ai && ((i as any).thumb || cacheKey(i)))
-  const state = (extra: { checked: number, cached: number, failed: number }) => ({ ...extra, provider, off: provider ? '' : (switchedOff() ? 'switched-off' : 'no-key') })
+  const state = (extra: { checked: number, cached: number, failed: number }) => ({ ...extra, provider, off: provider ? '' : 'no-key' })
   if (!todo.length) return state({ checked: 0, cached: 0, failed: 0 })
   const cache = await readCache(db, todo, provider)
   let cached = 0
   for (const i of todo) { const hit = cache.get(cacheKey(i)); if (hit) { i.ai = hit; cached++ } }
   const ask = todo.filter(i => !i.ai && (i as any).thumb)
   if (!ask.length || !provider) {
-    if (ask.length) o.log(switchedOff() ? 'AI photo check is switched off on this server (SCANNER_AI=off) — photos are judged by the built-in checks only' : 'AI photo check is off (no ANTHROPIC_API_KEY or GOOGLE_GEMINI_API_KEY on this server) — photos are judged by the built-in checks only')
+    if (ask.length) o.log('AI photo check is off (no ANTHROPIC_API_KEY or GOOGLE_GEMINI_API_KEY on this server) — photos are judged by the built-in checks only')
     else if (cached) o.log(`AI photo check: all ${cached} photos already known — no AI call needed`)
     return state({ checked: 0, cached, failed: ask.length && !provider ? ask.length : 0 })
   }
@@ -135,7 +140,7 @@ export async function visionCheck(db: Db | null, images: ImageInfo[], vehicles: 
         const req = {
           system: SYSTEM,
           prompt: `There are ${batch.length} items, labelled "Item 1" to "Item ${batch.length}", each followed by its image. Answer ONLY with JSON: {"items":[{"i":1,"ad":false,"adWhy":"","v":"real|placeholder|stock","blur":false,"c":0.95,"t":"","why":""}, …]} — one entry per item, in order.`,
-          images: batch.map((im, k) => ({ label: `Item ${k + 1} — ${cardLine(byImage.get(im.id))}`, mime: 'image/jpeg', b64: (im as any).thumb as string })),
+          images: batch.map((im, k) => ({ label: `Item ${k + 1} — ${cardLine(byImage.get(im.id))}${o.notes?.get(im.id) ? ` · note: ${o.notes.get(im.id)}` : ''}`, mime: 'image/jpeg', b64: (im as any).thumb as string })),
           maxTokens: provider === 'anthropic' ? 6000 + 150 * batch.length : 150 * batch.length + 400,
           timeoutMs: Math.min(provider === 'anthropic' ? 120_000 : 45_000, left - 2_000),
           purpose: 'scanner-photos',
@@ -172,4 +177,10 @@ export async function teachVision(db: Db, img: ImageInfo, verdict: 'real' | 'pla
   const v = verdict ? (verdict === 'missing' ? 'placeholder' : verdict === 'blurry' ? 'real' : verdict) : (prev?.v || 'real')
   const blur = verdict === 'blurry' ? true : verdict === 'real' ? false : (verdict ? undefined : prev?.blur)
   await writeCache(db, img, { v, c: 1, why: 'Corrected by you', text: prev?.text || '', model: 'you', ad: typeof ad === 'boolean' ? ad : prev?.ad, adWhy: ad ? 'Marked as an ad by you' : '', blur }, 'you')
+}
+
+/** A person took a correction back: the remembered answer for those pictures goes too (the scanner judges them itself again). */
+export async function forgetTeaching(db: Db, imgs: ImageInfo[]) {
+  const ids = [...new Set(imgs.map(cacheKey).filter(Boolean))].map(k => docId(k, 'you'))
+  if (ids.length) await db.collection(VISION_CACHE).deleteMany({ _id: { $in: ids } as any }).catch(() => {})
 }
