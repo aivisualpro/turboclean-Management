@@ -141,9 +141,10 @@ table.data-grid .grid-th.is-resizing .grid-th__resizer::after { top: 0; bottom: 
 
 /* ── Body ── one line per row; anything longer is cut with "…" (hover shows the full text) */
 table.data-grid > tbody > tr > td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Spacer column: takes whatever width is left when the columns are narrower than the view */
+/* Spacer: takes whatever width is left when the columns are narrower than the view (a wide screen, zoomed out).
+   No line between the last column and the spacer, so the spare width reads as the end of the last column — never as an empty extra column. */
 table.data-grid > :is(thead, tbody) > tr > .grid-filler { padding: 0; border-right: 0; }
-table.data-grid:not(.data-grid--fills) > :is(thead, tbody) > tr > .is-last { border-right: 0; }
+table.data-grid > :is(thead, tbody) > tr > .is-last { border-right: 0; }
 
 /* ── Frozen columns ── */
 table.data-grid--pin > :is(thead, tbody) > tr > .is-pinned { position: sticky; }

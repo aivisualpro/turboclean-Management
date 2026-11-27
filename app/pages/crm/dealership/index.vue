@@ -40,10 +40,11 @@ onMounted(() => { if (!dealerships.value.length && (loadError.value || !lastFetc
 
 // ─── Column model — one value per column ───
 type ColKey = 'dealershipId' | 'name' | 'dealerGroup' | 'route' | 'brands' | 'stage' | 'inStage' | 'leadSource' | 'city' | 'state' | 'zip' | 'phone' | 'website' | 'scanPages'
-  | 'territory' | 'lastTouch' | 'nextAction' | 'primaryContact' | 'primaryTitle' | 'primaryEmail' | 'contacts' | 'owner' | 'lastAudit' | 'missingPhotos' | 'inventory' | 'added' | 'updated'
+  | 'territory' | 'lastTouch' | 'nextAction' | 'primaryContact' | 'primaryTitle' | 'primaryEmail' | 'contacts' | 'owner' | 'lastAudit' | 'missingPhotos' | 'inventory' | 'added' | 'updated' | 'notes'
 /** `width` is the starting width; everyone can then drag, hide, reorder and freeze columns for themselves. */
 const COLUMNS: GridColumnDef<ColKey>[] = [
   { key: 'name', label: 'Dealership', sortable: true, width: 240, minWidth: 140, required: true, pinned: true },
+  { key: 'dealershipId', label: 'ID', sortable: true, width: 104, minWidth: 80, hidden: true },
   { key: 'dealerGroup', label: 'Dealer group', sortable: true, width: 170 },
   { key: 'route', label: 'Route', sortable: true, width: 96, minWidth: 76 },
   { key: 'brands', label: 'Brands', width: 170 },
@@ -69,6 +70,7 @@ const COLUMNS: GridColumnDef<ColKey>[] = [
   { key: 'lastAudit', label: 'Last audit', sortable: true, width: 156 },
   { key: 'added', label: 'Added', sortable: true, width: 124 },
   { key: 'updated', label: 'Updated', sortable: true, width: 148 },
+  { key: 'notes', label: 'Notes', width: 280, hidden: true },
 ]
 // Each person arranges the table for themselves: drag a header to move it, drag its edge to resize,
 // "Columns" to show / hide / freeze. Saved in the browser and in their account (see useGridLayout).
@@ -83,6 +85,18 @@ const grid = useGridLayout<ColKey>('crm-dealerships', COLUMNS, {
 })
 const shownColumns = grid.columns
 const columnsOpen = ref(false)
+// Quick edit draws this same table (same columns, same header, same layout). While it is open the layout works on
+// its table and scroller, so resizing, moving, freezing and "fit to content" behave exactly as they do on the list.
+let quickEditTable: HTMLElement | null = null
+let quickEditScroller: HTMLElement | null = null
+function bindQuickEditTable(el: HTMLElement | null) {
+  if (el) { quickEditTable = el; gridTable.value = el }
+  else { if (gridTable.value === quickEditTable) gridTable.value = null; quickEditTable = null }
+}
+function bindQuickEditScroller(el: HTMLElement | null) {
+  if (el) { quickEditScroller = el; scroller.value = el }
+  else { if (scroller.value === quickEditScroller) scroller.value = null; quickEditScroller = null }
+}
 /** Attributes every body cell of a column shares (frozen position, last-column edge). */
 const cellBind = computed(() => {
   const out = {} as Record<ColKey, Record<string, unknown>>
@@ -306,7 +320,7 @@ const sortValue = (d: CrmDealership, k: ColKey): string | number => ({
   dealershipId: d.dealershipId, name: d.name, dealerGroup: d.dealerGroup, brands: (d.brands || []).join(', '), stage: DEALERSHIP_STAGES.indexOf(d.stage as any), inStage: stageAgeMs(d), lastTouch: d.interactionSummary?.last?.occurredAt || '', nextAction: d.interactionSummary?.nextAction?.date || (d.interactionSummary?.nextAction ? '9999-12-30' : '9999-12-31'),
   leadSource: d.leadSource, city: d.city, state: d.state, zip: d.zip, phone: d.phone, website: d.website, territory: d.territory, route: d.route || '', scanPages: scanPageCount(d),
   primaryContact: d.contactSummary?.primary?.fullName || '', primaryTitle: d.contactSummary?.primary?.jobTitle || '', primaryEmail: d.contactSummary?.primary?.email || '',
-  contacts: d.contactSummary?.active || 0, owner: d.assignedUserName, added: d.createdAt, updated: d.updatedAt,
+  contacts: d.contactSummary?.active || 0, owner: d.assignedUserName, added: d.createdAt, updated: d.updatedAt, notes: d.notes || '',
   lastAudit: d.auditSummary?.latest?.auditedAt || '', missingPhotos: d.auditSummary?.latest?.missingPhotoPct ?? -1, inventory: d.auditSummary?.latest?.totalVehicles ?? -1,
 })[k] ?? ''
 
@@ -567,6 +581,8 @@ watch(showBatch, (v) => { if (!v) loadBatches() })
 // ─── Quick edit (spreadsheet mode) ───
 const gridMode = ref(route.query.edit === '1')
 const gridRef = ref<{ dirty: boolean } | null>(null)
+/** What the read-only cells of quick edit need to show the same thing as the list. */
+const cellHelpers = { stageAgeMs, isStalled, needsVerification, scanPageCount, scanPageIssue }
 function toggleGrid() {
   if (gridMode.value && gridRef.value?.dirty && !confirm('You have unsaved changes in quick edit. Leave and lose them?')) return
   gridMode.value = !gridMode.value
@@ -584,7 +600,7 @@ const isTyping = (e: KeyboardEvent) => ['INPUT', 'TEXTAREA', 'SELECT'].includes(
 onKeyStroke('/', (e) => { if (!isTyping(e)) { e.preventDefault(); (searchEl.value?.$el ?? searchEl.value)?.focus?.() } })
 onKeyStroke('n', (e) => { if (!isTyping(e) && canAdd.value && !showForm.value) { e.preventDefault(); showForm.value = true } })
 onKeyStroke('d', (e) => { if (!isTyping(e) && canAdd.value && !showForm.value && !showDiscover.value) { e.preventDefault(); showDiscover.value = true } })
-onKeyStroke('c', (e) => { if (!isTyping(e) && !gridMode.value && !showForm.value && !showDiscover.value && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); columnsOpen.value = !columnsOpen.value } })
+onKeyStroke('c', (e) => { if (!isTyping(e) && !showForm.value && !showDiscover.value && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); columnsOpen.value = !columnsOpen.value } })
 onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
 </script>
 
@@ -678,7 +694,7 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
             </div>
           </PopoverContent>
         </Popover>
-        <GridColumnManager v-if="!gridMode" v-model:open="columnsOpen" :grid="grid" />
+        <GridColumnManager v-model:open="columnsOpen" :grid="grid" />
         <Button
           v-if="canEdit" :variant="gridMode ? 'default' : 'outline'" size="sm" class="h-8 gap-1.5" :class="!gridMode && 'border-emerald-500/50 text-emerald-700 hover:bg-emerald-500/10 hover:text-emerald-700 dark:text-emerald-400'"
           title="Quick edit — edit the list like a spreadsheet (E)" @click="toggleGrid"
@@ -800,7 +816,11 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
     <div class="crm-grid-box flex-1 min-h-0 flex flex-col overflow-hidden rounded-lg border-2 border-primary bg-background">
     <div v-if="gridMode" class="relative flex-1 min-h-0">
       <ClientOnly>
-        <CrmDealershipGrid ref="gridRef" :rows="filtered" :users="users" :can-edit="canEdit" :can-add="canAdd" :layout="grid" @close="toggleGrid" @saved="onGridSaved" />
+        <CrmDealershipGrid
+          ref="gridRef" :rows="filtered" :users="users" :can-edit="canEdit" :can-add="canAdd"
+          :layout="grid" :sort-key="sortKey" :sort-dir="sortDir" :helpers="cellHelpers" :bind-table="bindQuickEditTable" :bind-scroller="bindQuickEditScroller"
+          @close="toggleGrid" @saved="onGridSaved" @sort="(k: string, dir?: 'asc' | 'desc') => sortBy(k as ColKey, dir)" @manage="columnsOpen = true"
+        />
       </ClientOnly>
     </div>
     <div v-else ref="scroller" class="flex-1 min-h-0 overflow-auto">
@@ -868,6 +888,8 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
               <td v-if="c.key === 'name'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
                 <span class="font-semibold text-foreground group-hover:text-primary transition-colors">{{ d.name }}</span>
               </td>
+              <td v-else-if="c.key === 'dealershipId'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap font-mono text-[11px] text-muted-foreground" :class="rowPad">{{ d.dealershipId }}</td>
+              <td v-else-if="c.key === 'notes'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad"><template v-if="d.notes">{{ d.notes }}</template><span v-else class="text-muted-foreground/50">—</span></td>
               <td v-else-if="c.key === 'dealerGroup'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad"><span v-if="d.dealerGroup">{{ d.dealerGroup }}</span><span v-else class="text-muted-foreground/50">—</span></td>
               <td v-else-if="c.key === 'brands'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
                 <div v-if="d.brands?.length" class="flex items-center gap-1"><Badge v-for="b in d.brands" :key="b" variant="secondary" class="h-[18px] text-[10px] px-1.5 py-0 font-medium">{{ b }}</Badge></div>
