@@ -1,5 +1,7 @@
 export interface NavLink {
   title: string
+  /** Shorter label for the bottom navbar on phones and tablets. */
+  short?: string
   link: string
   icon?: string
   new?: boolean

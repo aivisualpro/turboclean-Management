@@ -228,7 +228,7 @@ const showLog = ref(true)
         <form class="flex-1 overflow-y-auto px-6 py-5 space-y-6" @submit.prevent="save">
           <section class="space-y-3">
             <h4 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sending</h4>
-            <div class="grid grid-cols-3 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div class="space-y-1.5"><Label for="as-limit">Emails per day</Label><Input id="as-limit" v-model="form.dailySendLimit" type="number" min="0" max="500" /></div>
               <div class="space-y-1.5"><Label for="as-start">From</Label><Input id="as-start" v-model="form.sendStart" type="time" /></div>
               <div class="space-y-1.5"><Label for="as-end">Until</Label><Input id="as-end" v-model="form.sendEnd" type="time" /></div>

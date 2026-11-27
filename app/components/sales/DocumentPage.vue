@@ -599,7 +599,7 @@ const previewHtml = computed(() => {
           </div>
 
           <!-- Metadata -->
-          <div class="grid grid-cols-3 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div class="rounded-lg border p-3 space-y-0.5">
               <p class="text-[10px] text-muted-foreground uppercase tracking-wider">
                 Date

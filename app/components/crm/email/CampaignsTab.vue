@@ -91,7 +91,7 @@ async function toggleArchive(c: EmailCampaign) { try { await saveCampaign(c.id, 
         <DialogHeader><DialogTitle>{{ editing ? 'Edit campaign' : 'New campaign' }}</DialogTitle><DialogDescription class="text-xs">Group emails you want to measure together.</DialogDescription></DialogHeader>
         <div class="space-y-4">
           <div class="space-y-1.5"><Label>Name</Label><Input v-model="form.name" placeholder="Q4 — Texas franchise stores" /></div>
-          <div class="grid grid-cols-3 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div class="space-y-1.5"><Label>Status</Label>
               <Select v-model="form.status"><SelectTrigger class="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem v-for="s in ['planned', 'active', 'paused', 'completed']" :key="s" :value="s" class="capitalize">{{ s }}</SelectItem></SelectContent></Select>
             </div>

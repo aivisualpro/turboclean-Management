@@ -40,7 +40,7 @@ onMounted(() => { if (!dealerships.value.length && (loadError.value || !lastFetc
 
 // ─── Column model — one value per column ───
 type ColKey = 'dealershipId' | 'name' | 'dealerGroup' | 'route' | 'brands' | 'stage' | 'inStage' | 'leadSource' | 'city' | 'state' | 'zip' | 'phone' | 'website' | 'scanPages'
-  | 'territory' | 'lastTouch' | 'nextAction' | 'primaryContact' | 'primaryTitle' | 'primaryEmail' | 'contacts' | 'owner' | 'lastAudit' | 'missingPhotos' | 'inventory' | 'added' | 'updated' | 'notes'
+  | 'territory' | 'lastTouch' | 'nextAction' | 'primaryContact' | 'primaryTitle' | 'primaryEmail' | 'contacts' | 'owner' | 'lastAudit' | 'missingPhotos' | 'inventory' | 'added' | 'updated' | 'notes' | 'primaryPhone'
 /** `width` is the starting width; everyone can then drag, hide, reorder and freeze columns for themselves. */
 const COLUMNS: GridColumnDef<ColKey>[] = [
   { key: 'name', label: 'Dealership', sortable: true, width: 240, minWidth: 140, required: true, pinned: true },
@@ -63,6 +63,7 @@ const COLUMNS: GridColumnDef<ColKey>[] = [
   { key: 'primaryContact', label: 'Primary contact', sortable: true, width: 200 },
   { key: 'primaryTitle', label: 'Contact title', width: 170 },
   { key: 'primaryEmail', label: 'Contact email', width: 220 },
+  { key: 'primaryPhone', label: 'Contact phone', width: 150, minWidth: 80, hidden: true },
   { key: 'contacts', label: 'Contacts', sortable: true, width: 116, minWidth: 72, align: 'right' },
   { key: 'owner', label: 'Owner', sortable: true, width: 150 },
   { key: 'missingPhotos', label: 'Missing photos', sortable: true, width: 164, minWidth: 80, align: 'right' },
@@ -319,7 +320,7 @@ const QUICK: { key: typeof quick.value, label: string, tone?: string }[] = [
 const sortValue = (d: CrmDealership, k: ColKey): string | number => ({
   dealershipId: d.dealershipId, name: d.name, dealerGroup: d.dealerGroup, brands: (d.brands || []).join(', '), stage: DEALERSHIP_STAGES.indexOf(d.stage as any), inStage: stageAgeMs(d), lastTouch: d.interactionSummary?.last?.occurredAt || '', nextAction: d.interactionSummary?.nextAction?.date || (d.interactionSummary?.nextAction ? '9999-12-30' : '9999-12-31'),
   leadSource: d.leadSource, city: d.city, state: d.state, zip: d.zip, phone: d.phone, website: d.website, territory: d.territory, route: d.route || '', scanPages: scanPageCount(d),
-  primaryContact: d.contactSummary?.primary?.fullName || '', primaryTitle: d.contactSummary?.primary?.jobTitle || '', primaryEmail: d.contactSummary?.primary?.email || '',
+  primaryContact: d.contactSummary?.primary?.fullName || '', primaryTitle: d.contactSummary?.primary?.jobTitle || '', primaryEmail: d.contactSummary?.primary?.email || '', primaryPhone: d.contactSummary?.primary?.phone || d.contactSummary?.primary?.mobile || '',
   contacts: d.contactSummary?.active || 0, owner: d.assignedUserName, added: d.createdAt, updated: d.updatedAt, notes: d.notes || '',
   lastAudit: d.auditSummary?.latest?.auditedAt || '', missingPhotos: d.auditSummary?.latest?.missingPhotoPct ?? -1, inventory: d.auditSummary?.latest?.totalVehicles ?? -1,
 })[k] ?? ''
@@ -963,6 +964,10 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
               <td v-else-if="c.key === 'primaryTitle'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap text-muted-foreground" :class="rowPad">{{ d.contactSummary?.primary ? (d.contactSummary.primary.jobTitle || d.contactSummary.primary.role) : '—' }}</td>
               <td v-else-if="c.key === 'primaryEmail'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap" :class="rowPad">
                 <a v-if="d.contactSummary?.primary?.email" :href="`mailto:${d.contactSummary.primary.email}`" class="hover:text-primary hover:underline underline-offset-2" @click.stop>{{ d.contactSummary.primary.email }}</a>
+                <span v-else class="text-muted-foreground/50">—</span>
+              </td>
+              <td v-else-if="c.key === 'primaryPhone'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap tabular-nums" :class="rowPad">
+                <a v-if="d.contactSummary?.primary?.phone || d.contactSummary?.primary?.mobile" :href="`tel:${d.contactSummary.primary.phone || d.contactSummary.primary.mobile}`" class="hover:text-primary hover:underline underline-offset-2" @click.stop>{{ d.contactSummary.primary.phone || d.contactSummary.primary.mobile }}</a>
                 <span v-else class="text-muted-foreground/50">—</span>
               </td>
               <td v-else-if="c.key === 'contacts'" v-bind="cellBind[c.key]" class="px-3 border-b border-border/60 whitespace-nowrap text-right tabular-nums" :class="rowPad">

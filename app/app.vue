@@ -11,7 +11,8 @@ const { theme } = useAppSettings()
 useHead({
   meta: [
     { charset: 'utf-8' },
-    { name: 'viewport', content: 'width=device-width, initial-scale=1' },
+    // viewport-fit=cover: lets the layout reach under notches / the home indicator (the shell adds the safe-area gaps itself)
+    { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
     { key: 'theme-color', name: 'theme-color', content: color },
   ],
   link: [

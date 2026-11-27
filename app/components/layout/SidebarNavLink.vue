@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import type { SidebarMenuButtonVariants } from '~/components/ui/sidebar'
 import type { NavLink } from '~/types/nav'
+import { Star } from 'lucide-vue-next'
 import { useSidebar } from '~/components/ui/sidebar'
 
 withDefaults(defineProps<{
   item: NavLink
   size?: SidebarMenuButtonVariants['size']
+  /** Shows a star that adds this page to the bottom navbar (phones and tablets). */
+  pinnable?: boolean
 }>(), {
   size: 'default',
+  pinnable: false,
 })
+
+defineEmits<{ pin: [] }>()
 
 const { setOpenMobile } = useSidebar()
 </script>
@@ -25,6 +31,9 @@ const { setOpenMobile } = useSidebar()
           </span>
         </NuxtLink>
       </SidebarMenuButton>
+      <SidebarMenuAction v-if="pinnable" :aria-label="`Add ${item.title} to the navbar`" title="Add to navbar" @click="$emit('pin')">
+        <Star />
+      </SidebarMenuAction>
     </SidebarMenuItem>
   </SidebarMenu>
 </template>

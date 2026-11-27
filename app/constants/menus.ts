@@ -1,5 +1,7 @@
 import type { NavMenu, NavMenuItems } from '~/types/nav'
 
+// `short` is the label used in the bottom navbar on phones and tablets (the cells are narrow).
+
 export const navMenu: NavMenu[] = [
   {
     heading: 'Project Management',
@@ -11,6 +13,7 @@ export const navMenu: NavMenu[] = [
       },
       {
         title: 'App Users',
+        short: 'Users',
         icon: 'i-lucide-users',
         link: '/users',
       },
@@ -26,6 +29,7 @@ export const navMenu: NavMenu[] = [
       },
       {
         title: 'Work Orders',
+        short: 'Orders',
         icon: 'i-lucide-file-text',
         link: '/sales/work-orders',
       },
@@ -36,6 +40,7 @@ export const navMenu: NavMenu[] = [
       },
       {
         title: 'Monthly Invoices',
+        short: 'Monthly',
         icon: 'i-lucide-calendar-range',
         link: '/sales/monthly-invoices',
       },
@@ -51,6 +56,7 @@ export const navMenu: NavMenu[] = [
     items: [
       {
         title: 'CRM Dashboard',
+        short: 'CRM',
         icon: 'i-lucide-layout-dashboard',
         link: '/crm/dashboard',
       },
@@ -81,16 +87,19 @@ export const navMenu: NavMenu[] = [
       },
       {
         title: 'Lost deals',
+        short: 'Lost',
         icon: 'i-lucide-circle-x',
         link: '/crm/lost',
       },
       {
         title: 'Won deals',
+        short: 'Won',
         icon: 'i-lucide-trophy',
         link: '/crm/won',
       },
       {
         title: 'Time & ROI',
+        short: 'Time',
         icon: 'i-lucide-timer',
         link: '/crm/time',
       },
@@ -101,6 +110,7 @@ export const navMenu: NavMenu[] = [
       },
       {
         title: 'Data quality',
+        short: 'Quality',
         icon: 'i-lucide-shield-check',
         link: '/crm/data-quality',
       },
@@ -111,11 +121,13 @@ export const navMenu: NavMenu[] = [
     items: [
       {
         title: 'Automation Center',
+        short: 'Automations',
         icon: 'i-lucide-bot',
         link: '/automations',
       },
       {
         title: 'Approval Queue',
+        short: 'Approvals',
         icon: 'i-lucide-inbox',
         link: '/automations/approvals',
       },
@@ -146,6 +158,7 @@ export const navMenuBottom: NavMenuItems = [
   },
   {
     title: 'General Settings',
+    short: 'Settings',
     icon: 'i-lucide-settings-2',
     link: '/settings/general',
   }

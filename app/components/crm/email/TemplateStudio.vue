@@ -477,7 +477,7 @@ const libraryTemplates = computed(() => templates.value.filter(t => !t.archivedA
                 <span class="size-14 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-700 text-white flex items-center justify-center shadow-lg shadow-emerald-600/30"><Sparkles class="size-6" /></span>
                 <p class="mt-4 text-base font-semibold tracking-tight">Your email appears here as it’s being designed</p>
                 <p class="mt-1 text-sm text-muted-foreground max-w-md">Table-based, Outlook-safe, mobile-ready HTML in the ZRZ OPS style, filled with real data from your CRM. Preview it on desktop and phone, with sample data or any dealership.</p>
-                <div class="mt-6 grid grid-cols-3 gap-3 max-w-lg w-full text-left">
+                <div class="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-lg w-full text-left">
                   <div class="rounded-lg border bg-background p-3"><p class="text-[11px] font-semibold">Outlook-safe</p><p class="mt-0.5 text-[10px] text-muted-foreground">Tables, VML buttons, inline CSS</p></div>
                   <div class="rounded-lg border bg-background p-3"><p class="text-[11px] font-semibold">Your real data</p><p class="mt-0.5 text-[10px] text-muted-foreground">Audit numbers & evidence</p></div>
                   <div class="rounded-lg border bg-background p-3"><p class="text-[11px] font-semibold">Learns</p><p class="mt-0.5 text-[10px] text-muted-foreground">Every edit trains the brain</p></div>

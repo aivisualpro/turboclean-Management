@@ -74,7 +74,7 @@ function exportCsv() {
             <p class="mt-1 text-2xl font-bold tabular-nums tracking-tight">{{ fmtDays(c.s?.avgDays) }} <span class="text-xs font-normal text-muted-foreground">avg</span></p>
           </div>
           <div class="h-10 w-px bg-border" />
-          <dl class="grid grid-cols-4 gap-4 text-xs flex-1">
+          <dl class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs flex-1">
             <div><dt class="text-muted-foreground">Deals</dt><dd class="font-semibold tabular-nums">{{ c.s?.count ?? 0 }}</dd></div>
             <div><dt class="text-muted-foreground">Median</dt><dd class="font-semibold tabular-nums">{{ fmtDays(c.s?.medianDays) }}</dd></div>
             <div><dt class="text-muted-foreground">Fastest</dt><dd class="font-semibold tabular-nums">{{ fmtDays(c.s?.minDays) }}</dd></div>

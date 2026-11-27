@@ -178,12 +178,18 @@
     text-rendering: optimizeLegibility;
     overflow: hidden;
     height: 100vh;
+    /* phones: the part of the screen that is really visible (the browser's bars come and go) */
+    height: 100dvh;
   }
 
   html {
     @apply scroll-smooth;
     overflow: hidden;
     height: 100vh;
+    height: 100dvh;
+    /* no surprise text enlarging when a phone is turned sideways */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
 
   @supports (font: -apple-system-body) and (-webkit-appearance: none) {
@@ -405,13 +411,16 @@ button,
 [data-slot="sidebar-inset"] {
   margin: 8px;
   height: calc(100svh - 16px);
+  height: calc(100dvh - 16px);
+  min-width: 0;
   border: 2px solid var(--primary);
   border-radius: 0.75rem;
   box-shadow: none;
   overflow: hidden;
 }
-@media (width >= 48rem) {
-  /* sidebar visible (expanded or icon rail): its own 8px padding is the gap */
+@media (width >= 64rem) {
+  /* sidebar visible (expanded or icon rail): its own 8px padding is the gap.
+     Below 1024px there is no sidebar column — see "Mobile shell" at the end of this file. */
   .peer[data-slot="sidebar"]:not([data-collapsible="offcanvas"]) ~ [data-slot="sidebar-inset"] {
     margin-left: 0;
   }
@@ -539,3 +548,323 @@ table:not([role="grid"], .table-plain) > thead > tr:first-child > th:last-child 
    Toasts are always pressable. */
 [data-sonner-toaster],
 [data-sonner-toaster] [data-sonner-toast] { pointer-events: auto !important; }
+
+/* ═════════ Mobile shell — phones and tablets (below 1024px) ═════════
+   • No sidebar column: the menu is a panel opened with the burger button.
+   • A bottom navbar (components/layout/MobileNav.vue) holds the person's own pages (up to five,
+     picked in "Customize navbar") and the burger; the main box ends above it.
+   • The page header may grow to two rows: title (+ time tracker) first, the page's actions under
+     it in one row that scrolls sideways when it is too long.
+   Everything here is unlayered so it wins over the utility classes used in the components. */
+:root {
+  --mobile-nav-h: 3.5rem;
+}
+.mobile-nav {
+  display: none;
+}
+
+@media (width < 64rem) {
+  /* Main box: full width, ends above the navbar; keeps clear of notches / the home indicator */
+  [data-slot="sidebar-inset"] {
+    margin-top: calc(8px + env(safe-area-inset-top, 0px));
+    margin-left: calc(8px + env(safe-area-inset-left, 0px));
+    margin-right: calc(8px + env(safe-area-inset-right, 0px));
+    height: calc(100dvh - 24px - var(--mobile-nav-h) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  }
+  .app-scroll {
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* ── Bottom navbar ── */
+  .mobile-nav {
+    position: fixed;
+    z-index: 30;
+    left: calc(8px + env(safe-area-inset-left, 0px));
+    right: calc(8px + env(safe-area-inset-right, 0px));
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    height: var(--mobile-nav-h);
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: 2px;
+    padding: 4px;
+    background: var(--background);
+    border: 2px solid var(--primary);
+    border-radius: 0.75rem;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  .mobile-nav-item {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 8rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 0 2px;
+    border-radius: 0.5rem;
+    color: var(--muted-foreground);
+    font-size: 10px;
+    line-height: 12px;
+    font-weight: 500;
+    transition: background-color 0.15s, color 0.15s;
+    outline-offset: -2px;
+  }
+  .mobile-nav-item:focus-visible {
+    outline: 2px solid var(--ring);
+  }
+  .mobile-nav-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+  }
+  .mobile-nav-label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* current page: solid theme colour, like the active sidebar item */
+  .mobile-nav-item[data-active="true"] {
+    background: var(--primary);
+    color: var(--primary-foreground);
+  }
+  /* the current page is not in the bar → it lives behind the burger */
+  .mobile-nav-burger[data-current="true"]:not([data-active="true"]) {
+    background: color-mix(in oklab, var(--primary) 16%, transparent);
+    color: var(--foreground);
+  }
+
+  /* ── The menu panel (burger): a floating box like the rest of the shell, finger-sized rows ── */
+  [data-sidebar="sidebar"][data-mobile="true"] {
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+    height: calc(100dvh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    /* its own width (SIDEBAR_WIDTH_MOBILE), never wider than the screen */
+    width: min(var(--sidebar-width, 18rem), calc(100vw - 16px));
+    max-width: none;
+  }
+  [data-sidebar="sidebar"][data-mobile="true"].left-0 {
+    left: calc(8px + env(safe-area-inset-left, 0px));
+  }
+  [data-sidebar="sidebar"][data-mobile="true"].right-0 {
+    right: calc(8px + env(safe-area-inset-right, 0px));
+  }
+  [data-mobile="true"] [data-sidebar="menu-button"]:not([data-size="lg"]) {
+    height: 2.5rem;
+    font-size: 0.9375rem;
+  }
+  [data-mobile="true"] [data-sidebar="menu-action"] {
+    top: 0.25rem;
+    right: 0.25rem;
+    width: 2rem;
+    height: 2rem;
+    color: var(--muted-foreground);
+  }
+  [data-mobile="true"] [data-sidebar="menu-button"][data-active="true"] ~ [data-sidebar="menu-action"] {
+    color: var(--primary-foreground);
+  }
+  .mobile-menu-customize {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: 2.5rem;
+    padding: 0 10px;
+    border-radius: 0.5rem;
+    border: 2px solid var(--primary);
+    background: color-mix(in oklab, var(--primary) 12%, var(--background));
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  /* ── "Customize navbar": a sheet from the bottom; a centred card on tablets ── */
+  .nav-customize {
+    border: 2px solid var(--primary);
+    border-bottom: 0;
+    border-radius: 0.75rem 0.75rem 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    overflow: hidden;
+  }
+
+  /* Toasts sit above the navbar, not on it */
+  [data-sonner-toaster][data-y-position="bottom"] {
+    bottom: calc(var(--mobile-nav-h) + 20px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+/* very narrow phones (320px): six cells still fit their labels */
+@media (width < 22.5rem) {
+  .mobile-nav {
+    gap: 0;
+    padding-left: 2px;
+    padding-right: 2px;
+  }
+  .mobile-nav-item {
+    font-size: 9px;
+    padding: 0;
+  }
+}
+@media (width >= 40rem) and (width < 64rem) {
+  .mobile-nav-item {
+    font-size: 11px;
+    line-height: 14px;
+  }
+  .nav-customize {
+    left: 50%;
+    right: auto;
+    width: min(36rem, calc(100vw - 16px));
+    translate: -50% 0;
+  }
+}
+/* The navbar and its sheet exist only below 1024px (the sheet closes itself if the window grows). */
+@media (width >= 64rem) {
+  .nav-customize {
+    left: 50%;
+    right: auto;
+    width: 36rem;
+    translate: -50% 0;
+    border: 2px solid var(--primary);
+    border-bottom: 0;
+    border-radius: 0.75rem 0.75rem 0 0;
+    overflow: hidden;
+  }
+}
+
+/* ═════════ Page header on anything narrower than 1280px (phones, tablets, small laptops) ═════════
+   One row while everything fits. When it does not, the page's actions drop to a second row inside the
+   header bar, and that row scrolls sideways if it is still too long — the title is never squeezed out. */
+@media (width < 80rem) {
+  .app-header {
+    height: auto;
+    min-height: calc(var(--spacing) * 11);
+    flex-wrap: wrap;
+    column-gap: 8px;
+    row-gap: 4px;
+    padding-top: 2px;
+    padding-bottom: 2px;
+  }
+  /* first row: title + time tracker; the page's actions come after them (and wrap when needed) */
+  .app-header-title {
+    order: 1;
+    flex: 1 1 0%;
+    min-width: min(11rem, 50%);
+  }
+  .app-header-timer {
+    order: 2;
+  }
+  #page-header-actions {
+    order: 3;
+    margin-left: auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    /* room for focus rings inside the scrolling row */
+    padding: 2px;
+    margin-top: -2px;
+    margin-bottom: -2px;
+  }
+  #page-header-actions::-webkit-scrollbar {
+    display: none;
+  }
+  #page-header-actions:not(:has(> *)) {
+    display: none;
+  }
+  #page-header-actions > *,
+  #page-header-actions > div > * {
+    flex-shrink: 0;
+  }
+}
+
+/* ═════════ Small screens: nothing may be wider than the screen ═════════
+   Safety nets for every route (pages already stack their own columns with sm: / md: / lg:). */
+
+/* Windows taller than the screen scroll inside themselves. Layered on purpose (below the utilities),
+   so a dialog that sets its own height / overflow keeps it. */
+@layer components {
+  [data-slot="dialog-content"],
+  [data-slot="alert-dialog-content"] {
+    max-height: calc(100dvh - 1rem);
+    overflow-y: auto;
+  }
+  @media (width < 64rem) {
+    [data-slot="popover-content"] {
+      max-height: var(--reka-popover-content-available-height, calc(100dvh - 1rem));
+      overflow-y: auto;
+    }
+  }
+}
+
+@media (width < 64rem) {
+  /* Pop-ups (filters, pickers, menus, hints) never stick out of the screen */
+  [data-slot="popover-content"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="select-content"],
+  [data-slot="tooltip-content"] {
+    max-width: calc(100vw - 16px);
+  }
+  [data-slot="sheet-content"] {
+    max-width: 100vw;
+  }
+
+  /* Tab bars and segmented switchers scroll sideways instead of squeezing or spilling out */
+  [data-slot="tabs-list"],
+  [role="tablist"] {
+    max-width: 100%;
+    overflow-x: auto;
+    justify-content: flex-start;
+    scrollbar-width: none;
+  }
+  [data-slot="tabs-list"]::-webkit-scrollbar,
+  [role="tablist"]::-webkit-scrollbar {
+    display: none;
+  }
+  [data-slot="tabs-list"] > [data-slot="tabs-trigger"],
+  [role="tablist"] > [role="tab"] {
+    flex-shrink: 0;
+  }
+
+  /* A wide table scrolls sideways inside its own box — the page itself never does.
+     (Tables that already sit in a scrolling area are not affected.) */
+  :has(> table:not([role="grid"], .table-plain)) {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  :is(.border, .border-2, [data-slot="card"]):not(.overflow-auto, .overflow-x-auto, .overflow-y-auto, .overflow-scroll):has(> table:not([role="grid"], .table-plain), > div > table:not([role="grid"], .table-plain), > div > div > table:not([role="grid"], .table-plain)) {
+    overflow-x: auto;
+  }
+}
+@media (width < 40rem) {
+  [data-slot="dialog-content"],
+  [data-slot="alert-dialog-content"] {
+    max-width: calc(100vw - 16px);
+  }
+}
+
+/* Touch screens have no hover: buttons that only appear on hover (row actions, remove "×") stay visible */
+@media (hover: none) {
+  .opacity-0[class*="group-hover"][class*=":opacity-100"] {
+    opacity: 1;
+  }
+  .hidden[class*="group-hover/row:inline-flex"] {
+    display: inline-flex;
+  }
+}
+
+/* iPhone / iPad zoom the whole page when a field with text smaller than 16px gets the cursor,
+   and do not zoom back. 16px text in fields on touch screens prevents that. */
+@media (pointer: coarse) and (width < 64rem) {
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]),
+  textarea,
+  select,
+  [contenteditable="true"] {
+    font-size: 16px;
+  }
+}
+

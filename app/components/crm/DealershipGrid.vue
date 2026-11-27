@@ -5,11 +5,11 @@
  * paste straight from Excel / Google Sheets (new rows are added when you paste past the end),
  * ⌘D fills a selection down, ⌘Z undoes, ⌘S saves. Nothing touches the CRM until you press Save.
  */
-import type { CrmDealership } from '~/composables/useCrmDealerships'
+import type { CrmContact, CrmDealership } from '~/composables/useCrmDealerships'
 import { dueState, formatDuration } from '~/composables/useCrmDealerships'
 import type { GridColumn, GridLayout } from '~/composables/useGridLayout'
 import { CASCADE_FIELDS } from '~/composables/useCascade'
-import { DEALERSHIP_STAGES, INTERACTION_TYPE_MAP, LEAD_SOURCES, LEAD_SOURCE_STYLE, STAGE_STYLE, US_STATES } from '~/constants/crm'
+import { CONTACT_ROLES, DEALERSHIP_STAGES, INTERACTION_TYPE_MAP, LEAD_SOURCES, LEAD_SOURCE_STYLE, STAGE_STYLE, US_STATES } from '~/constants/crm'
 import { INTERACTION_ICONS } from '~/constants/crm-icons'
 import { AlertCircle, ArrowDownToLine, Briefcase, Check, ExternalLink, Keyboard, Layers, Loader2, Plus, RotateCcw, Route, Save, ShieldAlert, Trash2, Undo2, UserCircle2, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
@@ -37,13 +37,15 @@ const props = defineProps<{
   bindScroller?: (el: HTMLElement | null) => void
 }>()
 const emit = defineEmits<{ close: [], saved: [], sort: [key: string, dir?: 'asc' | 'desc'], manage: [] }>()
-const { createDealership, updateDealership } = useCrmDealerships()
+const { createDealership, updateDealership, addContact, updateContact } = useCrmDealerships()
 const cascade = useCascade()
 
 // ─── Columns ───
 // Quick edit never rearranges the table: it draws exactly the columns of the list — same order, same widths, same hidden
 // and frozen columns, same header (sort, drag to move, drag the edge to resize, "⋮" menu) — through the same layout object.
 // The columns listed in EDIT can be typed into; every other column shows what the list shows and is read-only here.
+// The primary contact's columns are typed into like the rest, but are saved on the contact's own record (the emails,
+// follow-ups and history hang off it): changed when the dealership has a primary contact, added as the primary when it has none.
 type ColKey = string
 interface Edit { type?: 'select', options?: (row: CrmDealership | null) => string[], suggest?: boolean, required?: boolean, hint?: string }
 const PARKED = ['Won', 'Lost', 'Nurture / Follow Up Later']
@@ -62,7 +64,12 @@ const EDIT: Record<string, Edit> = {
   owner: { type: 'select', options: () => ['', ...props.users.map(u => u.name)] },
   leadSource: { type: 'select', options: () => [...LEAD_SOURCES] },
   notes: {},
+  primaryContact: { hint: 'Jane Smith' },
+  primaryTitle: { suggest: true, hint: 'General Manager' },
+  primaryEmail: { hint: 'jane@dealer.com' },
+  primaryPhone: {},
 }
+const CONTACT_KEYS = ['primaryContact', 'primaryTitle', 'primaryEmail', 'primaryPhone']
 const SUGGEST_KEYS = Object.keys(EDIT).filter(k => EDIT[k]!.suggest)
 interface Col extends GridColumn<string> { edit: Edit | null }
 /** The list's visible columns, in its order. Unchanged by a resize (widths live in the <col> elements). */
@@ -124,6 +131,10 @@ function original(row: CrmDealership, key: ColKey): string {
     case 'brands': return (row.brands || []).join(', ')
     case 'owner': return row.assignedUserName || ''
     case 'website': return row.website || ''
+    case 'primaryContact': return row.contactSummary?.primary?.fullName || ''
+    case 'primaryTitle': { const p = row.contactSummary?.primary; return p ? (p.jobTitle || p.role || '') : '' }
+    case 'primaryEmail': return row.contactSummary?.primary?.email || ''
+    case 'primaryPhone': return row.contactSummary?.primary?.phone || row.contactSummary?.primary?.mobile || ''
     default: return String((row as any)[key] ?? '')
   }
 }
@@ -156,7 +167,7 @@ defineExpose({ dirty })
 /** Suggestions for free-text columns = every value already in use. */
 const suggestions = computed(() => {
   const out: Partial<Record<ColKey, string[]>> = {}
-  for (const k of SUGGEST_KEYS) out[k] = [...new Set(props.rows.map(r => original(r, k)).filter(Boolean))].sort((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true }))
+  for (const k of SUGGEST_KEYS) out[k] = [...new Set([...(k === 'primaryTitle' ? CONTACT_ROLES.filter(r => r !== 'Other') : []), ...props.rows.map(r => original(r, k)).filter(Boolean)])].sort((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true }))
   return out
 })
 const defaultState = computed(() => {
@@ -400,6 +411,7 @@ const progress = ref({ done: 0, total: 0 })
 function payloadFor(vals: Partial<Record<ColKey, string>>) {
   const p: Record<string, any> = {}
   for (const [k, v] of Object.entries(vals)) {
+    if (CONTACT_KEYS.includes(k)) continue
     if (k === 'owner') { const u = props.users.find(x => x.name === v); p.assignedUserId = u?.id || ''; p.assignedUserName = u?.name || '' }
     else if (k === 'brands') p.brands = String(v || '').split(/[,;/|]+/).map(s => s.trim()).filter(Boolean)
     else p[k] = v
@@ -407,12 +419,71 @@ function payloadFor(vals: Partial<Record<ColKey, string>>) {
   return p
 }
 const friendly = (e: any) => e?.data?.statusMessage || e?.statusMessage || e?.message || 'Could not save'
+/** A "this looks like a duplicate" answer (dealership or contact) → a row message that offers to save anyway. */
+function duplicateMessage(e: any): string {
+  if (e?.statusCode !== 409) return ''
+  const d = e?.data?.data
+  if (d?.duplicates?.length) return `Looks like a duplicate of ${d.duplicates.map((x: any) => x.name).join(', ')} — click to save anyway`
+  if (d?.contactDuplicates?.length) return `This contact looks like ${d.contactDuplicates.map((x: any) => `${x.name}${x.dealershipName ? ` at ${x.dealershipName}` : ''}`).join(', ')} — click to save anyway`
+  return ''
+}
+
+// ─── The primary contact (typed in the row, saved on the contact's record) ───
+const typed = (vals: Partial<Record<ColKey, string>>, k: string) => String(vals[k] ?? '').trim()
+const contactValues = (vals: Partial<Record<ColKey, string>>) => Object.fromEntries(Object.entries(vals).filter(([k]) => CONTACT_KEYS.includes(k))) as Partial<Record<ColKey, string>>
+/** What can be told is wrong before anything is sent. `person` = the primary contact the row has now (null = none yet). */
+function contactProblem(vals: Partial<Record<ColKey, string>>, person: CrmContact | null): string {
+  if (!CONTACT_KEYS.some(k => k in vals)) return ''
+  if (!person && CONTACT_KEYS.some(k => typed(vals, k)) && !typed(vals, 'primaryContact')) return 'Type the person\'s name in “Primary contact” first — the title, email and phone are saved with that person'
+  if (person && 'primaryContact' in vals && !typed(vals, 'primaryContact')) return 'A contact needs a name. To remove a contact, open the dealership'
+  const email = typed(vals, 'primaryEmail')
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return `“${email}” does not look like an email address`
+  return ''
+}
+function contactPayload(vals: Partial<Record<ColKey, string>>, person: CrmContact | null) {
+  const out: Record<string, any> = {}
+  if ('primaryContact' in vals) { const parts = typed(vals, 'primaryContact').split(/\s+/).filter(Boolean); out.firstName = parts[0] || ''; out.lastName = parts.slice(1).join(' ') }
+  if ('primaryTitle' in vals) {
+    out.jobTitle = typed(vals, 'primaryTitle')
+    // A title that is one of the standard roles also sets the role (it drives the role filters and email templates).
+    const role = CONTACT_ROLES.find(r => r.toLowerCase() === out.jobTitle.toLowerCase())
+    if (role) out.role = role
+  }
+  if ('primaryEmail' in vals) out.email = typed(vals, 'primaryEmail')
+  if ('primaryPhone' in vals) out[person && !person.phone && person.mobile ? 'mobile' : 'phone'] = typed(vals, 'primaryPhone')
+  return out
+}
+/** Changes the dealership's primary contact, or adds one (as the primary) when it has none. */
+async function saveContact(dealershipId: string, vals: Partial<Record<ColKey, string>>, person: CrmContact | null, allowDuplicate: boolean) {
+  const body = { ...contactPayload(vals, person), ...(allowDuplicate ? { allowDuplicate: true } : {}) } as any
+  if (person) return await updateContact(dealershipId, person.id, body)
+  if (!CONTACT_KEYS.some(k => typed(vals, k))) return null
+  return await addContact(dealershipId, { ...body, isPrimary: true })
+}
+/** The list shows the saved contact at once (the full refresh follows). */
+function showSavedContact(dealershipId: string, contact: CrmContact | null, isNew: boolean) {
+  const sum = props.rows.find(r => r.id === dealershipId)?.contactSummary
+  if (!sum || !contact) return
+  sum.primary = contact
+  if (isNew) { sum.total++; sum.active++ }
+}
+/** Takes saved cells out of a row's pending edits (the rest of the row stays pending). */
+function dropEdits(key: string, keys: string[]) {
+  const e = { ...(edits.value[key] || {}) }
+  for (const k of keys) delete e[k]
+  const n = { ...edits.value }
+  if (Object.keys(e).length) n[key] = e
+  else delete n[key]
+  edits.value = n
+}
+
 async function save() {
   if (saving.value || !dirty.value) return
   // New rows must at least have a name and a state.
   const newRows = added.value.filter((a) => {
-    if (String(a.values.name || '').trim() && String(a.values.state || '').trim()) return true
-    errors.value[a.key] = 'New dealerships need a name and a state'
+    const problem = !(typed(a.values, 'name') && typed(a.values, 'state')) ? 'New dealerships need a name and a state' : contactProblem(contactValues(a.values), null)
+    if (!problem) return true
+    errors.value[a.key] = problem
     return false
   })
   const editKeys = Object.keys(edits.value)
@@ -424,25 +495,47 @@ async function save() {
     const g = rowByKey.value.get(key)
     const vals = edits.value[key]
     if (!g?.row || !vals) { progress.value.done++; continue }
+    const person = g.row.contactSummary?.primary || null
+    const own = payloadFor(vals), ownKeys = Object.keys(vals).filter(k => !CONTACT_KEYS.includes(k))
+    const contact = contactValues(vals)
+    const problem = contactProblem(contact, person)
+    if (problem) { failed++; errors.value[key] = problem; progress.value.done++; continue }
     try {
-      const saved = await updateDealership(key, { ...payloadFor(vals), ...(allowDup.value[key] ? { allowDuplicate: true } : {}) } as any)
-      for (const f of CASCADE_FIELDS) if (f in vals) changed.push({ field: f, from: String((g.row as any)[f] || ''), to: String((saved as any)[f] || ''), id: key })
-      revertRow(key); ok++
+      if (ownKeys.length) {
+        const saved = await updateDealership(key, { ...own, ...(allowDup.value[key] ? { allowDuplicate: true } : {}) } as any)
+        for (const f of CASCADE_FIELDS) if (f in vals) changed.push({ field: f, from: String((g.row as any)[f] || ''), to: String((saved as any)[f] || ''), id: key })
+        dropEdits(key, ownKeys)
+      }
+      if (Object.keys(contact).length) {
+        showSavedContact(key, await saveContact(key, contact, person, !!allowDup.value[key]), !person)
+        dropEdits(key, Object.keys(contact))
+      }
+      delete errors.value[key]; ok++
     }
     catch (e: any) {
       failed++
-      errors.value[key] = e?.statusCode === 409 && e?.data?.data?.duplicates?.length ? `Looks like a duplicate of ${e.data.data.duplicates.map((d: any) => d.name).join(', ')} — click to save anyway` : friendly(e)
+      errors.value[key] = duplicateMessage(e) || friendly(e)
     }
     progress.value.done++
   }
   for (const a of newRows) {
+    let created: CrmDealership | null = null
     try {
-      await createDealership({ ...payloadFor(a.values), ...(allowDup.value[a.key] ? { allowDuplicate: true } : {}) } as any)
+      created = await createDealership({ ...payloadFor(a.values), ...(allowDup.value[a.key] ? { allowDuplicate: true } : {}) } as any)
+      const contact = contactValues(a.values)
+      if (CONTACT_KEYS.some(k => typed(contact, k))) showSavedContact(created.id, await saveContact(created.id, contact, null, false), true)
       removeNewRow(a.key); ok++
     }
     catch (e: any) {
-      failed++
-      errors.value[a.key] = e?.statusCode === 409 && e?.data?.data?.duplicates?.length ? `Looks like a duplicate of ${e.data.data.duplicates.map((d: any) => d.name).join(', ')} — click to save anyway` : friendly(e)
+      if (created) {
+        // The dealership exists now — only its contact did not go through. It is in the list; the contact can be typed there.
+        removeNewRow(a.key); ok++
+        toast.warning(`${created.name} was added, but its contact was not`, { description: `${friendly(e)}. Type the contact again on its row.`, duration: 10000 })
+      }
+      else {
+        failed++
+        errors.value[a.key] = duplicateMessage(e) || friendly(e)
+      }
     }
     progress.value.done++
   }
@@ -531,6 +624,7 @@ watch(() => [props.sortKey, props.sortDir], () => { if (editing.value) commit();
               <dt class="font-mono text-[11px] text-muted-foreground">⌘Z</dt><dd>Undo</dd>
               <dt class="font-mono text-[11px] text-muted-foreground">⌘S</dt><dd>Save everything</dd>
             </dl>
+            <p class="mt-2 text-muted-foreground">Primary contact, title, email and phone are saved on that person's contact record — typing them on a dealership with no contact adds the person as its primary contact.</p>
             <p class="mt-2 text-muted-foreground">Changed cells turn amber. Renaming a dealer group, route, territory or city asks whether to rename it on the other dealerships too.</p>
           </PopoverContent>
         </Popover>
@@ -603,6 +697,7 @@ watch(() => [props.sortKey, props.sortDir], () => { if (editing.value) commit();
                 <template v-if="!value(g, c.key)">
                   <span v-if="g.add" class="text-muted-foreground/40">{{ c.edit.hint }}</span>
                   <span v-else-if="c.key === 'owner'" class="inline-flex max-w-full min-w-0 items-center gap-1.5 align-bottom text-xs text-rose-600 dark:text-rose-400"><UserCircle2 class="size-3.5 shrink-0" /> <span class="truncate">Unassigned</span></span>
+                  <span v-else-if="c.key === 'primaryContact' && !g.row?.contactSummary?.primary" class="text-xs italic text-muted-foreground/70">No contacts yet</span>
                   <span v-else class="text-muted-foreground/50">—</span>
                 </template>
                 <span v-else-if="c.key === 'name'" class="font-semibold text-foreground">{{ value(g, c.key) }}</span>
@@ -613,7 +708,12 @@ watch(() => [props.sortKey, props.sortDir], () => { if (editing.value) commit();
                 </div>
                 <span v-else-if="c.key === 'leadSource'" class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"><span class="size-1.5 shrink-0 rounded-full" :class="LEAD_SOURCE_STYLE[value(g, c.key)]?.dot" /><span class="truncate">{{ value(g, c.key) }}</span></span>
                 <span v-else-if="c.key === 'state'" class="font-mono text-xs">{{ value(g, c.key) }}</span>
-                <span v-else-if="c.key === 'zip' || c.key === 'phone'" class="tabular-nums">{{ value(g, c.key) }}</span>
+                <span v-else-if="c.key === 'zip' || c.key === 'phone' || c.key === 'primaryPhone'" class="tabular-nums">{{ value(g, c.key) }}</span>
+                <div v-else-if="c.key === 'primaryContact'" class="flex min-w-0 items-center gap-2">
+                  <span class="truncate font-medium">{{ value(g, c.key) }}</span>
+                  <Badge v-if="g.row && !isChanged(g, c.key) && helpers.needsVerification(g.row)" variant="outline" class="shrink-0 text-[10px] gap-1 bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20" title="Contact details unverified for 90+ days"><ShieldAlert class="size-3" /> Verify</Badge>
+                </div>
+                <span v-else-if="c.key === 'primaryTitle'" class="text-muted-foreground">{{ value(g, c.key) }}</span>
                 <span v-else-if="c.key === 'website'" class="inline-flex max-w-full min-w-0 items-center gap-1 align-bottom text-primary"><span class="truncate">{{ value(g, c.key).replace(/^https?:\/\//, '') }}</span><ExternalLink class="size-3 shrink-0 opacity-50" /></span>
                 <span v-else-if="c.key === 'route'" class="inline-flex max-w-full min-w-0 items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/5 px-1.5 py-0.5 align-bottom text-[11px] font-medium text-sky-700 dark:text-sky-300"><Route class="size-3 shrink-0" /><span class="truncate">{{ value(g, c.key) }}</span></span>
                 <template v-else>{{ value(g, c.key) }}</template>
@@ -650,18 +750,6 @@ watch(() => [props.sortKey, props.sortDir], () => { if (editing.value) commit();
                     <template v-else>—</template>
                   </span>
                 </span>
-                <template v-else-if="c.key === 'primaryContact'">
-                  <div v-if="g.row.contactSummary?.primary" class="flex min-w-0 items-center gap-2">
-                    <span class="truncate font-medium">{{ g.row.contactSummary.primary.fullName }}</span>
-                    <Badge v-if="helpers.needsVerification(g.row)" variant="outline" class="shrink-0 text-[10px] gap-1 bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20" title="Contact details unverified for 90+ days"><ShieldAlert class="size-3" /> Verify</Badge>
-                  </div>
-                  <span v-else class="text-xs italic text-muted-foreground/70">No contacts yet</span>
-                </template>
-                <span v-else-if="c.key === 'primaryTitle'" class="text-muted-foreground">{{ g.row.contactSummary?.primary ? (g.row.contactSummary.primary.jobTitle || g.row.contactSummary.primary.role) : '—' }}</span>
-                <template v-else-if="c.key === 'primaryEmail'">
-                  <span v-if="g.row.contactSummary?.primary?.email">{{ g.row.contactSummary.primary.email }}</span>
-                  <span v-else class="text-muted-foreground/50">—</span>
-                </template>
                 <template v-else-if="c.key === 'contacts'">
                   <span class="font-medium">{{ g.row.contactSummary?.active ?? 0 }}</span>
                   <span v-if="g.row.contactSummary?.inactive" class="text-[11px] text-muted-foreground ml-1" :title="`${g.row.contactSummary.inactive} former`">+{{ g.row.contactSummary.inactive }}</span>
