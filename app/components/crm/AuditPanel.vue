@@ -169,10 +169,11 @@ function exportCsv() {
         <button
           v-for="t in tabList" :key="t.key" type="button" role="tab" :aria-selected="tab === t.key" :title="t.hint"
           class="shrink-0 max-w-[300px] rounded-xl border-2 bg-card px-3.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          :class="tab === t.key ? 'border-primary shadow-sm' : 'border-border hover:border-foreground/30'" @click="tab = t.key"
+          :class="tab === t.key ? 'border-primary bg-primary text-primary-foreground shadow-sm' : 'border-border hover:border-foreground/30'" @click="tab = t.key"
         >
-          <span class="flex items-center gap-1.5 text-sm font-semibold" :class="tab === t.key ? 'text-foreground' : 'text-muted-foreground'"><component :is="t.combined ? Layers : FileText" class="size-3.5 shrink-0 opacity-70" /><span class="truncate">{{ t.label }}</span></span>
-          <span v-if="t.v" class="block text-[11px] tabular-nums whitespace-nowrap"><b :class="tone(t.v.pct)">{{ t.v.pct ?? '—' }}%</b> <span class="text-muted-foreground">· {{ t.v.missing }} of {{ t.v.total }} missing photos</span></span>
+          <!-- (the app paints the selected tab solid theme colour: its text takes the colour that reads on it) -->
+          <span class="flex items-center gap-1.5 text-sm font-semibold" :class="tab === t.key ? 'text-primary-foreground' : 'text-muted-foreground'"><component :is="t.combined ? Layers : FileText" class="size-3.5 shrink-0 opacity-70" /><span class="truncate">{{ t.label }}</span></span>
+          <span v-if="t.v" class="block text-[11px] tabular-nums whitespace-nowrap"><b :class="tab === t.key ? 'text-primary-foreground' : tone(t.v.pct)">{{ t.v.pct ?? '—' }}%</b> <span :class="tab === t.key ? 'text-primary-foreground/75' : 'text-muted-foreground'">· {{ t.v.missing }} of {{ t.v.total }} missing photos</span></span>
         </button>
       </div>
 

@@ -180,9 +180,6 @@ const canDelete = computed(() => isActionAllowed('dealers', 'Delete'))
       <ClientOnly>
         <Teleport to="#page-header-actions">
           <div class="flex items-center gap-2">
-            <Button variant="outline" size="sm" class="h-8" @click="navigateTo('/dealers')">
-              <ArrowLeft class="size-3.5 mr-1.5" /> Back
-            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
                 <Button variant="outline" size="sm" class="h-8 gap-1.5">

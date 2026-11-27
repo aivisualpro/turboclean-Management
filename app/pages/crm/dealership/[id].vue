@@ -212,7 +212,6 @@ const tabs = computed(() => [
   <div class="absolute inset-0 flex flex-col overflow-hidden">
     <ClientOnly>
       <Teleport to="#page-header-actions">
-        <Button variant="ghost" size="icon" class="size-8" title="All dealerships" aria-label="All dealerships" @click="navigateTo('/crm/dealership')"><ArrowLeft class="size-4" /></Button>
         <Button v-if="canEdit && dealership && !dealership.archivedAt" size="sm" class="h-8 gap-1.5 bg-red-600 hover:bg-red-700 text-white shadow-sm shadow-red-600/25" title="Crawl the dealership website for vehicles without real photos" @click="showScanner = true"><ScanSearch class="size-4" /><span class="hidden lg:inline">Crawl</span></Button>
         <Button v-if="canEdit && dealership && !dealership.archivedAt" variant="outline" size="sm" class="h-8 gap-1.5" @click="openCompose()"><MailHeaderIcon class="size-4" /><span class="hidden lg:inline">Email</span></Button>
         <Button v-if="canEdit && dealership" size="sm" class="h-8 gap-1.5" @click="openLog()"><MessageSquarePlus class="size-4" /><span class="hidden lg:inline">Log activity</span></Button>

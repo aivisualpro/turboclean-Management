@@ -429,6 +429,11 @@ button,
   background: color-mix(in oklab, var(--primary) 26%, var(--background));
   border: 0;
 }
+/* A work screen is open (the crawler, Mission Control — components/layout/WorkScreen.vue): the header
+   shows that screen's controls; the buttons of the page under it wait out of sight. */
+.app-header[data-work] #page-header-actions > :not([data-work-actions]) {
+  display: none !important;
+}
 
 /* Active sidebar item: solid theme colour */
 [data-sidebar="menu-button"][data-active="true"],

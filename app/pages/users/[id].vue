@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, Search, Pencil, Trash2, Check, ChevronsUpDown, X, ArrowLeft, Save, Eye, EyeOff } from 'lucide-vue-next'
+import { Plus, Search, Pencil, Trash2, Check, ChevronsUpDown, X, Save, Eye, EyeOff } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { useDealers } from '~/composables/useDealers'
 import { nanoid } from 'nanoid'
@@ -202,9 +202,6 @@ async function handleDelete() {
       <ClientOnly>
         <Teleport to="#page-header-actions">
           <div class="flex items-center gap-2">
-            <Button variant="outline" size="sm" class="h-8" @click="$router.push('/users')">
-              <ArrowLeft class="size-3.5 mr-1.5" /> Back to Users
-            </Button>
             <Button v-if="!isNew" variant="outline" size="icon" class="h-8 w-8 text-destructive hover:bg-destructive/10 border-destructive/20" @click="showDeleteDialog = true">
               <Trash2 class="size-3.5" />
             </Button>

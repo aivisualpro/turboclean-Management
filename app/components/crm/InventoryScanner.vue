@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
 import { formatDistanceToNow } from 'date-fns'
 import { VERDICT_META } from '~/composables/useInventoryScanner'
 import type { ScanPage, ScopeRow } from '~/lib/scanScope'
 import { HEALTH_META, SCOPE_META, TONE, checkScanPage, guessPageLabel, normalizeAddress, pagePath, scopeKey } from '~/lib/scanScope'
 import {
-  ScanSearch, X, ArrowLeft, ArrowRight, RotateCw, Lock, Globe, ChevronDown, Loader2, Square, MonitorPlay, LayoutGrid, CheckCircle2,
+  ScanSearch, ArrowLeft, ArrowRight, RotateCw, Lock, Globe, ChevronDown, Loader2, Square, MonitorPlay, LayoutGrid, CheckCircle2,
   AlertTriangle, Car, Images, ScanLine, Save, ExternalLink, Cloud, FileStack, Sparkles, History, CircleSlash, MousePointerClick, List, Search,
   BookmarkCheck, BookmarkPlus, Wand2, Plus, Trash2, Activity, CircleDashed, CornerUpLeft, ShieldCheck, Ban, PlayCircle, ListChecks, Mail,
 } from 'lucide-vue-next'
@@ -285,11 +284,15 @@ async function save() {
   } catch (e: any) { toast.error(failText(e, 'Could not save')) } finally { saving.value = false }
 }
 function emailAudit() { open.value = false; emit('email') }
-function closeDialog() {
-  if (scanning.value && !confirm('A crawl is running. Close the crawler and stop it? What it found so far is still checked and kept.')) return
-  if (ranHere.value && results.value && !results.value.savedAuditId && !confirm('These results are not saved to the CRM yet. Close anyway? (You can reopen them from “Last crawl”.)')) return
-  open.value = false
+/** Asked before the crawler goes away (Back, Escape, or walking off through the sidebar). */
+function mayClose() {
+  if (scanning.value && !confirm('A crawl is running. Close the crawler and stop it? What it found so far is still checked and kept.')) return false
+  if (ranHere.value && results.value && !results.value.savedAuditId && !confirm('These results are not saved to the CRM yet. Close anyway? (You can reopen them from “Last crawl”.)')) return false
+  return true
 }
+function closeDialog() { if (mayClose()) open.value = false }
+// Leaving the page while the crawler is open ends it like closing does.
+onBeforeUnmount(() => { if (open.value) sc.dispose() })
 
 // ── Presentation ──
 const livePage = computed(() => (progress.value?.scope || []).find(e => e.status === 'running') || null)
@@ -371,39 +374,24 @@ const crawlLabel = computed(() => chosen.value.length ? `Crawl ${chosen.value.le
 </script>
 
 <template>
-  <DialogRoot v-model:open="open">
-    <DialogPortal>
-      <DialogOverlay class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0" />
-      <DialogContent
-        class="scanner fixed inset-2 z-50 flex flex-col overflow-hidden rounded-xl border-2 border-primary bg-background shadow-2xl outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0"
-        @escape-key-down="(e: Event) => { e.preventDefault(); if (!editingAddress) closeDialog() }"
-        @interact-outside="(e: Event) => e.preventDefault()"
-        @open-auto-focus="(e: Event) => e.preventDefault()"
-      >
-        <!-- Title bar -->
-        <header class="shrink-0 h-12 flex items-center gap-3 px-3 border-b bg-card">
-          <div class="flex items-center gap-2.5 min-w-0">
-            <span class="size-8 shrink-0 rounded-lg bg-red-600 text-white flex items-center justify-center shadow-sm shadow-red-600/30"><ScanSearch class="size-4.5" /></span>
-            <div class="min-w-0 leading-tight">
-              <DialogTitle class="text-sm font-semibold truncate">Inventory Crawler</DialogTitle>
-              <DialogDescription class="text-[11px] text-muted-foreground truncate">{{ dealership.name }}</DialogDescription>
-            </div>
-          </div>
-          <div v-if="phase === 'ready'" role="tablist" class="sm:ml-4 inline-flex shrink-0 rounded-lg border bg-muted/40 p-0.5">
-            <button type="button" role="tab" :aria-selected="tab === 'site'" class="rounded-md px-3 py-1 text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap" :class="tab === 'site' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'" @click="tab = 'site'"><ListChecks class="size-3.5" /> Crawl plan</button>
-            <button type="button" role="tab" :aria-selected="tab === 'results'" :disabled="!results" class="rounded-md px-3 py-1 text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-40" :class="tab === 'results' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'" @click="tab = 'results'">
-              <LayoutGrid class="size-3.5" /> Results <span v-if="results" class="rounded-full px-1.5 text-[10px] tabular-nums bg-background/80 text-foreground">{{ results.summary.total }}</span>
-            </button>
-          </div>
-          <div class="ml-auto flex items-center gap-2">
-            <span v-if="phase === 'ready'" class="hidden md:inline-flex items-center gap-1.5 rounded-full px-2 h-6 text-[11px] font-medium" :class="TONE.ok.soft" title="The crawler reads the saved scan pages and their result pages. It never starts from the home page and never follows a link out of a list."><ShieldCheck class="size-3.5" /> Scan pages only</span>
-            <span v-if="phase === 'ready'" class="hidden lg:inline-flex items-center gap-1.5 text-[11px] text-muted-foreground"><Cloud class="size-3.5" /> {{ engineLabel }} · 1440×900</span>
-            <button v-if="phase === 'ready' && photoCheck && photoCheck.on" type="button" class="hidden xl:inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground hover:border-foreground/40 disabled:opacity-60" :disabled="aiTesting" title="Every photo is looked at by AI as well as measured. Click to test that the AI really answers." @click="testAi"><Loader2 v-if="aiTesting" class="size-3.5 animate-spin" /><Sparkles v-else class="size-3.5 text-violet-500" /> AI photo check · {{ photoCheck.label }} · {{ aiTesting ? 'testing…' : 'test' }}</button>
-            <button v-else-if="phase === 'ready' && photoCheck" type="button" class="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300" :title="`${photoCheck.reason} ${photoCheck.fix} Click to test.`" :disabled="aiTesting" @click="testAi"><Loader2 v-if="aiTesting" class="size-3.5 animate-spin" /><AlertTriangle v-else class="size-3.5" /> AI photo check is off</button>
-            <Button variant="ghost" size="icon" class="size-8" aria-label="Close the crawler" @click="closeDialog"><X class="size-4" /></Button>
-          </div>
-        </header>
-
+  <!-- Opens in the page area: the sidebar and the main header stay. The header shows the crawler's title, a back
+       button (closes the crawler) and the controls below. -->
+  <LayoutWorkScreen
+    v-model:open="open" :title="`Inventory crawler · ${dealership.name}`" icon="i-lucide-scan-search" :back-label="`Back to ${dealership.name}`"
+    panel-class="scanner border-2 border-primary bg-background" :hold-escape="editingAddress" :leave-guard="mayClose" @back="closeDialog"
+  >
+    <template #actions>
+          <span v-if="phase === 'ready'" class="hidden md:inline-flex items-center gap-1.5 rounded-full px-2 h-6 text-[11px] font-medium" :class="TONE.ok.soft" title="The crawler reads the saved scan pages and their result pages. It never starts from the home page and never follows a link out of a list."><ShieldCheck class="size-3.5" /> Scan pages only</span>
+          <span v-if="phase === 'ready'" class="hidden lg:inline-flex items-center gap-1.5 text-[11px] text-muted-foreground"><Cloud class="size-3.5" /> {{ engineLabel }} · 1440×900</span>
+          <button v-if="phase === 'ready' && photoCheck && photoCheck.on" type="button" class="hidden xl:inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground hover:border-foreground/40 disabled:opacity-60" :disabled="aiTesting" title="Every photo is looked at by AI as well as measured. Click to test that the AI really answers." @click="testAi"><Loader2 v-if="aiTesting" class="size-3.5 animate-spin" /><Sparkles v-else class="size-3.5 text-violet-500" /> AI photo check · {{ photoCheck.label }} · {{ aiTesting ? 'testing…' : 'test' }}</button>
+          <button v-else-if="phase === 'ready' && photoCheck" type="button" class="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300" :title="`${photoCheck.reason} ${photoCheck.fix} Click to test.`" :disabled="aiTesting" @click="testAi"><Loader2 v-if="aiTesting" class="size-3.5 animate-spin" /><AlertTriangle v-else class="size-3.5" /> AI photo check is off</button>
+      <div v-if="phase === 'ready'" role="tablist" class="inline-flex h-8 shrink-0 items-center rounded-lg border bg-muted/40 p-0.5">
+        <button type="button" role="tab" :aria-selected="tab === 'site'" class="rounded-md px-3 py-1 text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap" :class="tab === 'site' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'" @click="tab = 'site'"><ListChecks class="size-3.5" /> Crawl plan</button>
+        <button type="button" role="tab" :aria-selected="tab === 'results'" :disabled="!results" class="rounded-md px-3 py-1 text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-40" :class="tab === 'results' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'" @click="tab = 'results'">
+          <LayoutGrid class="size-3.5" /> Results <span v-if="results" class="rounded-full px-1.5 text-[10px] tabular-nums bg-background/80 text-foreground">{{ results.summary.total }}</span>
+        </button>
+      </div>
+    </template>
         <!-- Body -->
         <div class="flex-1 min-h-0 relative">
           <!-- Starting / problems -->
@@ -718,9 +706,7 @@ const crawlLabel = computed(() => chosen.value.length ? `Crawl ${chosen.value.le
           <span v-else-if="preview && !scanning" class="hidden md:inline shrink-0">· Looking around never crawls anything — only the scan pages on the left are read</span>
           <a v-if="preview?.url" :href="preview.url" target="_blank" rel="noopener" class="ml-auto inline-flex items-center gap-1 hover:text-foreground shrink-0">Open in my browser <ExternalLink class="size-3" /></a>
         </div>
-      </DialogContent>
-    </DialogPortal>
-  </DialogRoot>
+  </LayoutWorkScreen>
 </template>
 
 <style>

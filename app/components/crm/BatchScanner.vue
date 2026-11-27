@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
 import type { CrmDealership } from '~/composables/useCrmDealerships'
 import type { Batch, BatchItem } from '~/composables/useBatchScan'
 import type { EmailTemplate } from '~/composables/useCrmEmail'
@@ -7,7 +6,7 @@ import { loadPreviewContext, renderEmail } from '~/composables/useTemplatePrevie
 import { useInventoryScanner } from '~/composables/useInventoryScanner'
 import type { PreviewContext } from '~/composables/useTemplatePreview'
 import {
-  X, Radar, Play, Pause, Square, Loader2, CheckCircle2, AlertTriangle, CircleDashed, Car, ImageOff, Clock, Mail, Send, Eye, ChevronRight, ListChecks,
+  X, Play, Pause, Square, Loader2, CheckCircle2, AlertTriangle, CircleDashed, Car, ImageOff, Clock, Mail, Send, Eye, ChevronRight, ListChecks,
   RotateCcw, Globe, Sparkles, Inbox, ExternalLink, Users, Check, Ban, Zap, Archive, Pencil, Wand2, DoorOpen, Cloud, WifiOff, ShieldCheck,
   FileDown, FileText, FileBarChart, ChevronDown, LayoutGrid,
 } from 'lucide-vue-next'
@@ -319,30 +318,25 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
 </script>
 
 <template>
-  <DialogRoot v-model:open="open">
-    <DialogPortal>
-      <DialogOverlay class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm data-[state=open]:animate-in data-[state=open]:fade-in-0" />
-      <DialogContent class="mission fixed inset-2 z-50 flex flex-col overflow-hidden rounded-xl border border-emerald-500/30 bg-[#070b09] text-zinc-100 shadow-2xl outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95" @escape-key-down="(e: Event) => { e.preventDefault(); closeDialog() }" @interact-outside="(e: Event) => e.preventDefault()" @open-auto-focus="(e: Event) => e.preventDefault()">
-        <!-- Title bar -->
-        <header class="relative z-10 shrink-0 h-14 flex items-center gap-4 px-4 border-b border-white/10 bg-[#0b100d]">
-          <div class="flex items-center gap-3 min-w-0">
-            <span class="relative size-9 rounded-xl bg-emerald-500/15 ring-1 ring-emerald-400/30 flex items-center justify-center"><Radar class="size-5 text-emerald-300" :class="driving && 'animate-pulse'" /><span v-if="driving" class="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-emerald-400 animate-ping" /></span>
-            <div class="min-w-0 leading-tight">
-              <DialogTitle class="text-sm font-semibold tracking-wide">Mission Control <span class="text-emerald-400/80 font-normal">· batch crawl &amp; outreach</span></DialogTitle>
-              <DialogDescription class="text-[11px] text-zinc-400 truncate">{{ batch?.name || `${setupRows.length} dealership${setupRows.length === 1 ? '' : 's'} selected` }}</DialogDescription>
-            </div>
-          </div>
-          <ol class="ml-4 hidden md:flex items-center gap-1" aria-label="Steps">
-            <li v-for="(s, i) in STEPS" :key="s.key" class="flex items-center gap-1">
-              <button type="button" class="inline-flex items-center gap-2 rounded-full px-3 h-8 text-xs font-medium transition-colors disabled:cursor-default" :class="step === s.key ? 'bg-emerald-500 text-black' : i < stepIndex ? 'text-emerald-300 hover:bg-white/5' : 'text-zinc-500'" :disabled="i > stepIndex || (s.key === 'scan' && !batch) || (s.key === 'sent' && !sentResults.length)" @click="step = s.key"><span class="size-5 rounded-full flex items-center justify-center text-[10px] font-bold" :class="step === s.key ? 'bg-black/20' : i < stepIndex ? 'bg-emerald-500/20' : 'bg-white/5'"><Check v-if="i < stepIndex" class="size-3" /><template v-else>{{ s.n }}</template></span>{{ s.label }}</button>
-              <ChevronRight v-if="i < STEPS.length - 1" class="size-3.5 text-zinc-600" />
-            </li>
-          </ol>
-          <div class="ml-auto flex items-center gap-2">
-            <span v-if="batch" class="hidden lg:inline-flex items-center gap-1.5 font-mono text-xs text-zinc-400"><Clock class="size-3.5" /> {{ mmss(elapsed) }}</span>
-            <Button variant="ghost" size="icon" class="size-8 text-zinc-300 hover:text-white hover:bg-white/10" aria-label="Close" @click="closeDialog"><X class="size-4" /></Button>
-          </div>
-        </header>
+  <!-- Opens in the page area: the sidebar and the main header stay. The header shows the title, a back button
+       (closes Mission Control — crawls keep running on the server) and the steps. -->
+  <LayoutWorkScreen
+    v-model:open="open" :title="`Mission Control · ${batch?.name || `${setupRows.length} dealership${setupRows.length === 1 ? '' : 's'} selected`}`" icon="i-lucide-radar" back-label="Back to Dealership"
+    panel-class="mission border border-emerald-500/30 bg-[#070b09] text-zinc-100" @back="closeDialog"
+  >
+    <template #actions>
+      <span v-if="batch" class="hidden lg:inline-flex items-center gap-1.5 font-mono text-xs text-muted-foreground" title="Time since this batch started"><Clock class="size-3.5" /> {{ mmss(elapsed) }}</span>
+      <div role="tablist" aria-label="Steps" class="inline-flex h-8 shrink-0 items-center rounded-lg border bg-muted/40 p-0.5">
+        <button
+          v-for="(s, i) in STEPS" :key="s.key" type="button" role="tab" :aria-selected="step === s.key"
+          class="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium disabled:cursor-default disabled:opacity-45"
+          :class="step === s.key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'"
+          :disabled="i > stepIndex || (s.key === 'scan' && !batch) || (s.key === 'sent' && !sentResults.length)" @click="step = s.key"
+        >
+          <span class="flex size-4 items-center justify-center rounded-full text-[10px] font-bold" :class="step === s.key ? 'bg-primary-foreground/20' : 'bg-foreground/10'"><Check v-if="i < stepIndex" class="size-3" /><template v-else>{{ s.n }}</template></span>{{ s.label }}
+        </button>
+      </div>
+    </template>
 
         <!-- ═══ 1. Pages ═══ -->
         <div v-if="step === 'setup'" class="relative flex-1 min-h-0 overflow-y-auto p-6">
@@ -449,11 +443,11 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
               <div v-if="items.length > 1" ref="tabStrip" role="tablist" aria-label="Dealership" class="shrink-0 flex items-end gap-1 overflow-x-auto border-b border-white/10 bg-black/50 px-3 pt-2 [scrollbar-width:thin]">
                 <button type="button" role="tab" :aria-selected="!focus" class="-mb-px shrink-0 rounded-t-lg border border-t-2 border-b-0 px-3 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400" :class="!focus ? 'bg-[#0b100d] border-white/15 border-t-emerald-400 text-white' : 'border-transparent text-zinc-400 hover:bg-white/5 hover:text-white'" @click="openDealer(null)">
                   <span class="flex items-center gap-1.5 text-sm font-semibold"><LayoutGrid class="size-3.5 shrink-0 opacity-80" /> All dealers</span>
-                  <span class="block text-[11px] tabular-nums whitespace-nowrap text-zinc-500">{{ doneItems.length }} of {{ items.length }} crawled<template v-if="withoutPct !== null"> · <b :class="pctClass(withoutPct)">{{ withoutPct }}%</b> no real photo</template></span>
+                  <span class="block text-[11px] tabular-nums whitespace-nowrap" :class="!focus ? 'text-zinc-300' : 'text-zinc-500'">{{ doneItems.length }} of {{ items.length }} crawled<template v-if="withoutPct !== null"> · <b :class="pctClass(withoutPct)">{{ withoutPct }}%</b> no real photo</template></span>
                 </button>
                 <button v-for="i in items" :key="i.dealershipId" type="button" role="tab" :aria-selected="focus === i.dealershipId" :title="i.name" class="-mb-px shrink-0 max-w-[230px] rounded-t-lg border border-t-2 border-b-0 px-3 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400" :class="focus === i.dealershipId ? 'bg-[#0b100d] border-white/15 border-t-emerald-400 text-white' : 'border-transparent text-zinc-400 hover:bg-white/5 hover:text-white'" @click="openDealer(i.dealershipId)">
                   <span class="flex items-center gap-1.5 text-sm font-semibold"><component :is="STATUS[i.status]!.icon" class="size-3.5 shrink-0" :class="[STATUS[i.status]!.cls, i.status === 'running' && 'animate-spin']" /><span class="truncate">{{ i.name }}</span></span>
-                  <span class="block text-[11px] tabular-nums whitespace-nowrap"><template v-if="i.summary"><b :class="pctClass(i.summary.withoutRealPct)">{{ i.summary.withoutRealPct ?? 0 }}%</b> <span class="text-zinc-500">· {{ i.summary.withoutReal }} of {{ i.summary.total }}</span></template><span v-else :class="STATUS[i.status]!.cls">{{ STATUS[i.status]!.label }}</span></span>
+                  <span class="block text-[11px] tabular-nums whitespace-nowrap"><template v-if="i.summary"><b :class="pctClass(i.summary.withoutRealPct)">{{ i.summary.withoutRealPct ?? 0 }}%</b> <span :class="focus === i.dealershipId ? 'text-zinc-300' : 'text-zinc-500'">· {{ i.summary.withoutReal }} of {{ i.summary.total }}</span></template><span v-else :class="STATUS[i.status]!.cls">{{ STATUS[i.status]!.label }}</span></span>
                 </button>
               </div>
               <div class="flex-1 min-h-0 overflow-y-auto p-3">
@@ -706,9 +700,7 @@ const ago = (iso?: string | null) => { try { return iso ? formatDistanceToNow(ne
         </Dialog>
         <CrmScanPagesEditor v-model:open="showPages" :dealership="editing" @saved="pagesSaved" />
         <CrmEmailSentViewer v-model:open="viewOpen" :email-id="viewId" />
-      </DialogContent>
-    </DialogPortal>
-  </DialogRoot>
+  </LayoutWorkScreen>
 </template>
 
 <style>

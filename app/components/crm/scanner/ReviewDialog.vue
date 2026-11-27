@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Check, Loader2, Pencil, ScanSearch, FileDown, Mail } from 'lucide-vue-next'
+import { Check, Loader2, Pencil, FileDown, Mail } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { format } from 'date-fns'
 import { useInventoryScanner } from '~/composables/useInventoryScanner'
@@ -37,40 +37,35 @@ async function save() {
     emit('saved')
   } catch (e: any) { toast.error(e?.data?.statusMessage || 'Could not save') } finally { saving.value = false }
 }
-/** Pressing a toast button ("Undo") is not a click away from this window — it must not close it. */
-function onOutside(e: any) {
-  const el = (e?.detail?.originalEvent?.target || e?.target) as HTMLElement | null
-  if (el?.closest?.('[data-sonner-toaster]')) e.preventDefault()
+/** Asked before the review goes away (Back, Escape, or walking off through the sidebar). */
+function mayClose() {
+  return !dirty.value || confirm('You changed some verdicts but did not save them. Close anyway? (They stay here as a draft.)')
 }
-function close() {
-  if (dirty.value && !confirm('You changed some verdicts but did not save them. Close anyway? (They stay here as a draft.)')) return
-  open.value = false
-}
+function close() { if (mayClose()) open.value = false }
 </script>
 
 <template>
-  <Dialog :open="open" @update:open="(o: boolean) => { if (!o) close() }">
-    <DialogContent class="sm:max-w-[min(1400px,96vw)] h-[92vh] p-0 gap-0 flex flex-col overflow-hidden" @interact-outside="onOutside">
-      <DialogHeader class="px-5 pt-4 pb-3 border-b">
-        <DialogTitle class="text-base flex items-center gap-2"><ScanSearch class="size-4 text-red-600" /> Crawl results{{ dealershipName ? ` · ${dealershipName}` : '' }}</DialogTitle>
-        <DialogDescription class="text-xs flex flex-wrap items-center gap-2">
-          <span>{{ auditedAt ? `Audit of ${format(new Date(auditedAt), 'MMM d, yyyy h:mm a')} — ` : '' }}press the right button on any car the scanner got wrong, then save.</span>
-          <span v-if="auditId" class="ml-auto flex items-center gap-2">
-            <Button v-if="canEmail" size="sm" class="h-7 gap-1.5 text-xs" :disabled="dirty" :title="dirty ? 'Save the corrections first — the email uses the saved numbers' : 'Email this audit to the dealer'" @click="emit('email')"><Mail class="size-3.5" /> Email this audit</Button>
-            <Button as="a" :href="`/api/crm/audits/${auditId}/report?format=pdf&download=1`" size="sm" variant="outline" class="h-7 gap-1.5 text-xs"><FileDown class="size-3.5" /> Report PDF</Button>
-          </span>
-        </DialogDescription>
-      </DialogHeader>
-      <div v-if="dirty" class="shrink-0 flex flex-wrap items-center gap-3 px-5 py-2.5 bg-amber-500/10 border-b border-amber-500/20 text-sm">
-        <Pencil class="size-4 text-amber-600" />
-        <span><b>Not saved yet</b> — now <b class="tabular-nums">{{ r!.summary.withoutReal }}</b> of {{ r!.summary.total }} without a real photo ({{ r!.summary.withoutRealPct ?? 0 }}%). The audit, report and emails keep the old numbers until you save.</span>
-        <Button size="sm" class="ml-auto h-8 gap-1.5" :disabled="saving" @click="save"><Loader2 v-if="saving" class="size-3.5 animate-spin" /><Check v-else class="size-3.5" /> Save corrections</Button>
-      </div>
-      <div class="flex-1 min-h-0">
-        <div v-if="loading" class="h-full flex items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 class="size-4 animate-spin" /> Loading the crawl…</div>
-        <div v-else-if="failed" class="h-full flex items-center justify-center text-sm text-muted-foreground">{{ failed }}</div>
-        <CrmScannerResults v-else-if="r" :results="r" :review="sc.review" :recheck="sc.recheck" :list-rules="sc.listRules" :add-rule="sc.addRule" :remove-rule="sc.removeRule" />
-      </div>
-    </DialogContent>
-  </Dialog>
+  <!-- Opens in the page area (sidebar and main header stay); the back button in the header closes it. -->
+  <LayoutWorkScreen
+    v-model:open="open" :title="`Crawl results${dealershipName ? ` · ${dealershipName}` : ''}`" icon="i-lucide-scan-search" :back-label="dealershipName ? `Back to ${dealershipName}` : 'Back'"
+    panel-class="border-2 border-primary bg-background" :leave-guard="mayClose" @back="close"
+  >
+    <template #actions>
+      <span v-if="auditedAt" class="hidden xl:inline text-xs text-muted-foreground whitespace-nowrap">Audit of {{ format(new Date(auditedAt), 'MMM d, yyyy h:mm a') }}</span>
+      <template v-if="auditId">
+        <Button as="a" :href="`/api/crm/audits/${auditId}/report?format=pdf&download=1`" size="sm" variant="outline" class="h-8 gap-1.5"><FileDown class="size-4" /><span class="hidden lg:inline">Report PDF</span></Button>
+        <Button v-if="canEmail" size="sm" class="h-8 gap-1.5" :disabled="dirty" :title="dirty ? 'Save the corrections first — the email uses the saved numbers' : 'Email this audit to the dealer'" @click="emit('email')"><Mail class="size-4" /><span class="hidden lg:inline">Email this audit</span></Button>
+      </template>
+    </template>
+    <div v-if="dirty" class="shrink-0 flex flex-wrap items-center gap-3 px-5 py-2.5 bg-amber-500/10 border-b border-amber-500/20 text-sm">
+      <Pencil class="size-4 text-amber-600" />
+      <span><b>Not saved yet</b> — now <b class="tabular-nums">{{ r!.summary.withoutReal }}</b> of {{ r!.summary.total }} without a real photo ({{ r!.summary.withoutRealPct ?? 0 }}%). The audit, report and emails keep the old numbers until you save.</span>
+      <Button size="sm" class="ml-auto h-8 gap-1.5" :disabled="saving" @click="save"><Loader2 v-if="saving" class="size-3.5 animate-spin" /><Check v-else class="size-3.5" /> Save corrections</Button>
+    </div>
+    <div class="flex-1 min-h-0">
+      <div v-if="loading" class="h-full flex items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 class="size-4 animate-spin" /> Loading the crawl…</div>
+      <div v-else-if="failed" class="h-full flex items-center justify-center text-sm text-muted-foreground">{{ failed }}</div>
+      <CrmScannerResults v-else-if="r" :results="r" :review="sc.review" :recheck="sc.recheck" :list-rules="sc.listRules" :add-rule="sc.addRule" :remove-rule="sc.removeRule" />
+    </div>
+  </LayoutWorkScreen>
 </template>

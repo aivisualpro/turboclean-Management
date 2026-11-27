@@ -325,10 +325,11 @@ const newLine = computed(() => `${s.value.counts.newMissingPhotos} of ${s.value.
       <button
         v-for="p in pageTabs" :key="p.k" type="button" role="tab" :aria-selected="page === p.k" :title="p.hint"
         class="-mb-px shrink-0 max-w-[280px] rounded-t-lg border border-t-2 border-b-0 px-3 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        :class="page === p.k ? 'bg-card border-border border-t-primary text-foreground' : 'border-transparent text-muted-foreground hover:bg-card/60 hover:text-foreground'" @click="page = p.k"
+        :class="page === p.k ? 'bg-primary border-primary text-primary-foreground' : 'border-transparent text-muted-foreground hover:bg-card/60 hover:text-foreground'" @click="page = p.k"
       >
         <span class="flex items-center gap-1.5 text-sm font-semibold"><component :is="p.combined ? Layers : FileText" class="size-3.5 shrink-0 opacity-70" /><span class="truncate">{{ p.label }}</span></span>
-        <span class="block text-[11px] tabular-nums whitespace-nowrap"><b :class="pctTone(p.pct)">{{ p.pct ?? 0 }}%</b> <span class="text-muted-foreground">· {{ p.withoutReal }} of {{ p.total }} no real photo</span></span>
+        <!-- (the app paints the selected tab solid theme colour: its text takes the colour that reads on it) -->
+        <span class="block text-[11px] tabular-nums whitespace-nowrap"><b :class="page === p.k ? 'text-primary-foreground' : pctTone(p.pct)">{{ p.pct ?? 0 }}%</b> <span :class="page === p.k ? 'text-primary-foreground/75' : 'text-muted-foreground'">· {{ p.withoutReal }} of {{ p.total }} no real photo</span></span>
       </button>
     </div>
 
@@ -377,11 +378,11 @@ const newLine = computed(() => `${s.value.counts.newMissingPhotos} of ${s.value.
       <button
         v-for="t in tabs" :key="t.k" type="button" role="tab" :aria-selected="tab === t.k"
         class="shrink-0 min-w-[132px] rounded-xl border-2 bg-card px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        :class="tab === t.k ? 'border-primary shadow-sm' : 'border-border hover:border-foreground/30'" @click="tab = t.k"
+        :class="tab === t.k ? 'border-primary bg-primary text-primary-foreground shadow-sm' : 'border-border hover:border-foreground/30'" @click="tab = t.k"
       >
-        <span class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider" :class="tab === t.k ? 'text-foreground' : 'text-muted-foreground'"><span class="size-2 rounded-full" :class="t.dot" /> {{ t.label }}</span>
+        <span class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider" :class="tab === t.k ? 'text-primary-foreground' : 'text-muted-foreground'"><span class="size-2 rounded-full" :class="[t.dot, tab === t.k && 'ring-1 ring-primary-foreground/60']" /> {{ t.label }}</span>
         <span class="block text-2xl font-bold tabular-nums leading-tight">{{ t.n }}</span>
-        <span class="block text-[11px] text-muted-foreground whitespace-nowrap">{{ t.sub }}</span>
+        <span class="block text-[11px] whitespace-nowrap" :class="tab === t.k ? 'text-primary-foreground/75' : 'text-muted-foreground'">{{ t.sub }}</span>
       </button>
     </div>
 
