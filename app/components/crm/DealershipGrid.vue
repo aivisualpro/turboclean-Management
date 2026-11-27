@@ -10,16 +10,28 @@ import { CASCADE_FIELDS } from '~/composables/useCascade'
 import { DEALERSHIP_STAGES, LEAD_SOURCES, STAGE_STYLE, US_STATES } from '~/constants/crm'
 import { AlertCircle, ArrowDownToLine, Check, ExternalLink, Keyboard, Loader2, Plus, RotateCcw, Save, Trash2, Undo2, X } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
+import { useElementSize } from '@vueuse/core'
 
 interface UserOpt { id: string, name: string }
-const props = defineProps<{ rows: CrmDealership[], users: UserOpt[], canEdit: boolean, canAdd: boolean }>()
+/**
+ * The list's own column layout (useGridLayout on the dealership page). Quick edit follows it, so the columns
+ * stay exactly as the person arranged them: same order, same widths, same hidden and frozen columns.
+ * Resizing a column here changes the list too.
+ */
+interface QuickEditLayout {
+  columns: { value: { key: string, pinned: boolean }[] }
+  allColumns: { value: { key: string }[] }
+  sizes: { value: Record<string, number> }
+  setWidth: (key: any, px: number) => void
+}
+const props = defineProps<{ rows: CrmDealership[], users: UserOpt[], canEdit: boolean, canAdd: boolean, layout?: QuickEditLayout }>()
 const emit = defineEmits<{ close: [], saved: [] }>()
 const { createDealership, updateDealership } = useCrmDealerships()
 const cascade = useCascade()
 
 // ─── Columns ───
 type ColKey = 'dealershipId' | 'name' | 'dealerGroup' | 'route' | 'brands' | 'stage' | 'city' | 'state' | 'zip' | 'phone' | 'website' | 'territory' | 'owner' | 'leadSource' | 'notes'
-interface Col { key: ColKey, label: string, w: number, type?: 'select', options?: (row: CrmDealership | null) => string[], suggest?: boolean, readonly?: boolean, required?: boolean, hint?: string, mono?: boolean }
+interface Col { key: ColKey, label: string, w: number, pinned?: boolean, left?: number, pinEdge?: boolean, type?: 'select', options?: (row: CrmDealership | null) => string[], suggest?: boolean, readonly?: boolean, required?: boolean, hint?: string, mono?: boolean }
 const PARKED = ['Won', 'Lost', 'Nurture / Follow Up Later']
 const COLS: Col[] = [
   { key: 'dealershipId', label: 'ID', w: 86, readonly: true, mono: true },
@@ -38,7 +50,82 @@ const COLS: Col[] = [
   { key: 'leadSource', label: 'Lead source', w: 150, type: 'select', options: () => [...LEAD_SOURCES] },
   { key: 'notes', label: 'Notes', w: 280 },
 ]
-const colIndex = Object.fromEntries(COLS.map((c, i) => [c.key, i])) as Record<ColKey, number>
+const COL_BY_KEY = Object.fromEntries(COLS.map(c => [c.key, c])) as Record<ColKey, Col>
+/** Only in quick edit (the list has no column for them): the ID leads, Notes closes. */
+const EXTRA: ColKey[] = ['dealershipId', 'notes']
+const LEAD_W = 44
+const bodyEl = ref<HTMLElement | null>(null)
+const { width: bodyWidth } = useElementSize(bodyEl)
+/** Column whose edge is being dragged ('' when none). */
+const resizing = ref<ColKey | ''>('')
+const tableEl = ref<HTMLTableElement | null>(null)
+
+/** The columns in the order, widths and frozen state of the list. */
+const cols = computed<Col[]>(() => {
+  const L = props.layout
+  if (!L) return COLS
+  const shown = new Map(L.columns.value.map(c => [c.key, c]))
+  const sizes = L.sizes.value
+  const pinned: Col[] = [], rest: Col[] = []
+  for (const m of L.allColumns.value) {
+    const c = COL_BY_KEY[m.key as ColKey]
+    if (!c || EXTRA.includes(c.key)) continue
+    const v = shown.get(m.key)
+    // Switched off in the list → not here either, except what a new row cannot be saved without.
+    if (!v && !c.required) continue
+    const col: Col = { ...c, w: sizes[m.key] ?? c.w }
+    ;(v?.pinned ? pinned : rest).push(col)
+  }
+  const id = COL_BY_KEY.dealershipId
+  // Frozen part = # + ID + the list's frozen columns, as long as it leaves room to scroll (same 60% rule as the list).
+  const frozenW = LEAD_W + id.w + pinned.reduce((n, c) => n + c.w, 0)
+  const canFreeze = pinned.length > 0 && (!bodyWidth.value || frozenW <= bodyWidth.value * 0.6)
+  const out: Col[] = [{ ...id }, ...pinned]
+  if (canFreeze) {
+    let left = LEAD_W
+    for (const c of out) { c.pinned = true; c.left = left; left += c.w }
+    out[out.length - 1]!.pinEdge = true
+  }
+  return [...out, ...rest, { ...COL_BY_KEY.notes }]
+})
+const tableWidth = computed(() => LEAD_W + cols.value.reduce((n, c) => n + c.w, 0))
+/** Width covered by the frozen part — moving the cursor scrolls a cell out from under it. */
+const frozenWidth = computed(() => LEAD_W + cols.value.reduce((n, c) => n + (c.pinned ? c.w : 0), 0))
+
+// ─── Resizing a column (drag the right edge of its header) ───
+// While dragging only that <col> and the table width change (no re-render of the rows); the width is saved on release.
+function startColResize(e: PointerEvent, c: Col) {
+  if (!props.layout || EXTRA.includes(c.key) || e.button !== 0) return
+  const colEl = tableEl.value?.querySelector<HTMLElement>(`col[data-col="${c.key}"]`)
+  if (!colEl || !tableEl.value) return
+  e.preventDefault(); e.stopPropagation()
+  const x0 = e.clientX, w0 = c.w, t0 = tableWidth.value
+  let next = w0
+  resizing.value = c.key
+  // Frozen columns to the right of a frozen one slide along with its edge.
+  const after = c.pinned ? cols.value.filter(x => x.pinned && (x.left ?? 0) > (c.left ?? 0)) : []
+  const shift = (dx: number) => {
+    for (const x of after) for (const el of tableEl.value!.querySelectorAll<HTMLElement>(`[data-col="${x.key}"]:not(col)`)) el.style.left = `${(x.left ?? 0) + dx}px`
+  }
+  const move = (ev: PointerEvent) => {
+    next = Math.max(56, Math.min(720, Math.round(w0 + ev.clientX - x0)))
+    colEl.style.width = `${next}px`
+    tableEl.value!.style.width = `${t0 + next - w0}px`
+    if (after.length) shift(next - w0)
+  }
+  const end = (cancel: boolean) => {
+    window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', cancelIt); window.removeEventListener('keydown', onKey, true)
+    document.body.style.cursor = ''
+    resizing.value = ''
+    if (!cancel && next !== w0) props.layout!.setWidth(c.key, next)
+    else { colEl.style.width = `${w0}px`; tableEl.value!.style.width = `${t0}px`; if (after.length) shift(0) }
+  }
+  const up = () => end(false)
+  const cancelIt = () => end(true)
+  const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); end(true) } }
+  document.body.style.cursor = 'col-resize'
+  window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', cancelIt); window.addEventListener('keydown', onKey, true)
+}
 
 /** Stored value → what the cell shows / edits. */
 function original(row: CrmDealership, key: ColKey): string {
@@ -93,7 +180,7 @@ type UndoStep = { cells: UndoEntry[], newRows: string[] }
 const undoStack = ref<UndoStep[]>([])
 function setCell(key: string, col: ColKey, v: string, batch?: UndoEntry[]) {
   const g = rowByKey.value.get(key)
-  const c = COLS[colIndex[col]]!
+  const c = COL_BY_KEY[col]
   if (!g || c.readonly) return
   if (col === 'state') v = v.trim().toUpperCase().slice(0, 2)
   const prev = g.add ? g.add.values[col] : edits.value[key]?.[col]
@@ -130,7 +217,6 @@ const editorEl = ref<HTMLInputElement | HTMLSelectElement | null>(null)
 // The editor sits inside v-for, so a plain ref would become an array — use a callback ref.
 const setEditor = (el: any) => { editorEl.value = el || null }
 const gridEl = ref<HTMLElement | null>(null)
-const bodyEl = ref<HTMLElement | null>(null)
 const range = computed(() => {
   if (!cur.value) return null
   const a = anchor.value || cur.value
@@ -141,7 +227,7 @@ const isCur = (r: number, c: number) => !!cur.value && cur.value.r === r && cur.
 const rangeSize = computed(() => range.value ? (range.value.r2 - range.value.r1 + 1) * (range.value.c2 - range.value.c1 + 1) : 0)
 
 function select(r: number, c: number, extend = false) {
-  r = Math.max(0, Math.min(gridRows.value.length - 1, r)); c = Math.max(0, Math.min(COLS.length - 1, c))
+  r = Math.max(0, Math.min(gridRows.value.length - 1, r)); c = Math.max(0, Math.min(cols.value.length - 1, c))
   if (!extend || !cur.value) anchor.value = { r, c }
   cur.value = { r, c }
   nextTick(() => {
@@ -163,7 +249,7 @@ onMounted(() => { window.addEventListener('mouseup', () => { dragging = false })
 
 function startEdit(initial?: string) {
   if (!cur.value || !props.canEdit) return
-  const col = COLS[cur.value.c]!
+  const col = cols.value[cur.value.c]!
   if (col.readonly) return
   const g = gridRows.value[cur.value.r]!
   // Typing into a drop-down column jumps to the first option starting with that letter.
@@ -181,7 +267,7 @@ function startEdit(initial?: string) {
 function commit(move?: 'down' | 'right' | 'left' | 'up') {
   if (editing.value && cur.value) {
     const g = gridRows.value[cur.value.r]!
-    const col = COLS[cur.value.c]!
+    const col = cols.value[cur.value.c]!
     const v = draft.value
     if (v !== value(g, col.key)) { const b: UndoEntry[] = []; setCell(g.key, col.key, v, b); commitBatch(b) }
   }
@@ -198,7 +284,7 @@ function clearRange() {
   if (!range.value) return
   const b: UndoEntry[] = []
   for (let r = range.value.r1; r <= range.value.r2; r++) for (let c = range.value.c1; c <= range.value.c2; c++) {
-    const g = gridRows.value[r]!, col = COLS[c]!
+    const g = gridRows.value[r]!, col = cols.value[c]!
     if (!col.readonly && value(g, col.key) !== '') setCell(g.key, col.key, '', b)
   }
   commitBatch(b)
@@ -207,7 +293,7 @@ function fillDown() {
   if (!range.value || range.value.r2 === range.value.r1) return
   const b: UndoEntry[] = []
   for (let c = range.value.c1; c <= range.value.c2; c++) {
-    const col = COLS[c]!
+    const col = cols.value[c]!
     if (col.readonly) continue
     const top = value(gridRows.value[range.value.r1]!, col.key)
     for (let r = range.value.r1 + 1; r <= range.value.r2; r++) setCell(gridRows.value[r]!.key, col.key, top, b)
@@ -220,7 +306,7 @@ async function copyRange() {
   const lines: string[] = []
   for (let r = range.value.r1; r <= range.value.r2; r++) {
     const cells: string[] = []
-    for (let c = range.value.c1; c <= range.value.c2; c++) cells.push(value(gridRows.value[r]!, COLS[c]!.key))
+    for (let c = range.value.c1; c <= range.value.c2; c++) cells.push(value(gridRows.value[r]!, cols.value[c]!.key))
     lines.push(cells.join('\t'))
   }
   try { await navigator.clipboard.writeText(lines.join('\n')); toast(`Copied ${rangeSize.value} cell${rangeSize.value === 1 ? '' : 's'}`) } catch { toast.error('Clipboard is blocked by the browser') }
@@ -238,7 +324,7 @@ function onPaste(e: ClipboardEvent) {
   const createdRows: string[] = []
   // One value pasted onto a selection → fill the whole selection with it.
   if (matrix.length === 1 && matrix[0]!.length === 1 && rangeSize.value > 1) {
-    for (let r = range.value!.r1; r <= range.value!.r2; r++) for (let c = range.value!.c1; c <= range.value!.c2; c++) if (!COLS[c]!.readonly) setCell(gridRows.value[r]!.key, COLS[c]!.key, matrix[0]![0]!, b)
+    for (let r = range.value!.r1; r <= range.value!.r2; r++) for (let c = range.value!.c1; c <= range.value!.c2; c++) if (!cols.value[c]!.readonly) setCell(gridRows.value[r]!.key, cols.value[c]!.key, matrix[0]![0]!, b)
     commitBatch(b); return
   }
   for (let i = 0; i < matrix.length; i++) {
@@ -247,14 +333,14 @@ function onPaste(e: ClipboardEvent) {
     const g = gridRows.value[r]!
     for (let j = 0; j < matrix[i]!.length; j++) {
       const c = cur.value.c + j
-      if (c >= COLS.length) break
-      const col = COLS[c]!
+      if (c >= cols.value.length) break
+      const col = cols.value[c]!
       if (!col.readonly) setCell(g.key, col.key, matrix[i]![j]!.trim(), b)
     }
   }
   commitBatch(b, createdRows)
   anchor.value = { ...cur.value }
-  cur.value = { r: Math.min(gridRows.value.length - 1, cur.value.r + matrix.length - 1), c: Math.min(COLS.length - 1, cur.value.c + Math.max(...matrix.map(m => m.length)) - 1) }
+  cur.value = { r: Math.min(gridRows.value.length - 1, cur.value.r + matrix.length - 1), c: Math.min(cols.value.length - 1, cur.value.c + Math.max(...matrix.map(m => m.length)) - 1) }
   toast.success(`Pasted ${b.length} cell${b.length === 1 ? '' : 's'}${createdRows.length ? ` · ${createdRows.length} new row${createdRows.length === 1 ? '' : 's'}` : ''}`)
 }
 
@@ -267,16 +353,16 @@ function onKey(e: KeyboardEvent) {
   if (meta && e.key.toLowerCase() === 's') { e.preventDefault(); save(); return }
   if (meta && e.key.toLowerCase() === 'd') { e.preventDefault(); fillDown(); return }
   if (meta && e.key.toLowerCase() === 'c') { e.preventDefault(); copyRange(); return }
-  if (meta && e.key.toLowerCase() === 'a') { e.preventDefault(); anchor.value = { r: 0, c: 0 }; cur.value = { r: gridRows.value.length - 1, c: COLS.length - 1 }; return }
+  if (meta && e.key.toLowerCase() === 'a') { e.preventDefault(); anchor.value = { r: 0, c: 0 }; cur.value = { r: gridRows.value.length - 1, c: cols.value.length - 1 }; return }
   if (!cur.value) { if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); select(0, 1) } return }
   const { r, c } = cur.value
   switch (e.key) {
     case 'ArrowDown': e.preventDefault(); select(meta ? gridRows.value.length - 1 : r + 1, c, e.shiftKey); return
     case 'ArrowUp': e.preventDefault(); select(meta ? 0 : r - 1, c, e.shiftKey); return
-    case 'ArrowRight': e.preventDefault(); select(r, meta ? COLS.length - 1 : c + 1, e.shiftKey); return
+    case 'ArrowRight': e.preventDefault(); select(r, meta ? cols.value.length - 1 : c + 1, e.shiftKey); return
     case 'ArrowLeft': e.preventDefault(); select(r, meta ? 0 : c - 1, e.shiftKey); return
     case 'Home': e.preventDefault(); select(r, 0, e.shiftKey); return
-    case 'End': e.preventDefault(); select(r, COLS.length - 1, e.shiftKey); return
+    case 'End': e.preventDefault(); select(r, cols.value.length - 1, e.shiftKey); return
     case 'PageDown': e.preventDefault(); select(r + 20, c, e.shiftKey); return
     case 'PageUp': e.preventDefault(); select(r - 20, c, e.shiftKey); return
     case 'Tab': e.preventDefault(); select(r, c + (e.shiftKey ? -1 : 1)); return
@@ -390,7 +476,7 @@ function close() {
   if (dirty.value && !confirm('You have unsaved changes. Leave quick edit and lose them?')) return
   emit('close')
 }
-const colAt = (c: number) => COLS[c] as Col
+const colAt = (c: number) => cols.value[c] as Col
 const rowAt = (r: number) => gridRows.value[r] as GridRow
 const optionsFor = (c: Col, g: GridRow) => c.options ? c.options(g.row) : []
 const cellTitle = (g: GridRow, key: ColKey) => {
@@ -448,14 +534,23 @@ const cellTitle = (g: GridRow, key: ColKey) => {
     </div>
 
     <!-- Sheet -->
-    <div ref="bodyEl" class="flex-1 min-h-0 overflow-auto select-none">
-      <table class="table-fixed border-separate border-spacing-0 text-[13px]" :style="{ width: `${44 + COLS.reduce((n, c) => n + c.w, 0)}px` }">
-        <colgroup><col style="width:44px"><col v-for="c in COLS" :key="c.key" :style="{ width: `${c.w}px` }"></colgroup>
+    <div ref="bodyEl" class="flex-1 min-h-0 overflow-auto select-none" :style="{ scrollPaddingLeft: `${frozenWidth}px`, scrollPaddingTop: '30px' }">
+      <table ref="tableEl" class="table-fixed border-separate border-spacing-0 text-[13px]" :style="{ width: `${tableWidth}px` }">
+        <colgroup><col style="width:44px"><col v-for="c in cols" :key="c.key" :data-col="c.key" :style="{ width: `${c.w}px` }"></colgroup>
         <thead class="sticky top-0 z-20">
           <tr>
             <th class="sticky left-0 z-30 bg-muted border-b border-r px-1 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">#</th>
-            <th v-for="c in COLS" :key="c.key" class="bg-muted border-b border-r px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap" :class="c.readonly && 'text-muted-foreground/60'">
+            <th
+              v-for="c in cols" :key="c.key" :data-col="c.key"
+              class="bg-muted border-b border-r px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis"
+              :class="[c.readonly && 'text-muted-foreground/60', c.pinned ? 'sticky z-30' : 'relative', c.pinEdge && 'qe-pin-edge']"
+              :style="c.pinned ? { left: `${c.left}px` } : undefined"
+            >
               <span :title="c.hint ? `e.g. ${c.hint}` : undefined">{{ c.label }}</span><span v-if="c.required" class="text-rose-500">*</span>
+              <span
+                v-if="layout && !EXTRA.includes(c.key)" class="qe-resize absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize"
+                :class="resizing === c.key && 'is-active'" title="Drag to resize" aria-hidden="true" @pointerdown="startColResize($event, c)"
+              />
             </th>
           </tr>
         </thead>
@@ -471,13 +566,16 @@ const cellTitle = (g: GridRow, key: ColKey) => {
               </template>
             </td>
             <td
-              v-for="(c, ci) in COLS" :key="c.key" :data-cell="`${r}:${ci}`"
-              class="relative border-b border-r px-2 h-8 align-middle whitespace-nowrap overflow-hidden text-ellipsis max-w-0"
+              v-for="(c, ci) in cols" :key="c.key" :data-cell="`${r}:${ci}`" :data-col="c.pinned ? c.key : undefined"
+              class="border-b border-r px-2 h-8 align-middle whitespace-nowrap overflow-hidden text-ellipsis max-w-0"
+              :style="c.pinned ? { left: `${c.left}px` } : undefined"
               :class="[
+                c.pinned ? 'sticky z-10 bg-background' : 'relative',
+                c.pinEdge && 'qe-pin-edge',
                 c.readonly ? 'text-muted-foreground/70' : 'cursor-cell',
                 c.mono && 'font-mono text-[11px]',
                 inRange(r, ci) && !isCur(r, ci) && 'bg-primary/10',
-                isCur(r, ci) && 'ring-2 ring-inset ring-primary bg-primary/5 z-[5]',
+                isCur(r, ci) && 'ring-2 ring-inset ring-primary bg-primary/5', isCur(r, ci) && !c.pinned && 'z-[5]',
                 isChanged(g, c.key) && !g.add && 'bg-amber-500/15 text-amber-900 dark:text-amber-200',
                 g.add && c.required && !value(g, c.key) && 'bg-rose-500/10',
               ]"
@@ -505,7 +603,7 @@ const cellTitle = (g: GridRow, key: ColKey) => {
               </template>
             </td>
           </tr>
-          <tr v-if="!gridRows.length"><td :colspan="COLS.length + 1" class="px-4 py-10 text-center text-sm text-muted-foreground">No dealerships match the current filters.</td></tr>
+          <tr v-if="!gridRows.length"><td :colspan="cols.length + 1" class="px-4 py-10 text-center text-sm text-muted-foreground">No dealerships match the current filters.</td></tr>
         </tbody>
       </table>
       <datalist v-for="c in COLS.filter(x => x.suggest)" :id="`qe-${c.key}`" :key="c.key"><option v-for="s in suggestions[c.key] || []" :key="s" :value="s" /></datalist>
@@ -529,4 +627,8 @@ const cellTitle = (g: GridRow, key: ColKey) => {
 <style scoped>
 .fade-enter-active, .fade-leave-active { transition: opacity .15s }
 .fade-enter-from, .fade-leave-to { opacity: 0 }
+/* The edge between the frozen columns and the scrolling part. */
+.qe-pin-edge { box-shadow: 2px 0 0 0 var(--color-border), 6px 0 8px -6px rgb(0 0 0 / .25) }
+.qe-resize::after { content: ''; position: absolute; inset: 4px 3px; border-radius: 2px; background: transparent; transition: background .1s }
+.qe-resize:hover::after, .qe-resize.is-active::after { background: var(--color-primary) }
 </style>

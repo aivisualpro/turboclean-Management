@@ -800,7 +800,7 @@ onKeyStroke('Escape', () => { if (selected.value.size) clearSelection() })
     <div class="crm-grid-box flex-1 min-h-0 flex flex-col overflow-hidden rounded-lg border-2 border-primary bg-background">
     <div v-if="gridMode" class="relative flex-1 min-h-0">
       <ClientOnly>
-        <CrmDealershipGrid ref="gridRef" :rows="filtered" :users="users" :can-edit="canEdit" :can-add="canAdd" @close="toggleGrid" @saved="onGridSaved" />
+        <CrmDealershipGrid ref="gridRef" :rows="filtered" :users="users" :can-edit="canEdit" :can-add="canAdd" :layout="grid" @close="toggleGrid" @saved="onGridSaved" />
       </ClientOnly>
     </div>
     <div v-else ref="scroller" class="flex-1 min-h-0 overflow-auto">
